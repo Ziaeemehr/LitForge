@@ -61,6 +61,24 @@ Every result gets two scores, both between 0 and 1:
 **Review priority** = 0.65 × relevance + 0.35 × importance, the default sort order, so a large
 result set can be read from the top.
 
+### Screening with a local model
+
+Relevance counts shared words and citations; it does not read the paper. Screening does: a local
+model (Ollama, default `qwen3:4b`) reads the title and abstract of a run's top papers and checks them
+against the project's research question and inclusion/exclusion criteria. It suggests **include**,
+**uncertain** or **exclude** with a reason and quotes from the abstract (quotes not found in the
+abstract are flagged). The decision and a 0–1 score are computed by fixed rules, not by the model;
+a paper without an abstract is never excluded. Your ✓/✗ marks are separate and always decide.
+Nothing leaves your computer.
+
+1. `ollama pull qwen3:4b` once (`qwen3:8b` is slower but more careful: set `screening.model`).
+2. In the web UI open a run, fill in **Screening** (question, criteria one per line), press **Screen**.
+   About 2 s per paper on an RTX 5070 with `qwen3:4b`.
+3. Sort by **screening**, filter by decision, **Mark top N ✓**, then export the ✓ papers.
+
+Changing the criteria or the model marks earlier results as stale; screening again re-checks them,
+and unchanged papers are not sent to the model twice.
+
 ## Find papers
 
 ```bash
@@ -110,6 +128,7 @@ uv run litforge status            # what is in the active project
 uv run litforge project list      # all projects (* marks the active one)
 uv run litforge project use NAME  # switch the active project
 uv run litforge doctor            # check the environment
+uv run litforge screen --top 100  # screen the latest run's top papers (criteria are set in the web UI)
 ```
 
 Any command accepts `--project NAME` to work on a project other than the active one.
@@ -162,9 +181,9 @@ To keep the virtual environment outside the repository, set `UV_PROJECT_ENVIRONM
 
 ## Status and limitations
 
-Implemented: import, parsing, search, Markdown export and paper discovery (OpenAlex,
-Crossref, arXiv, citation chaining, reference-list import). Planned: screening with a local
-language model, deep analysis.
+Implemented: import, parsing, search, Markdown export, paper discovery (OpenAlex,
+Crossref, arXiv, citation chaining, reference-list import) and title/abstract screening with a
+local model. Planned: full-text screening and deep analysis of selected papers.
 
 Known limitations of the fast parser:
 

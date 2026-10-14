@@ -48,12 +48,14 @@ def export_markdown(
     kb = root / "knowledge_base"
     rows = conn.execute(
         f"""SELECT p.id, p.title, p.year, p.doi, p.doi_status, p.abstract, a.sha256, a.pdf_path,
-                  r.parser, r.status, r.output_dir
+                  r.parser, r.status, r.output_dir,
+                  s.decision AS s_decision, s.score AS s_score, s.result_json AS s_result
            FROM project_papers pp
            JOIN papers p ON p.id = pp.paper_id
            LEFT JOIN artifacts a ON a.paper_id = p.id AND a.status = 'ok'
            LEFT JOIN parse_runs r ON r.artifact_id = a.id AND r.is_current = 1
            LEFT JOIN paper_marks m ON m.paper_id = p.id AND m.project_id = pp.project_id
+           LEFT JOIN screening_results s ON s.paper_id = p.id AND s.project_id = pp.project_id
            WHERE pp.project_id = ?{MARK_SCOPES[only]} ORDER BY p.year, p.title""",
         (project_id,),
     ).fetchall()
@@ -63,13 +65,14 @@ def export_markdown(
     if not rows:
         return root, 0
     kb.mkdir(parents=True, exist_ok=True)
+    screened = any(r["s_decision"] for r in rows)
     previous = _previous_slugs(root / "manifest.json")
     written: dict[str, str] = {}  # paper id -> slug
     index_lines = [
         f"# {project}\n",
         "> Private export: contains full extracted text and figure crops.\n",
-        "| Paper | Year | Status | PDF |",
-        "|---|---|---|---|",
+        "| Paper | Year | Status | PDF |" + (" Screening |" if screened else ""),
+        "|---|---|---|---|" + ("---|" if screened else ""),
     ]
     for row in rows:
         title = row["title"] or f"Untitled ({(row['sha256'] or row['id'])[:8]})"
@@ -86,6 +89,10 @@ def export_markdown(
             "parser": row["parser"],
             "pdf_sha256": row["sha256"],
         }
+        if row["s_decision"]:
+            front["screening_decision"] = row["s_decision"]
+            front["screening_score"] = round(row["s_score"], 3)
+            front["screening_reason"] = json.loads(row["s_result"]).get("reason", "")
         pdf = None
         if row["pdf_path"] and (paths.root / row["pdf_path"]).is_file():
             pdf = root / "pdfs" / f"{slug}.pdf"
@@ -112,6 +119,7 @@ def export_markdown(
         index_lines.append(
             f"| [{title.replace('|', '/')}](knowledge_base/{slug}.md) | {row['year'] or ''} "
             f"| {front['parse_status']} | {f'[PDF](pdfs/{slug}.pdf)' if pdf else ''} |"
+            + (f" {row['s_decision'] or ''} |" if screened else "")
         )
     for slug in previous - set(written.values()):
         (kb / f"{slug}.md").unlink(missing_ok=True)
@@ -119,7 +127,8 @@ def export_markdown(
         (root / "pdfs" / f"{slug}.pdf").unlink(missing_ok=True)
     (root / "README.md").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
     (root / "manifest.json").write_text(
-        json.dumps([{**dict(r), "slug": written[r["id"]]} for r in rows], indent=1, ensure_ascii=False),
+        json.dumps([{**{k: v for k, v in dict(r).items() if not k.startswith("s_")}, "slug": written[r["id"]]}
+                    for r in rows], indent=1, ensure_ascii=False),
         encoding="utf-8",
     )
     return root, len(rows)

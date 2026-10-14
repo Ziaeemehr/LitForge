@@ -191,3 +191,31 @@ def test_cli_screen_latest_run(conn: sqlite3.Connection, paths: Paths, monkeypat
     result = CliRunner().invoke(cli.app, ["--data-dir", str(paths.root), "screen", "--project", "scr", "--top", "2"])
     assert result.exit_code == 0, result.output
     assert "include 1" in result.output and "2 screened" in result.output
+
+
+def test_export_includes_screening(conn: sqlite3.Connection, paths: Paths, tmp_path: Any) -> None:
+    from litforge.export.markdown import export_markdown
+
+    pid, run_id, _ = make_run(conn, paths, PAPERS[:2])
+    screen_run(conn, FakeLlm(answer), run_id, top=5)
+    root, n = export_markdown(conn, paths, "scr", pid, out_dir=tmp_path / "out")
+    assert n == 2
+    notes = "\n".join(p.read_text() for p in (root / "knowledge_base").glob("*.md"))
+    assert "screening_decision: include" in notes and "screening_decision: exclude" in notes
+    assert "| Screening |" in (root / "README.md").read_text()
+    assert all(not k.startswith("s_") for e in json.loads((root / "manifest.json").read_text()) for k in e)
+
+
+@pytest.mark.skipif("not __import__('os').environ.get('LITFORGE_LIVE_LLM')",
+                    reason="set LITFORGE_LIVE_LLM=1 with Ollama running and qwen3:4b pulled")
+def test_live_ollama_screens_obvious_cases(conn: sqlite3.Connection, paths: Paths) -> None:
+    from litforge.config import load_config
+    from litforge.screening.llm import ollama_from_config
+
+    _, run_id, ids = make_run(conn, paths, [
+        ("Simulation-based inference for a Jansen-Rit neural mass model",
+         "We fit a neural mass model to human EEG recordings using simulation-based inference."),
+        ("Crop yields under drought", "We study wheat yields in dry seasons in a field trial.")])
+    screen_run(conn, ollama_from_config(load_config().screening), run_id, top=2)
+    got = {r["paper_id"]: r["decision"] for r in conn.execute("SELECT paper_id, decision FROM screening_results")}
+    assert got[ids[0]] == "include" and got[ids[1]] != "include"
