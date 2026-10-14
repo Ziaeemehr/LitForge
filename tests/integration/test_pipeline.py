@@ -181,10 +181,14 @@ def test_export_markdown_has_relative_working_links(
     root, _ = export_markdown(conn, paths, "demo", project)
     readme = (root / "README.md").read_text()
     assert "Inferring Neural Mass Parameters" in readme
-    for md in (root / "knowledge_base").glob("*.md"):
+    assert not (root / "pdfs").exists() and list((root.parent / "pdfs").glob("*.pdf"))  # PDFs sit beside markdown/
+    for md in [root / "README.md", *(root / "knowledge_base").glob("*.md")]:
         text = md.read_text()
-        assert text.startswith("---\npaper_id:")
-        for link in re.findall(r"!\[[^\]]*\]\(([^)]+)\)", text):
+        links = re.findall(r"\]\(([^)]+)\)", text) + re.findall(r"^pdf: (.+)$", text, re.M)
+        assert any(link.endswith(".pdf") for link in links), md
+        for link in links:
+            if link.startswith("http"):
+                continue
             assert not link.startswith("/")
             assert (md.parent / link).resolve().is_file(), link
 

@@ -40,6 +40,24 @@ class FetchReport:
     parsed: int = 0
     no_source: int = 0  # no arXiv id and no open-access URL
     failed: list[str] = field(default_factory=list)
+    # One entry per paper: {paper_id, title, outcome (downloaded | failed | no_source), reason, links}.
+    items: list[dict[str, object]] = field(default_factory=list)
+
+    def note(self, row: sqlite3.Row, outcome: str, reason: str, links: list[str] | None = None) -> None:
+        self.items.append({"paper_id": row["id"], "title": row["title"], "outcome": outcome, "reason": reason,
+                           "links": links or []})
+
+
+def plain_reason(errors: list[str]) -> str:
+    """Why no copy could be downloaded, in words a user can act on (the worst-understood host first)."""
+    text = " ".join(errors)
+    if "HTTP 403" in text or "HTTP 401" in text:
+        return "the site blocks automatic downloads"
+    if "HTTP 202" in text:
+        return "the site asks for a human check first"
+    if "PDF link" in text:
+        return "the page has no direct PDF link"
+    return "; ".join(errors)
 
 
 def candidate_urls(arxiv_id: str | None, oa_url: str | None,
@@ -76,6 +94,27 @@ def openalex_locations(http: HttpClient, openalex_id: str | None) -> tuple[list[
         elif loc.get("landing_page_url"):
             (repo_page if is_repo else pub_page).append(loc["landing_page_url"])
     return repo_pdf + repo_page, pub_pdf + pub_page
+
+
+def unpaywall_locations(http: HttpClient, doi: str | None, email: str | None) -> tuple[list[str], list[str]]:
+    """Open-access copies Unpaywall knows for a DOI: (repository URLs, publisher URLs), PDFs first.
+    Unpaywall requires the user's e-mail on every request, so without one it is not asked."""
+    if not doi or not email:
+        return [], []
+    try:
+        work = http.get_json(http.url(f"https://api.unpaywall.org/v2/{doi}", {"email": email}))
+    except Exception:  # noqa: BLE001 - optional extra source
+        return [], []
+    repo_pdf: list[str] = []
+    repo_page: list[str] = []
+    pub_pdf: list[str] = []
+    for loc in work.get("oa_locations") or []:
+        is_repo = loc.get("host_type") == "repository"
+        if loc.get("url_for_pdf"):
+            (repo_pdf if is_repo else pub_pdf).append(loc["url_for_pdf"])
+        elif is_repo and loc.get("url"):
+            repo_page.append(loc["url"])
+    return list(dict.fromkeys(repo_pdf + repo_page)), list(dict.fromkeys(pub_pdf))
 
 
 def _short(exc: Exception) -> str:
@@ -119,7 +158,10 @@ def fetch_open_access(
     paper_ids: Collection[str] | None = None,
     log: EventLog = NULL_LOG,
     progress: Callable[[str], None] = lambda _: None,
+    mailto: str | None = None,
 ) -> FetchReport:
+    """Download open-access PDFs of a project's papers that have none: arXiv, the copies OpenAlex lists
+    and, when the user gave an e-mail (`mailto`), the copies Unpaywall lists."""
     if only not in MARK_SCOPES:
         raise ValueError(f"only must be one of {sorted(MARK_SCOPES)}")
     rows = conn.execute(
@@ -146,9 +188,12 @@ def fetch_open_access(
     for i, row in enumerate(rows, 1):
         label = (row["title"] or row["id"])[:80]
         progress(f"[{i}/{len(rows)}] {label}")
-        urls = candidate_urls(row["arxiv_id"], row["oa_url"], *openalex_locations(api_http, row["openalex_id"]))
+        oa_repo, oa_pub = openalex_locations(api_http, row["openalex_id"])
+        up_repo, up_pub = unpaywall_locations(api_http, row["doi"], mailto)
+        urls = candidate_urls(row["arxiv_id"], row["oa_url"], oa_repo + up_repo, oa_pub + up_pub)
         if not urls:
             report.no_source += 1
+            report.note(row, "no_source", "no free copy is known")
             continue
         body, errors = None, []
         for url in urls:
@@ -160,6 +205,7 @@ def fetch_open_access(
         if body is None:
             link = f"https://doi.org/{row['doi']}" if row["doi"] else urls[0]
             report.failed.append(f"{label}: {'; '.join(errors)} (open in a browser: {link})")
+            report.note(row, "failed", plain_reason(errors), urls)
             log.emit("fetch.failed", paper_id=row["id"], errors=errors)
             continue
         tmp = tmp_dir / f"{row['id']}.pdf"
@@ -176,9 +222,11 @@ def fetch_open_access(
                     "INSERT OR IGNORE INTO duplicate_candidates(paper_id_a, paper_id_b, reason, created_at)"
                     " VALUES (?,?,?,?)", (res.paper_id, row["id"], "same open-access PDF", now()))
             report.failed.append(f"{label}: same PDF as another library record (listed as a possible duplicate)")
+            report.note(row, "failed", "the PDF found belongs to another record (a possible duplicate)")
             continue
         if res.status != "new" or res.artifact_id is None:
             report.failed.append(f"{label}: {res.message or res.status}")
+            report.note(row, "failed", res.message or res.status)
             continue
         report.downloaded += 1
         log.emit("fetch.downloaded", paper_id=row["id"], url=url, bytes=len(body))
@@ -187,8 +235,10 @@ def fetch_open_access(
         new_artifacts.add(res.artifact_id)
         if parsed.status != "failed":
             report.parsed += 1
+            report.note(row, "downloaded", f"full text extracted from {urllib.parse.urlsplit(url).netloc}")
         else:
             report.failed.append(f"{label}: downloaded but text extraction failed")
+            report.note(row, "downloaded", "downloaded, but its text could not be extracted")
     if new_artifacts:
         progress("indexing the new text")
         for run in current_runs(conn, project_id):

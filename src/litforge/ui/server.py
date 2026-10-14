@@ -6,8 +6,10 @@ background thread; the page polls /api/jobs/<id> for progress.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import mimetypes
+import os
 import re
 import sqlite3
 import subprocess
@@ -24,14 +26,18 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from litforge.config import Config, EnvSettings, Paths
+from litforge.config import Config, EnvSettings, Paths, contact_email, save_mailto
 from litforge.discovery.fetch import fetch_open_access
 from litforge.discovery.http import HttpClient
 from litforge.discovery.run import Sources, run_import, run_search
 from litforge.discovery.similar import run_similar
 from litforge.discovery.textsim import Embedder, load_embedder
 from litforge.export.markdown import default_export_dir, export_markdown
+from litforge.ingest import IngestResult
 from litforge.observability import EventLog
+from litforge.parsing.formulas import FormulaEngine, Pix2TextEngine, formulas_available
+from litforge.parsing.run import ParseResult
+from litforge.parsing.vision import OllamaVision, Vision, enhance_project
 from litforge.pipeline import add_pdfs
 from litforge.projects import ProjectNotFound, create_project, delete_project, get_project_id, set_active
 from litforge.screening.criteria import load_criteria
@@ -54,13 +60,16 @@ class Job:
     messages: list[str] = field(default_factory=list)
     run_id: str | None = None
     error: str | None = None
+    report: dict[str, Any] | None = None  # structured result, for jobs whose page shows one
 
 
 class App:
     """Shared state for request handlers."""
 
     def __init__(self, paths: Paths, config: Config, make_http: Callable[[], HttpClient] | None = None,
-                 make_llm: Callable[[str | None], Llm] | None = None) -> None:
+                 make_llm: Callable[[str | None], Llm] | None = None,
+                 make_vision: Callable[[], Vision] | None = None,
+                 make_formulas: Callable[[], FormulaEngine] | None = None) -> None:
         self.paths = paths
         self.config = config
         self.log = EventLog(paths.logs)
@@ -71,18 +80,29 @@ class App:
         self.make_http = make_http or (lambda: HttpClient(
             cache_dir=paths.http_cache, cache_ttl_s=config.discovery.cache_ttl_days * 86400))
         self.make_llm = make_llm or (lambda model: ollama_from_config(config.screening, model))
+        self.make_vision = make_vision or (lambda: OllamaVision(
+            os.environ.get("LITFORGE_OLLAMA_URL") or config.screening.ollama_url, config.vision))
+        self._make_formulas = make_formulas or Pix2TextEngine
+        self._formulas: FormulaEngine | None = None
         paths.ensure()
         conn = open_db(paths.db)  # applies migrations once at startup
         # Jobs live in memory: runs left 'running' by a previous server process will never finish.
         conn.execute("UPDATE discovery_runs SET status='interrupted' WHERE status='running'")
         conn.close()
 
+    def formulas(self) -> FormulaEngine:
+        """Pix2Text loads its models once and is reused across exports."""
+        with self._lock:
+            if self._formulas is None:
+                self._formulas = self._make_formulas()
+            return self._formulas
+
     def db(self) -> sqlite3.Connection:
         return open_db(self.paths.db)
 
     def sources(self) -> Sources:
         env = EnvSettings()
-        return Sources(self.make_http(), env.openalex_api_key, env.mailto or self.config.discovery.mailto)
+        return Sources(self.make_http(), env.openalex_api_key, contact_email(self.paths, self.config))
 
     def embedder(self, wanted: bool) -> Embedder | None:
         if not wanted or not self.config.similar.embedding_model:
@@ -212,6 +232,11 @@ class App:
                 for f in files:  # the library keeps its own copy
                     f.unlink(missing_ok=True)
             job.messages += [f"warning: {e}" for e in report.errors]
+            c = self.db()
+            try:
+                job.report = self._add_report(c, project, pid, results, parsed)
+            finally:
+                c.close()
             new = sum(r.status == "new" for r in results)
             known = sum(r.status == "duplicate" and r.paper_id is not None for r in results)
             full = sum(p.status != "failed" for p in parsed)
@@ -220,6 +245,34 @@ class App:
             return report.run_id
 
         return self.start_job("pdfs", project, work)
+
+    def _add_report(self, conn: sqlite3.Connection, project: str, pid: str, results: list[IngestResult],
+                    parsed: list[ParseResult]) -> dict[str, Any]:
+        """What happened to each added file: attached to a paper the project was missing a PDF for, a new
+        paper, already in the library, or rejected; and where the files are kept."""
+        failed_parse = {p.artifact_id for p in parsed if p.status == "failed"}
+        items = []
+        for r in results:
+            title = None
+            if r.paper_id:
+                row = conn.execute("SELECT title FROM papers WHERE id=?", (r.paper_id,)).fetchone()
+                title = row["title"] if row else None
+            if r.status == "new":
+                outcome = "attached" if r.message == "attached to an existing library record" else "new_paper"
+            elif r.status == "duplicate" and r.paper_id:
+                outcome = "already"
+            else:
+                outcome = "failed"
+            full_text = outcome != "failed" and r.artifact_id not in failed_parse and conn.execute(
+                "SELECT 1 FROM parse_runs pr JOIN artifacts a ON a.id = pr.artifact_id WHERE a.paper_id=?"
+                " AND pr.is_current = 1 AND pr.status != 'failed'", (r.paper_id,)).fetchone() is not None
+            name = Path(r.path).name
+            if Path(r.path).parent == self.paths.root / "uploads":  # stored as <hash>-<name> by /api/upload
+                name = name.split("-", 1)[-1]
+            items.append({"file": name, "outcome": outcome, "paper_id": r.paper_id, "title": title,
+                          "full_text": full_text, "reason": r.message or r.status})
+        return {"items": items, "library": str(self.paths.pdfs),
+                "export_dir": str(default_export_dir(conn, self.paths, project, pid).expanduser().resolve())}
 
     def screen_job(self, body: dict[str, Any]) -> Job:
         """Screen the top papers of a run with the local model; reports back the run so the page reloads it."""
@@ -251,32 +304,63 @@ class App:
 
         return self.start_job("screen", str(run["name"]), work)
 
-    def export_job(self, body: dict[str, Any]) -> Job:
-        """Export with PDFs: download open-access PDFs of the chosen papers, then export the same papers.
-        The job reports back the run being viewed so the page can refresh its PDF badges."""
+    def export_job(self, body: dict[str, Any], export: bool = True) -> Job:
+        """Export in the background: first download open-access PDFs of the chosen papers (`fetch`) and/or
+        rewrite their hard pages with the vision model (`vision`), then export the same papers (with
+        `export` False, only download). The job reports back the run being viewed so the page can refresh
+        its PDF badges."""
         conn = self.db()
         project = str(body["project"])
         pid = self.ensure_project(conn, project, body.get("export_dir"))
         conn.close()
         paper_ids, only = body.get("paper_ids"), str(body.get("only", "all"))
 
+        fetch = bool(body.get("fetch")) or not export
+        level = str(body.get("math") or ("high" if body.get("vision") else "off"))
+        if level not in ("off", "medium", "high"):
+            raise ValueError("math must be off, medium or high")
+        if level == "medium" and self._make_formulas is Pix2TextEngine and not formulas_available():
+            raise ValueError("better math (medium) needs Pix2Text: run `uv sync --extra formulas-gpu` "
+                             "(NVIDIA GPU) or `uv sync --extra formulas` (CPU), then restart `litforge ui`")
+        engine: Vision | FormulaEngine | None = self.make_vision() if level == "high" else None
+        if isinstance(engine, OllamaVision):
+            engine.check()  # fail now, on the page, if Ollama or the model is missing
+
         def work(job: Job) -> str | None:
             c = self.db()
+            job.report = {"library": str(self.paths.pdfs),
+                          "export_dir": str(default_export_dir(c, self.paths, project, pid).expanduser().resolve())}
             try:
-                report = fetch_open_access(c, self.paths, self.config, self.make_http(), pid, only, paper_ids,
-                                           self.log, progress=job.messages.append)
-                job.messages += [f"warning: {e}" for e in report.failed]
-                job.messages.append(
-                    f"{report.downloaded} of {report.candidates} missing PDFs downloaded, "
-                    f"{report.parsed} with full text"
-                    + (f"; {report.no_source} have no open-access copy" if report.no_source else ""))
-                out, count = export_markdown(c, self.paths, project, pid, only=only, paper_ids=paper_ids)
+                if fetch:
+                    self._fetch(c, job, pid, only, paper_ids)
+                if level != "off":
+                    tool = engine if engine is not None else self.formulas()
+                    vis = enhance_project(c, self.paths, self.config, pid, tool, only, paper_ids, self.log,
+                                          progress=job.messages.append)
+                    job.report["vision"] = {**dataclasses.asdict(vis), "level": level}
+                    job.messages.append(f"better math ({level}): {vis.pages_improved} pages rewritten in "
+                                        f"{vis.papers} papers" + (f", {vis.pages_rejected} kept as extracted"
+                                                                 if vis.pages_rejected else ""))
+                if export:
+                    out, count = export_markdown(c, self.paths, project, pid, only=only, paper_ids=paper_ids)
+                    job.messages.append(f"done: exported {count} papers to {out}")
             finally:
                 c.close()
-            job.messages.append(f"done: exported {count} papers to {out}")
             return body.get("run_id")
 
-        return self.start_job("export", project, work)
+        return self.start_job("export" if export else "fetch", project, work)
+
+    def _fetch(self, c: sqlite3.Connection, job: Job, pid: str, only: str, paper_ids: list[str] | None) -> None:
+        """Download open-access PDFs of the chosen papers; adds one line per paper to the job's report."""
+        report = fetch_open_access(c, self.paths, self.config, self.make_http(), pid, only, paper_ids,
+                                   self.log, progress=job.messages.append,
+                                   mailto=contact_email(self.paths, self.config))
+        job.messages += [f"warning: {e}" for e in report.failed]
+        job.messages.append(
+            f"{report.downloaded} of {report.candidates} missing PDFs downloaded, {report.parsed} with full text"
+            + (f"; {report.no_source} have no open-access copy" if report.no_source else ""))
+        assert job.report is not None
+        job.report.update(downloaded=report.downloaded, candidates=report.candidates, items=report.items)
 
 
 def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
@@ -340,7 +424,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             conn = app.db()
             try:
                 if path == "/api/info":
-                    return self._json({"exports_root": str(app.paths.exports_root)})
+                    return self._json({"exports_root": str(app.paths.exports_root),
+                                       "math": {"medium": formulas_available(), "high": app.config.vision.model}})
                 if path == "/api/projects":
                     return self._json(api.list_projects(conn, app.paths))
                 if path == "/api/runs":
@@ -348,6 +433,11 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(api.list_runs(conn, pid, int(query.get("limit", 50))))
                 if path == "/api/library":
                     return self._json(api.library(conn))
+                if path == "/api/settings":
+                    return self._json({"mailto": contact_email(app.paths, app.config)})
+                if path == "/api/missing-pdfs":
+                    pid = get_project_id(conn, query["project"])
+                    return self._json(api.missing_pdfs(conn, pid, query.get("only", "all")))
                 if path == "/api/criteria":
                     return self._json({**api.get_criteria(conn, query["project"]), **self._screen_info()})
                 if m := re.fullmatch(r"/api/runs/([\w-]+)", path):
@@ -450,7 +540,12 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         api.set_marks(conn, body["project"], ids, body.get("mark"))
                     conn.close()
                     return self._json({"ok": True})
-                if url.path == "/api/export" and body.get("fetch"):
+                if url.path == "/api/settings":
+                    save_mailto(app.paths, body.get("mailto"))
+                    return self._json({"mailto": contact_email(app.paths, app.config)})
+                if url.path == "/api/fetch":
+                    return self._json(app.export_job(body, export=False).__dict__)
+                if url.path == "/api/export" and (body.get("fetch") or body.get("vision") or body.get("math")):
                     return self._json(app.export_job(body).__dict__)
                 if url.path == "/api/export":
                     conn = app.db()

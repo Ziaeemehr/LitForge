@@ -61,16 +61,18 @@ def delete_project(
 ) -> dict[str, object]:
     """Delete a project: its paper list, runs, marks and settings. Papers, PDFs and extracted text stay
     in the shared library (other projects may use them). Exports are the user's files and are kept
-    unless `delete_exports`; even then only the `markdown` folder LitForge wrote is removed from a
-    custom export folder (which may be, say, an Obsidian vault)."""
+    unless `delete_exports`; even then only the `markdown` folder and the PDFs LitForge wrote are removed
+    from a custom export folder (which may be, say, an Obsidian vault)."""
     project_id = get_project_id(conn, name)
     papers = conn.execute("SELECT COUNT(*) FROM project_papers WHERE project_id=?", (project_id,)).fetchone()[0]
     row = conn.execute("SELECT export_dir FROM projects WHERE id=?", (project_id,)).fetchone()
     folder = Path(row["export_dir"]).expanduser() if row["export_dir"] else paths.default_exports(name)
     legacy = paths.project_dir(name) / "exports"  # where older versions wrote exports
     if delete_exports:
+        from litforge.export.markdown import remove_export  # imports this module
+
         for d in (folder, legacy):
-            shutil.rmtree(d / "markdown", ignore_errors=True)
+            remove_export(d)
         if not row["export_dir"] and folder.is_dir() and not any(folder.iterdir()):
             folder.rmdir()  # the default folder only held this export
     with transaction(conn):

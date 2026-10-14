@@ -26,7 +26,7 @@ uv run litforge export
 - `new` creates a project and makes it active, so later commands don't need `--project`.
 - `add` imports, parses and indexes PDFs in one step. Run it again any time; nothing is processed twice.
 - `search` returns the paper, section, page and a quoted snippet for every hit.
-- `export` writes Markdown notes (and each paper's PDF under a readable name in `pdfs/`) to `~/Downloads/LitForge/my-review/markdown/` (set `LITFORGE_EXPORT_ROOT` to change the base folder, or pick a folder per project in the web UI); `--only relevant` keeps just the papers marked ✓ (`--only not-irrelevant` drops the ✗ ones).
+- `export` writes Markdown notes to `~/Downloads/LitForge/my-review/markdown/` and each paper's PDF under a readable name to `~/Downloads/LitForge/my-review/pdfs/` (set `LITFORGE_EXPORT_ROOT` to change the base folder, or pick a folder per project in the web UI); `--only relevant` keeps just the papers marked ✓ (`--only not-irrelevant` drops the ✗ ones).
 
 ## Web interface
 
@@ -43,7 +43,10 @@ iterate. To choose from a long list, mark the top N of the current filtered and 
 shift-click ✓/✗ to mark a range, or mark everything still unmarked ✗. The menu next to
 **Export Markdown** picks which papers to export: ✓ only, all but ✗, the
 visible list, or all; ticking **with PDFs** first downloads open-access copies of papers that
-have none. Exports go to `~/Downloads/LitForge/<project>/` unless you set another folder in the **Export folder** field. A sidebar, as in chat apps, has
+have none, and the **Math** menu rewrites the pages with equations first (see
+[Better math](#better-math-equations-and-tables)). **Missing PDFs** lists the papers still without a PDF, with
+links to get each one by hand (add the files with **+ New → My PDFs**; each is matched to its paper);
+with your e-mail saved there, downloads also ask [Unpaywall](https://unpaywall.org), which requires one. Exports go to `~/Downloads/LitForge/<project>/` unless you set another folder in the **Export folder** field. A sidebar, as in chat apps, has
 **+ New** (a new search), **Recents** (every search, by project), **Library** (all papers with their
 PDFs and projects), your projects and the latest searches. The page starts on an empty search. It runs locally with the Python standard library and works the same on macOS and Linux;
 on a remote GPU machine use `ssh -L 8765:127.0.0.1:8765 host` and open the same address.
@@ -161,6 +164,27 @@ data/
 Optional: `uv sync --extra docling` installs [Docling](https://github.com/docling-project/docling)
 as a fallback for complex layouts.
 
+## Better math (equations and tables)
+
+The text layer of a PDF keeps prose well but scatters display equations into single characters, and
+in scanned papers often misses them. Pages that show it (an equation, a table, an equation number,
+fragment lines) can be rewritten at two levels, before exporting (**Math** menu in the web UI) or with
+`litforge enhance --level medium|high`:
+
+| Level | How | Speed | Needs |
+|---|---|---|---|
+| medium | [Pix2Text](https://github.com/breezedeus/Pix2Text) finds every formula (inline and displayed) and reads it as LaTeX; the text stays as extracted | ~1.5 s/page on a GPU, ~5 s on a CPU | `uv sync --extra formulas-gpu` (NVIDIA) or `--extra formulas` (CPU) |
+| high | a local vision model (Ollama, `qwen2.5vl:7b`) rewrites whole pages: formulas, tables and text, also in scanned papers; a transcription that does not match the page's text is rejected | ~12 s/page | `ollama pull qwen2.5vl:7b` (about 8 GB of GPU memory) |
+
+Results are kept per page, so a later export or a higher level only processes what is new. Each
+note's front matter says how its equations were produced (`math: raw | medium | high`), so a
+language model reading the notes knows how far to trust them: a sensible workflow is to screen
+many papers with plain exports and rewrite only the ones you read closely.
+
+On 31 pages of 12 arXiv papers, scored against the papers' own LaTeX, both levels read about 95% of
+each displayed equation correctly (character similarity), Pix2Text finding a few more and the vision
+model getting more exactly right; Nougat and UniMERNet did no better and were slower.
+
 ## Development
 
 ```bash
@@ -189,7 +213,8 @@ Known limitations of the fast parser:
 
 - Tables drawn without vertical rules get a caption and crop but no cell grid (their text is
   still searchable).
-- Equation text is approximate; the saved image crop is the reliable version.
+- Without [better math](#better-math-equations-and-tables), equation text is approximate; the saved
+  image crop is the reliable version.
 - Some figures cannot be paired with their caption and get no crop.
 
 Design documents (in Persian and English) are in [docs/](docs/).

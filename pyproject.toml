@@ -15,9 +15,32 @@ dependencies = [
 [project.optional-dependencies]
 docling = ["docling>=2.0"]
 embed = ["fastembed>=0.4"]
+# "better math: medium": formula detection and LaTeX recognition on the CPU (no GPU needed).
+# rapidocr 3.10 removed a function pix2text's dependency cnstd imports.
+formulas = ["pix2text>=1.1.4", "rapidocr==3.9.0", "torch>=2.4", "torchvision>=0.19"]
+# The same on an NVIDIA GPU (about 7x faster): CUDA 12.8 builds, which RTX 50-series cards need.
+formulas-gpu = ["pix2text>=1.1.4", "rapidocr==3.9.0", "torch>=2.7", "torchvision>=0.22", "onnxruntime-gpu[cuda,cudnn]>=1.22"]
 
 [project.scripts]
 litforge = "litforge.cli:app"
+
+[tool.uv.sources]
+# The CPU build of PyTorch is enough for Pix2Text and is a fraction of the size of the CUDA build.
+torch = [{ index = "pytorch-cpu", extra = "formulas" }, { index = "pytorch-cu128", extra = "formulas-gpu" }]
+torchvision = [{ index = "pytorch-cpu", extra = "formulas" }, { index = "pytorch-cu128", extra = "formulas-gpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv]
+conflicts = [[{ extra = "formulas" }, { extra = "formulas-gpu" }]]
 
 [dependency-groups]
 dev = [
@@ -50,7 +73,7 @@ files = ["src"]
 untyped_calls_exclude = ["pymupdf"]
 
 [[tool.mypy.overrides]]
-module = ["fitz", "pymupdf", "docling.*"]
+module = ["fitz", "pymupdf", "docling.*", "pix2text.*", "PIL.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

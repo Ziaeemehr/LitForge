@@ -17,6 +17,8 @@ from discovery_fakes import FakeTransport, default_routes
 
 from litforge.config import Paths, load_config
 from litforge.discovery.http import HttpClient
+from litforge.parsing.formulas import FakeFormulas, Formula
+from litforge.parsing.vision import FakeVision
 from litforge.ui.server import App, make_handler
 
 ELICIT_CSV = (
@@ -32,8 +34,12 @@ def server(tmp_path: Path) -> Iterator[str]:
     transport = FakeTransport(default_routes())
     config = load_config()
     config.similar.embedding_model = None  # keep tests fast and offline
+    vision = FakeVision(lambda png, text: text + "\n\n$$\nx = \\frac{a}{b} \\tag{1}\n$$")
     app = App(Paths(tmp_path / "data"), config,
-              make_http=lambda: HttpClient(transport=transport, sleep=lambda s: None, min_interval={}))
+              make_http=lambda: HttpClient(transport=transport, sleep=lambda s: None, min_interval={}),
+              make_vision=lambda: vision,
+              make_formulas=lambda: FakeFormulas(lambda png: [Formula(box=(0, 0, 4000, 4000), kind="isolated",
+                                                                      latex=r"\frac{c}{d}")]))
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}"
@@ -127,6 +133,13 @@ def test_bulk_marks_and_selective_export(server: str, tmp_path: Path) -> None:
     _, data = call(server, f"/api/runs/{run_id}")
     assert data["stats"]["relevant"] == 2 and data["stats"]["irrelevant"] == 1
 
+    # Papers still without a PDF, for downloading by hand; the scope follows the marks like export does.
+    _, missing = call(server, "/api/missing-pdfs?project=sel")
+    assert {p["id"] for p in missing} == set(ids) and all("doi" in p and "oa_url" in p for p in missing)
+    _, missing = call(server, "/api/missing-pdfs?project=sel&only=relevant")
+    assert {p["id"] for p in missing} == set(ids[:2]) and {p["mark"] for p in missing} == {"relevant"}
+    assert call(server, "/api/missing-pdfs?project=sel&only=bogus")[0] == 400
+
     out = tmp_path / "sel-exports"
     notes = out / "markdown" / "knowledge_base"
     _, exp = call(server, "/api/export", {"project": "sel", "export_dir": str(out)})
@@ -173,6 +186,12 @@ def test_add_my_pdfs_from_folder_and_uploads(server: str, corpus: Path, tmp_path
     assert job["status"] == "done", job
     assert job["messages"][-1].startswith("done: 3 PDFs, 2 new")
     assert not Path(up["path"]).exists()  # upload removed once it is in the library
+    report = job["report"]  # what happened to each file, and where they are kept
+    by_file = {i["file"]: i for i in report["items"]}
+    assert set(by_file) == {"a.pdf", "broken.pdf", "two_column.pdf"}
+    assert by_file["a.pdf"]["outcome"] == "new_paper" and by_file["a.pdf"]["title"] and by_file["a.pdf"]["full_text"]
+    assert by_file["broken.pdf"]["outcome"] == "failed" and by_file["broken.pdf"]["reason"]
+    assert report["library"].endswith("library/pdfs") and report["export_dir"] == str(chosen.resolve())
     _, data = call(server, f"/api/runs/{job['run_id']}")
     assert data["run"]["kind"] == "pdfs" and data["run"]["label"] == "mine" and len(data["papers"]) == 2
     assert {r for p in data["papers"] for r in p["reasons"]} == {"your PDF: a.pdf", "your PDF: two_column.pdf"}
@@ -183,10 +202,10 @@ def test_add_my_pdfs_from_folder_and_uploads(server: str, corpus: Path, tmp_path
     assert status == 200 and pdf.startswith(b"%PDF")
     _, exp = call(server, "/api/export", {"project": "own"})
     assert exp["path"] == str(chosen / "markdown")
-    pdfs = sorted((Path(exp["path"]) / "pdfs").glob("*.pdf"))
+    pdfs = sorted((chosen / "pdfs").glob("*.pdf"))
     assert len(pdfs) == 2 and all(p.read_bytes().startswith(b"%PDF") for p in pdfs)
     note = next((Path(exp["path"]) / "knowledge_base").glob("*.md")).read_text()
-    assert "pdf: ../pdfs/" in note and "- [PDF](../pdfs/" in note
+    assert "pdf: ../../pdfs/" in note and "- [PDF](../../pdfs/" in note
 
     _, job = call(server, "/api/add", {"project": "own", "folder": str(folder)})  # re-run: nothing new
     assert wait_job(server, job["id"])["messages"][-1].startswith("done: 2 PDFs, 0 new, 1 already in the library")
@@ -235,6 +254,8 @@ def test_delete_project_keeps_library_and_exports(server: str, tmp_path: Path) -
     # With delete_exports, only the markdown folder LitForge wrote goes; the rest of a custom folder stays.
     vault = tmp_path / "vault"
     (vault / "my-notes").mkdir(parents=True)
+    (vault / "pdfs").mkdir()
+    (vault / "pdfs" / "mine.pdf").write_bytes(b"%PDF-1.4")  # the user's own file in a same-named folder
     _, job = call(server, "/api/similar", {"project": "gone2", "seeds": ["10.1073/pnas.1912789117"],
                                            "embeddings": False, "export_dir": str(vault)})
     wait_job(server, job["id"])
@@ -242,6 +263,7 @@ def test_delete_project_keeps_library_and_exports(server: str, tmp_path: Path) -
     assert (vault / "markdown" / "README.md").is_file()
     _, res = call(server, "/api/delete-project", {"project": "gone2", "delete_exports": True})
     assert res["kept_exports"] is None and not (vault / "markdown").exists() and (vault / "my-notes").is_dir()
+    assert [p.name for p in (vault / "pdfs").iterdir()] == ["mine.pdf"]  # only the PDFs LitForge copied go
 
 
 def test_import_elicit_then_expand(server: str, tmp_path: Path) -> None:
@@ -327,3 +349,80 @@ def test_criteria_screen_job_and_screening_fields(screen_server: str) -> None:
     call(s, "/api/criteria", {"project": "scr", "question": "changed", "include": "", "exclude": ""})
     _, data = call(s, f"/api/runs/{run_id}")
     assert all(p["screening"]["stale"] for p in data["papers"] if p["screening"])
+
+
+def test_contact_email_setting_and_fetch_job(server: str, tmp_path: Path) -> None:
+    assert call(server, "/api/settings")[1]["mailto"] is None
+    assert call(server, "/api/settings", {"mailto": "not an email"})[0] == 400
+    status, res = call(server, "/api/settings", {"mailto": " me@uni.edu "})
+    assert status == 200 and res["mailto"] == "me@uni.edu"
+    assert call(server, "/api/settings")[1]["mailto"] == "me@uni.edu"
+    assert json.loads((tmp_path / "data" / "settings.json").read_text())["mailto"] == "me@uni.edu"
+
+    # "Find PDFs again" from the missing-PDFs window: download only, for the listed papers.
+    _, job = call(server, "/api/similar", {"project": "dl", "seeds": ["10.1073/pnas.1912789117"],
+                                           "embeddings": False})
+    wait_job(server, job["id"])
+    _, missing = call(server, "/api/missing-pdfs?project=dl")
+    _, job = call(server, "/api/fetch", {"project": "dl", "paper_ids": [p["id"] for p in missing]})
+    job = wait_job(server, job["id"])
+    assert job["status"] == "done" and "missing PDFs downloaded" in job["messages"][-1]
+    report = job["report"]  # one line per paper, so the page can say what happened to each
+    assert report["downloaded"] == 0 and len(report["items"]) == len(missing)
+    assert {i["outcome"] for i in report["items"]} <= {"failed", "no_source"}
+    assert all(i["reason"] for i in report["items"])
+    assert report["library"].endswith("library/pdfs") and report["export_dir"].endswith("dl")
+
+    assert call(server, "/api/settings", {"mailto": ""})[1]["mailto"] is None  # cleared
+
+
+def test_export_with_better_math_runs_the_vision_model(server: str, corpus: Path, tmp_path: Path) -> None:
+    folder = tmp_path / "pdfs"
+    folder.mkdir()
+    (folder / "a.pdf").write_bytes((corpus / "single_column.pdf").read_bytes())
+    _, job = call(server, "/api/add", {"project": "math", "folder": str(folder)})
+    wait_job(server, job["id"])
+    _, job = call(server, "/api/export", {"project": "math", "vision": True})
+    job = wait_job(server, job["id"])
+    assert job["status"] == "done", job
+    vis = job["report"]["vision"]
+    assert vis["papers"] == 1 and vis["pages_improved"] >= 1 and vis["items"][0]["title"]
+    assert any("pages rewritten" in m for m in job["messages"]) and job["messages"][-1].startswith("done: exported 1")
+    note = next(Path(job["report"]["export_dir"], "markdown", "knowledge_base").glob("*.md")).read_text()
+    assert "\\frac{a}{b}" in note
+
+
+def test_export_with_math_medium_uses_the_formula_engine(server: str, corpus: Path, tmp_path: Path) -> None:
+    folder = tmp_path / "pdfs"
+    folder.mkdir()
+    (folder / "a.pdf").write_bytes((corpus / "single_column.pdf").read_bytes())
+    _, job = call(server, "/api/add", {"project": "med", "folder": str(folder)})
+    wait_job(server, job["id"])
+    assert call(server, "/api/export", {"project": "med", "math": "bogus"})[0] == 400
+    _, job = call(server, "/api/export", {"project": "med", "math": "medium"})
+    job = wait_job(server, job["id"])
+    assert job["status"] == "done", job
+    assert job["report"]["vision"]["level"] == "medium" and job["report"]["vision"]["pages_improved"] >= 1
+    note = next(Path(job["report"]["export_dir"], "markdown", "knowledge_base").glob("*.md")).read_text()
+    assert "\\frac{c}{d}" in note
+    _, info = call(server, "/api/info")
+    assert set(info["math"]) == {"medium", "high"}
+
+
+def test_startup_creates_the_library_and_marks_unfinished_runs_interrupted(tmp_path: Path) -> None:
+    from litforge.projects import create_project
+    from litforge.storage.db import open_db
+
+    paths = Paths(tmp_path / "data")
+    App(paths, load_config())  # a fresh data folder: folders and database are created
+    assert paths.db.is_file() and paths.pdfs.is_dir()
+    conn = open_db(paths.db)
+    pid = create_project(conn, paths, "p")
+    conn.execute("INSERT INTO discovery_runs(id, project_id, kind, params_json, status, started_at)"
+                 " VALUES ('r1', ?, 'search', '{}', 'running', '2026-01-01')", (pid,))
+    conn.commit()
+    conn.close()
+    App(paths, load_config())  # a restart: the old server's job will never finish
+    conn = open_db(paths.db)
+    assert conn.execute("SELECT status FROM discovery_runs WHERE id='r1'").fetchone()[0] == "interrupted"
+    conn.close()

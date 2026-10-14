@@ -15,7 +15,8 @@ from typing import Any
 from litforge.config import Paths
 from litforge.export.markdown import default_export_dir
 from litforge.parsing.canonical import read_canonical, to_markdown
-from litforge.projects import get_project_id
+from litforge.parsing.vision import read_page_markdown
+from litforge.projects import MARK_SCOPES, get_project_id
 from litforge.screening.criteria import Criteria, criteria_hash, load_criteria, save_criteria
 from litforge.storage.db import now
 
@@ -71,6 +72,24 @@ def library(conn: sqlite3.Connection, limit: int = 5000) -> list[dict[str, Any]]
         "authors": (json.loads(r["authors_json"]) if r["authors_json"] else [])[:4], "has_pdf": bool(r["has_pdf"]),
         "projects": sorted(r["projects"].split("|")) if r["projects"] else [],
     } for r in rows]
+
+
+def missing_pdfs(conn: sqlite3.Connection, project_id: str, only: str = "all") -> list[dict[str, Any]]:
+    """A project's papers that have no PDF in the library yet, with the links for getting one by hand.
+    `only` filters by the marks, as for export."""
+    if only not in MARK_SCOPES:
+        raise ValueError(f"only must be one of {sorted(MARK_SCOPES)}")
+    rows = conn.execute(
+        f"""SELECT p.id, p.title, p.year, p.venue, p.doi, p.arxiv_id, p.oa_url, p.authors_json, m.mark
+           FROM project_papers pp JOIN papers p ON p.id = pp.paper_id
+           LEFT JOIN paper_marks m ON m.paper_id = p.id AND m.project_id = pp.project_id
+           WHERE pp.project_id = ?{MARK_SCOPES[only]}
+             AND NOT EXISTS (SELECT 1 FROM artifacts a WHERE a.paper_id = p.id AND a.status = 'ok')
+           ORDER BY m.mark = 'relevant' DESC, p.year DESC, p.title""",
+        (project_id,),
+    ).fetchall()
+    return [{**{k: r[k] for k in ("id", "title", "year", "venue", "doi", "arxiv_id", "oa_url", "mark")},
+             "authors": (json.loads(r["authors_json"]) if r["authors_json"] else [])[:3]} for r in rows]
 
 
 def _seed_label(conn: sqlite3.Connection, seed: str) -> str:
@@ -190,7 +209,8 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
     if run and run["output_dir"]:
         out_dir = paths.root / run["output_dir"]
         if (out_dir / "canonical.json").is_file():
-            markdown = to_markdown(read_canonical(out_dir), None, asset_prefix=f"/api/papers/{paper_id}/files/")
+            markdown = to_markdown(read_canonical(out_dir), None, asset_prefix=f"/api/papers/{paper_id}/files/",
+                                   page_md=read_page_markdown(out_dir))
     mark = None
     if project_id:
         m = conn.execute("SELECT mark FROM paper_marks WHERE project_id=? AND paper_id=?",

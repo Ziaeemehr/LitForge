@@ -13,6 +13,8 @@ import yaml
 
 from litforge.config import Paths
 from litforge.parsing.canonical import read_canonical, to_markdown
+from litforge.parsing.formulas import FORMULAS
+from litforge.parsing.vision import VISION, read_page_markdown
 from litforge.projects import MARK_SCOPES
 
 
@@ -35,8 +37,9 @@ def export_markdown(
     only: str = "all",
     paper_ids: Collection[str] | None = None,
 ) -> tuple[Path, int]:
-    """Write exports/markdown/{README.md, knowledge_base/*.md, assets/<slug>/..., pdfs/<slug>.pdf};
-    returns (root, papers). Each paper's PDF is copied under a readable name and linked from its note.
+    """Write <export folder>/markdown/{README.md, knowledge_base/*.md, assets/<slug>/...} and
+    <export folder>/pdfs/<slug>.pdf; returns (root, papers) with root the markdown folder. Each paper's
+    PDF is copied under a readable name beside the markdown folder and linked from its note.
     `only` filters by the project's marks and `paper_ids` limits to an explicit selection. Notes and
     assets that the previous export wrote (listed in its manifest.json) but this one does not are
     removed, so the folder matches the selection; other files are never touched, and an empty
@@ -46,6 +49,7 @@ def export_markdown(
         raise ValueError(f"only must be one of {sorted(MARK_SCOPES)}")
     root = (out_dir or default_export_dir(conn, paths, project, project_id)) / "markdown"
     kb = root / "knowledge_base"
+    pdf_dir = root.parent / "pdfs"
     rows = conn.execute(
         f"""SELECT p.id, p.title, p.year, p.doi, p.doi_status, p.abstract, a.sha256, a.pdf_path,
                   r.parser, r.status, r.output_dir,
@@ -78,6 +82,16 @@ def export_markdown(
         title = row["title"] or f"Untitled ({(row['sha256'] or row['id'])[:8]})"
         slug = f"{slugify(title)}-{row['id'][:8]}"
         written[row["id"]] = slug
+        math = "raw"
+        if row["output_dir"]:
+            for name, level in ((VISION, "high"), (FORMULAS, "medium")):
+                try:
+                    data = json.loads((paths.root / row["output_dir"] / name).read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if any(p.get("markdown") for p in (data.get("pages") or {}).values()):
+                    math = level
+                    break
         front = {
             "paper_id": row["id"],
             "title": title,
@@ -87,6 +101,7 @@ def export_markdown(
             "project": project,
             "parse_status": row["status"] or ("not_parsed" if row["sha256"] else "no_pdf"),
             "parser": row["parser"],
+            "math": math,
             "pdf_sha256": row["sha256"],
         }
         if row["s_decision"]:
@@ -95,12 +110,12 @@ def export_markdown(
             front["screening_reason"] = json.loads(row["s_result"]).get("reason", "")
         pdf = None
         if row["pdf_path"] and (paths.root / row["pdf_path"]).is_file():
-            pdf = root / "pdfs" / f"{slug}.pdf"
+            pdf = pdf_dir / f"{slug}.pdf"
             pdf.parent.mkdir(exist_ok=True)
             if not pdf.exists() or pdf.stat().st_size != (paths.root / row["pdf_path"]).stat().st_size:
                 shutil.copy2(paths.root / row["pdf_path"], pdf)
-            front["pdf"] = f"../pdfs/{slug}.pdf"
-        links = ([f"- [PDF](../pdfs/{slug}.pdf)"] if pdf else []) + (
+            front["pdf"] = f"../../pdfs/{slug}.pdf"
+        links = ([f"- [PDF](../../pdfs/{slug}.pdf)"] if pdf else []) + (
             [f"- DOI ({row['doi_status']}): https://doi.org/{row['doi']}"] if row["doi"] else [])
         body = "_Not parsed yet._\n" if row["sha256"] else f"# {title}\n\n_No PDF in the library yet._\n"
         if not row["sha256"] and row["abstract"]:
@@ -111,20 +126,21 @@ def export_markdown(
             if (out_dir / "assets").is_dir():
                 dest = root / "assets" / slug / "assets"
                 shutil.copytree(out_dir / "assets", dest, dirs_exist_ok=True)
-            body = to_markdown(doc, title, asset_prefix=f"../assets/{slug}/")
+            body = to_markdown(doc, title, asset_prefix=f"../assets/{slug}/", page_md=read_page_markdown(out_dir))
         if links:
             body += "\n## Links\n\n" + "\n".join(links) + "\n"
         header = "---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n\n"
         (kb / f"{slug}.md").write_text(header + body, encoding="utf-8")
         index_lines.append(
             f"| [{title.replace('|', '/')}](knowledge_base/{slug}.md) | {row['year'] or ''} "
-            f"| {front['parse_status']} | {f'[PDF](pdfs/{slug}.pdf)' if pdf else ''} |"
+            f"| {front['parse_status']} | {f'[PDF](../pdfs/{slug}.pdf)' if pdf else ''} |"
             + (f" {row['s_decision'] or ''} |" if screened else "")
         )
     for slug in previous - set(written.values()):
         (kb / f"{slug}.md").unlink(missing_ok=True)
         shutil.rmtree(root / "assets" / slug, ignore_errors=True)
-        (root / "pdfs" / f"{slug}.pdf").unlink(missing_ok=True)
+        (pdf_dir / f"{slug}.pdf").unlink(missing_ok=True)
+    _remove_pdfs(root / "pdfs", previous | set(written.values()))  # older exports kept PDFs in markdown/pdfs
     (root / "README.md").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
     (root / "manifest.json").write_text(
         json.dumps([{**{k: v for k, v in dict(r).items() if not k.startswith("s_")}, "slug": written[r["id"]]}
@@ -132,6 +148,24 @@ def export_markdown(
         encoding="utf-8",
     )
     return root, len(rows)
+
+
+def remove_export(folder: Path) -> None:
+    """Remove what export_markdown wrote into `folder`: its markdown folder and the PDFs it copied beside
+    it. Other files in `folder`, including the user's own files in its pdfs folder, are kept."""
+    root = folder / "markdown"
+    _remove_pdfs(folder / "pdfs", _previous_slugs(root / "manifest.json"))
+    shutil.rmtree(root, ignore_errors=True)
+
+
+def _remove_pdfs(pdf_dir: Path, slugs: set[str]) -> None:
+    """Delete the exported PDFs of these slugs, and the folder once it is empty."""
+    if not pdf_dir.is_dir():
+        return
+    for slug in slugs:
+        (pdf_dir / f"{slug}.pdf").unlink(missing_ok=True)
+    if not any(pdf_dir.iterdir()):
+        pdf_dir.rmdir()
 
 
 def _previous_slugs(manifest: Path) -> set[str]:

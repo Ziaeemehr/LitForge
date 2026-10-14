@@ -256,3 +256,33 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .scr-unclear { color: var(--muted); }
 .screen-actions .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
 #dbody .bad { color: var(--bad); }
+
+.modal {
+  width: min(820px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; border: 1px solid var(--line);
+  border-radius: var(--radius); background: var(--panel); color: var(--ink); box-shadow: var(--shadow);
+}
+.modal::backdrop { background: rgba(0,0,0,.35); }
+.modal .mhead { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; background: var(--panel); }
+.modal .mhead h2 { margin: 0; font-size: 16px; flex: 1; min-width: 0; }
+.modal .mhead select { width: auto; flex: none; }
+.modal .row .why { font-size: 12px; margin-top: 3px; color: var(--bad); }
+.modal .row .why.ok { color: var(--good); }
+.modal > .hint { margin: 10px 16px; }
+.modal .rows .row { cursor: default; }
+.modal .links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; font-size: 13px; }
+.modal .empty { padding: 16px; color: var(--muted); }
+.modal .mail { margin: 0 16px 10px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); font-size: 13px; }
+.modal .mail input { width: min(260px, 100%); margin: 6px 6px 0 0; }
+.modal .mactions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 16px 10px; }
+.modal .mactions .hint { margin: 0; }
+.modal .report { margin: 0 16px 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+.modal .report h3 { margin: 0 0 6px; font-size: 14px; }
+.modal .report p { margin: 4px 0; }
+.modal .report code { font-size: 12px; overflow-wrap: anywhere; }
+.modal .report ul { margin: 4px 0 8px; padding-left: 18px; }
+.modal .report li { margin: 3px 0; }
+.modal .report .ok { color: var(--good); }
+.modal .report .no { color: var(--bad); }
+.modal .report .warn { color: var(--warn); }
+#added .report { margin-top: 12px; border: 0; }

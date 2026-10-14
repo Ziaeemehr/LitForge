@@ -83,7 +83,7 @@ class HttpClient:
             return None
         # Secrets in query strings must not end up in cache keys on disk.
         parsed = urllib.parse.urlsplit(url)
-        query = [(k, v) for k, v in urllib.parse.parse_qsl(parsed.query) if k not in ("api_key", "mailto")]
+        query = [(k, v) for k, v in urllib.parse.parse_qsl(parsed.query) if k not in ("api_key", "mailto", "email")]
         key = urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(sorted(query))))
         digest = hashlib.sha256(key.encode()).hexdigest()
         return self.cache_dir / parsed.netloc / f"{digest}.json"

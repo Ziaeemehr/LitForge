@@ -12,7 +12,7 @@
     mode: 'similar', projects: [], project: store.get('project', null), runId: null, data: null,
     filter: '', oa: false, onlyNew: false, hide: false, channel: null, sort: store.get('sort', 'score'),
     screenFilter: '', criteria: null, criteriaFor: null, criteriaLoading: null,
-    sel: -1, view: [], page: 'new', pdf: null, list: null, pdfs: [], job: null, anchor: -1, exportsRoot: '', dirEdited: false
+    sel: -1, view: [], page: 'new', pdf: null, list: null, pdfs: [], missing: [], fetchReasons: {}, job: null, anchor: -1, exportsRoot: '', dirEdited: false
   };
 
   var CHANNEL_LABEL = {
@@ -150,12 +150,169 @@
     $('delete-project').onclick = function (e) { e.preventDefault(); deleteProject(p); };
   }
 
+  // Papers without a PDF: their notes hold only the abstract, so list where to get each one by hand.
+  // Unpaywall finds many more open-access copies, but needs the user's e-mail: ask for it here, where it helps.
+  function showMail(mailto) {
+    var el = $('missing-mail');
+    el.innerHTML = mailto
+      ? 'Also searching Unpaywall with your e-mail <b>' + esc(mailto) + '</b> · <a href="#" id="mail-edit">change</a>'
+      : 'LitForge can find more open-access copies through <b>Unpaywall</b>, which asks for your e-mail with each ' +
+        'request (no account; it is also sent to OpenAlex and Crossref, and saved only on this computer).<br>' +
+        '<input type="email" id="mail-input" placeholder="you@university.edu"><button class="btn small" id="mail-save">Save</button>';
+    if (mailto) {
+      $('mail-edit').onclick = function (e) {
+        e.preventDefault();
+        showMail(null);
+        $('mail-input').value = mailto;
+        $('mail-input').focus();
+      };
+      return;
+    }
+    $('mail-save').onclick = function () {
+      post('/api/settings', { mailto: $('mail-input').value }).then(function (r) {
+        showMail(r.mailto);
+        toast(r.mailto ? 'Saved; press "Search for these PDFs again"' : 'E-mail removed');
+      }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  function fetchMissing() {
+    var ids = state.missing.map(function (p) { return p.id; });
+    if (!ids.length) return;
+    $('missing-fetch').disabled = true;
+    post('/api/fetch', { project: state.project, paper_ids: ids }).then(function (job) {
+      (function check() {
+        api('/api/jobs/' + job.id).then(function (j) {
+          $('missing-status').textContent = j.messages.length ? j.messages[j.messages.length - 1] : 'Searching…';
+          if (j.status === 'running') { setTimeout(check, 1000); return; }
+          $('missing-fetch').disabled = false;
+          $('missing-status').textContent = j.status === 'done' ? '' : 'Failed: ' + j.error;
+          if (j.report) showFetchReport(j.report);
+          showMissing();
+          if (state.runId && state.page === 'results') loadRun(state.runId);  // refresh the PDF badges
+        }).catch(function (e) { $('missing-fetch').disabled = false; toast(e.message); });
+      })();
+    }).catch(function (e) { $('missing-fetch').disabled = false; toast(e.message); });
+  }
+
+  // What the search did, and where the downloaded files are; each paper's reason shows under its title.
+  function showFetchReport(r) {
+    state.fetchReasons = {};
+    r.items.forEach(function (i) { state.fetchReasons[i.paper_id] = i; });
+    var got = r.items.filter(function (i) { return i.outcome === 'downloaded'; });
+    var left = r.candidates - got.length;
+    var html = '<h3>Downloaded ' + got.length + ' of ' + r.candidates + ' papers</h3>';
+    if (got.length) {
+      html += '<p>' + got.map(function (i) {
+        return '✓ ' + esc(i.title || '(no title)') + ' · <a target="_blank" rel="noopener" href="/api/papers/' +
+          esc(i.paper_id) + '/pdf">open PDF</a>';
+      }).join('<br>') + '</p><p>Saved in the library (<code>' + esc(r.library) + '</code>) with their full text. ' +
+        'Export copies them to <code>' + esc(r.export_dir) + '/pdfs</code> and rewrites their notes in <code>' +
+        esc(r.export_dir) + '/markdown</code>. <button class="btn small" id="report-export">Export now</button> ' +
+        '<button class="btn small" data-open-exports>Open export folder</button></p>';
+    }
+    html += left ? '<p>The ' + left + ' paper' + (left === 1 ? '' : 's') + ' below still need' + (left === 1 ? 's' : '') +
+      ' a PDF; under each title is why it could not be downloaded. Get them in your browser, then add them with ' +
+      '+ New → My PDFs.</p>' : '<p>Every listed paper now has its PDF.</p>';
+    $('missing-report').innerHTML = html;
+    $('missing-report').hidden = false;
+    if ($('report-export')) $('report-export').onclick = function () { $('missing').close(); $('btn-export').click(); };
+    wireOpenExports($('missing-report'));
+  }
+
+  // After adding PDFs: which paper each file went to, whether its text was extracted, and where files are kept.
+  function showAddReport(r) {
+    var LABEL = {
+      attached: ['ok', '✓', 'attached to'], new_paper: ['warn', '+', 'not matched to a paper of the project; added as a new paper:'],
+      already: ['ok', '=', 'already in the library, for'], failed: ['no', '✗', 'not added:']
+    };
+    var count = function (o) { return r.items.filter(function (i) { return i.outcome === o; }).length; };
+    $('added-title').textContent = r.items.length + ' PDF' + (r.items.length === 1 ? '' : 's') + ' processed: ' +
+      count('attached') + ' attached, ' + count('new_paper') + ' new, ' + count('already') + ' already there, ' +
+      count('failed') + ' failed';
+    var html = '<ul>' + r.items.map(function (i) {
+      var l = LABEL[i.outcome];
+      var what = i.outcome === 'failed' ? esc(i.reason) : '<b>' + esc(i.title || '(no title)') + '</b>' +
+        (i.full_text ? ' · full text extracted' : ' · <span class="no">text not extracted</span>') +
+        ' · <a target="_blank" rel="noopener" href="/api/papers/' + esc(i.paper_id) + '/pdf">open PDF</a>';
+      return '<li><span class="' + l[0] + '">' + l[1] + '</span> <code>' + esc(i.file) + '</code> ' + l[2] + ' ' + what + '</li>';
+    }).join('') + '</ul>';
+    if (count('new_paper')) {
+      html += '<p class="hint">A PDF is matched by the DOI or title printed in it. One added as a new paper may be a ' +
+        'paper you were missing whose PDF does not show these clearly; it is still in the project and gets its own note.</p>';
+    }
+    html += '<p>The library keeps a copy of each file in <code>' + esc(r.library) + '</code> (your originals are not ' +
+      'moved). Export copies them to <code>' + esc(r.export_dir) + '/pdfs</code> and writes the notes, now with the full ' +
+      'text, to <code>' + esc(r.export_dir) + '/markdown</code>. <button class="btn small" id="added-export">Export now</button> ' +
+      '<button class="btn small" data-open-exports>Open export folder</button></p>';
+    $('added-report').innerHTML = html;
+    $('added').showModal();
+    $('added-export').onclick = function () { $('added').close(); $('btn-export').click(); };
+    wireOpenExports($('added-report'));
+  }
+
+  // After "better math": how many pages of each paper the vision model rewrote, and where the notes are.
+  function showVisionReport(r, done) {
+    var v = r.vision;
+    $('added-title').textContent = 'Better math (' + (v.level || 'high') + '): ' + v.pages_improved + ' pages rewritten in ' +
+      v.papers + ' papers';
+    var html = '<ul>' + v.items.map(function (i) {
+      var what = !i.pages ? 'no page needed it' : i.improved + ' of ' + i.pages + ' pages rewritten' +
+        (i.rejected ? ' · <span class="warn">' + i.rejected + ' kept as extracted (the transcription did not match the page)</span>' : '');
+      return '<li><span class="' + (i.rejected ? 'warn' : 'ok') + '">' + (i.rejected ? '~' : '✓') + '</span> <b>' +
+        esc(i.title) + '</b> — ' + what + '</li>';
+    }).join('') + '</ul>';
+    html += '<p>' + esc(done.replace(/^done: /, '')) + '. ' + (v.level === 'medium'
+      ? 'On the rewritten pages every formula Pix2Text found is LaTeX ($…$ inline, $$…$$ displayed); the text is as extracted. '
+      : 'Pages the model rewrote have equations in LaTeX ($$…$$) and tables as Markdown tables. ') +
+      'Each note says in its "math" field (raw, medium or high) how far to trust its equations. The result is kept, so ' +
+      'the next export is fast. <button class="btn small" data-open-exports>Open export folder</button></p>';
+    $('added-report').innerHTML = html;
+    $('added').showModal();
+    wireOpenExports($('added-report'));
+  }
+
+  function wireOpenExports(el) {
+    el.querySelectorAll('[data-open-exports]').forEach(function (b) {
+      b.onclick = function () {
+        post('/api/open-exports', { project: state.project }).catch(function (err) { toast(err.message); });
+      };
+    });
+  }
+
+  function showMissing() {
+    if (!state.project) { toast('No project yet'); return; }
+    var scope = $('missing-scope').value, el = $('missing-list');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    if (!$('missing').open) $('missing').showModal();
+    api('/api/missing-pdfs?project=' + encodeURIComponent(state.project) + '&only=' + scope).then(function (list) {
+      $('missing').querySelector('h2').textContent = list.length + ' paper' + (list.length === 1 ? '' : 's') +
+        ' without a PDF in ' + state.project;
+      state.missing = list;
+      $('missing-fetch').hidden = !list.length;
+      if (!list.length) { el.innerHTML = '<div class="empty">Every paper here has its PDF.</div>'; return; }
+      el.innerHTML = list.map(function (p) {
+        var meta = [p.year, p.venue, p.authors.join(', ')].filter(Boolean).map(esc).join(' · ');
+        var links = [];
+        if (p.oa_url) links.push('<a target="_blank" rel="noopener" href="' + esc(p.oa_url) + '">Open-access copy</a>');
+        if (p.arxiv_id) links.push('<a target="_blank" rel="noopener" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '">arXiv</a>');
+        if (p.doi) links.push('<a target="_blank" rel="noopener" href="https://doi.org/' + esc(p.doi) + '">Publisher (DOI)</a>');
+        links.push('<a target="_blank" rel="noopener" href="https://scholar.google.com/scholar?q=' +
+          encodeURIComponent(p.title || p.doi || '') + '">Google Scholar</a>');
+        var why = state.fetchReasons[p.id];
+        return '<div class="row"><div><div class="title">' + (p.mark === 'relevant' ? '✓ ' : '') + esc(p.title || '(no title)') +
+          '</div><div class="meta">' + meta + '</div>' + (why ? '<div class="why">Not downloaded: ' + esc(why.reason) + '</div>' : '') +
+          '<div class="links">' + links.join('') + '</div></div></div>';
+      }).join('');
+    }).catch(function (e) { el.innerHTML = ''; toast(e.message); });
+  }
+
   function deleteProject(p) {
     var typed = window.prompt('Delete project "' + p.name + '" with its ' + p.papers + ' papers list, runs and marks?\n' +
       'Papers and PDFs stay in the library.\nType the project name to confirm:');
     if (typed === null) return;
     if (typed.trim() !== p.name) { toast('Name did not match; nothing deleted'); return; }
-    var dropExports = window.confirm('Also delete its exports (the notes and PDFs in ' + p.export_dir + '/markdown)?\n\n' +
+    var dropExports = window.confirm('Also delete its exports (the markdown and pdfs folders in ' + p.export_dir + ')?\n\n' +
       'OK = delete them too · Cancel = keep them');
     post('/api/delete-project', { project: p.name, delete_exports: dropExports }).then(function (r) {
       toast('Deleted ' + p.name + (r.kept_exports ? '; exports kept in ' + r.kept_exports : ''));
@@ -651,6 +808,8 @@
         setBusy(false);
         if (j.status === 'failed') { logLine(j.error, 'err'); toast({ export: 'Export failed', pdfs: 'Adding PDFs failed', screen: 'Screening failed' }[j.kind] || 'Search failed'); return; }
         if (j.kind === 'export') toast(j.messages[j.messages.length - 1].replace(/^done: /, ''));
+        if (j.kind === 'pdfs' && j.report) showAddReport(j.report);
+        if (j.kind === 'export' && j.report && j.report.vision) showVisionReport(j.report, j.messages[j.messages.length - 1]);
         state.project = j.project;
         store.set('project', j.project);
         state.runId = null;
@@ -880,10 +1039,32 @@
       this.classList.toggle('on', state.libraryPdf);
       renderLibrary();
     };
+    $('btn-missing').onclick = function () {
+      var scope = $('export-scope').value;  // start from what export would cover
+      $('missing-scope').value = scope === 'visible' ? 'all' : scope;
+      $('missing-status').textContent = '';
+      $('missing-report').hidden = true;
+      state.fetchReasons = {};
+      showMissing();
+      api('/api/settings').then(function (s) { showMail(s.mailto); }).catch(function () { showMail(null); });
+    };
+    $('missing-fetch').onclick = fetchMissing;
+    $('added-close').onclick = function () { $('added').close(); };
+    $('missing-scope').onchange = showMissing;
+    $('missing-close').onclick = function () { $('missing').close(); };
+    $('missing').onclick = function (e) { if (e.target === this) this.close(); };  // click outside
+    $('missing-add').onclick = function (e) {
+      e.preventDefault();
+      $('missing').close();
+      newSearch();
+      setMode('pdfs');
+    };
     $('export-scope').value = store.get('export-scope', 'all');
     $('export-scope').onchange = function () { store.set('export-scope', this.value); };
     $('export-fetch').checked = store.get('export-fetch', false);
     $('export-fetch').onchange = function () { store.set('export-fetch', this.checked); };
+    $('export-math').value = store.get('export-math', store.get('export-vision', false) ? 'high' : 'off');
+    $('export-math').onchange = function () { store.set('export-math', this.value); };
     $('btn-export').onclick = function () {
       if (!state.project) { toast('No project yet'); return; }
       var scope = $('export-scope').value, body = { project: state.project };
@@ -894,9 +1075,10 @@
       } else {
         body.only = scope;
       }
-      if ($('export-fetch').checked) {  // download missing PDFs first: a background job, like a search
+      var math = $('export-math').value;
+      if ($('export-fetch').checked || math !== 'off') {  // slow steps first: a background job
         setBusy(true);
-        post('/api/export', Object.assign(body, { fetch: true, run_id: state.runId }))
+        post('/api/export', Object.assign(body, { fetch: $('export-fetch').checked, math: math, run_id: state.runId }))
           .then(poll).catch(function (e) { setBusy(false); toast(e.message); });
         return;
       }
@@ -974,7 +1156,16 @@
       }
     });
 
-    api('/api/info').then(function (info) { state.exportsRoot = info.exports_root; })
+    api('/api/info').then(function (info) {
+      state.exportsRoot = info.exports_root;
+      var medium = $('export-math').querySelector('option[value="medium"]');
+      if (info.math && !info.math.medium) {  // Pix2Text is an optional install
+        medium.disabled = true;
+        medium.textContent = 'Math: medium (install Pix2Text)';
+        medium.title = 'Run `uv sync --extra formulas-gpu` (NVIDIA GPU) or `uv sync --extra formulas` (CPU), then restart';
+        if ($('export-math').value === 'medium') $('export-math').value = 'off';
+      }
+    })
       .catch(function () { /* older server: the field just starts empty */ })
       .then(loadProjects).catch(function (e) { toast(e.message); });
   }

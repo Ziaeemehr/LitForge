@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from discovery_fakes import ARXIV_FEED, FRONTIER_CROSSREF, FRONTIER_OA, FakeTransport, ok
 
-from litforge.discovery.fetch import candidate_urls, citation_pdf_url
+from litforge.discovery.fetch import candidate_urls, citation_pdf_url, plain_reason, unpaywall_locations
 from litforge.discovery.http import BudgetExhausted, HttpClient
 from litforge.discovery.importers import parse_bibtex, parse_csv, parse_ris
 from litforge.discovery.rank import lexical_score, rank, terms
@@ -134,3 +134,26 @@ def test_fetch_candidate_urls_and_landing_page_link() -> None:
     page = b'<meta name="citation_pdf_url" content="/content/1.full.pdf">'
     assert citation_pdf_url(page, "https://pub.example/a/b") == "https://pub.example/content/1.full.pdf"
     assert citation_pdf_url(b"<meta name='description' content='x'>", "https://pub.example") is None
+
+
+def test_unpaywall_locations_need_an_email() -> None:
+    payload = {"oa_locations": [
+        {"host_type": "publisher", "url_for_pdf": "https://pub.example/a.pdf", "url": "https://pub.example/a"},
+        {"host_type": "repository", "url_for_pdf": None, "url": "https://repo.example/r"},
+        {"host_type": "repository", "url_for_pdf": "https://repo.example/r.pdf", "url": "https://repo.example/r"},
+    ]}
+    transport = FakeTransport([("api.unpaywall.org/v2/10.1/x?email=me%40uni.edu", ok(payload))])
+    http = HttpClient(transport=transport, sleep=lambda s: None, min_interval={})
+    assert unpaywall_locations(http, "10.1/x", "me@uni.edu") == (
+        ["https://repo.example/r.pdf", "https://repo.example/r"], ["https://pub.example/a.pdf"])
+    assert unpaywall_locations(http, "10.1/x", None) == ([], []) and len(transport.calls) == 1
+    assert unpaywall_locations(http, None, "me@uni.edu") == ([], [])
+    assert unpaywall_locations(http, "10.1/missing", "me@uni.edu") == ([], [])  # 404: just fewer candidates
+
+
+def test_plain_reason_explains_download_failures() -> None:
+    assert plain_reason(["www.jneurosci.org: HTTP 403"]) == "the site blocks automatic downloads"
+    assert plain_reason(["infoscience.epfl.ch: HTTP 202"]) == "the site asks for a human check first"
+    assert plain_reason(["a.org: not a PDF and no PDF link on the page"]) == "the page has no direct PDF link"
+    assert plain_reason(["a.org: HTTP 404", "b.org: HTTP 403"]) == "the site blocks automatic downloads"
+    assert plain_reason(["a.org: timed out"]) == "a.org: timed out"

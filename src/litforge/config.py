@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +63,16 @@ class ScreeningConfig(BaseModel):
     timeout_s: float = 120
 
 
+class VisionConfig(BaseModel):
+    """Local vision model (Ollama) that rewrites pages with equations, tables or broken text as Markdown with
+    LaTeX. qwen2.5vl:7b needs about 6 GB of GPU memory; pull with `ollama pull qwen2.5vl:7b`."""
+
+    model: str = "qwen2.5vl:7b"
+    dpi: int = 150  # page image resolution sent to the model
+    formula_dpi: int = 150  # page image resolution for Pix2Text (medium level)
+    timeout_s: float = 300
+
+
 class PrivacyConfig(BaseModel):
     allow_cloud: bool = False
 
@@ -71,6 +83,7 @@ class Config(BaseModel):
     discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
     similar: SimilarConfig = Field(default_factory=SimilarConfig)
     screening: ScreeningConfig = Field(default_factory=ScreeningConfig)
+    vision: VisionConfig = Field(default_factory=VisionConfig)
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
 
 
@@ -135,6 +148,10 @@ class Paths:
     def project_dir(self, name: str) -> Path:
         return self.projects / name
 
+    @property
+    def settings(self) -> Path:
+        return self.root / "settings.json"
+
     def ensure(self) -> None:
         for d in (self.library, self.pdfs, self.parsed, self.projects, self.logs):
             d.mkdir(parents=True, exist_ok=True)
@@ -163,3 +180,29 @@ def load_config(path: Path | None = None) -> Config:
 
 def resolve_paths(data_dir: Path | None = None) -> Paths:
     return Paths(data_dir if data_dir is not None else EnvSettings().home)
+
+
+def load_settings(paths: Paths) -> dict[str, Any]:
+    """Settings chosen in the web UI (data/settings.json); empty when none were saved."""
+    try:
+        data = json.loads(paths.settings.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_mailto(paths: Paths, mailto: str | None) -> str | None:
+    """Save the contact e-mail the user typed in ("" or None clears it); returns the saved value."""
+    mailto = (mailto or "").strip() or None
+    if mailto and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", mailto):
+        raise ValueError("not an e-mail address")
+    settings = {**load_settings(paths), "mailto": mailto}
+    paths.settings.parent.mkdir(parents=True, exist_ok=True)
+    paths.settings.write_text(json.dumps(settings, indent=1) + "\n", encoding="utf-8")
+    return mailto
+
+
+def contact_email(paths: Paths, config: Config) -> str | None:
+    """The user's contact e-mail for OpenAlex/Crossref polite pools and Unpaywall, which requires one.
+    Only ever one the user gave: LITFORGE_MAILTO, the web UI setting, or discovery.mailto in the config."""
+    return EnvSettings().mailto or load_settings(paths).get("mailto") or config.discovery.mailto

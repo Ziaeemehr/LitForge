@@ -35,6 +35,12 @@
       <option value="visible">Visible list</option>
     </select>
     <label class="check" id="fetch-wrap" title="Before exporting, download open-access PDFs (arXiv, publisher copies) of the chosen papers that have none, so their notes contain the full text"><input type="checkbox" id="export-fetch"> with PDFs</label>
+    <select id="export-math" title="Better math: how the pages with equations, tables or broken text are rewritten before exporting. Results are kept, so raising the level later only processes what is new.">
+      <option value="off" title="The text extracted from the PDF; equations often come out garbled">Math: as extracted</option>
+      <option value="medium" title="Pix2Text reads every formula as LaTeX; the text stays as extracted from the PDF. About 1-5 s per page">Math: medium (fast)</option>
+      <option value="high" title="A local vision model (Ollama) rewrites whole pages: formulas, tables and text, also in scanned papers. About 12 s per page on the GPU">Math: high (best)</option>
+    </select>
+    <button class="btn" id="btn-missing" title="Papers of this project that have no PDF yet, with links to get them by hand">Missing PDFs</button>
     <button class="btn" id="btn-export" title="Write Markdown notes to the project's output folder">Export Markdown</button>
   </div>
 </header>
@@ -204,6 +210,31 @@
   <div class="dhead" id="dhead"></div>
   <div class="dbody" id="dbody"></div>
 </section>
+<dialog class="modal" id="missing">
+  <div class="mhead">
+    <h2>Papers without a PDF</h2>
+    <select id="missing-scope" title="Which papers to list">
+      <option value="all">All papers</option>
+      <option value="relevant">Marked ✓ only</option>
+      <option value="not-irrelevant">All except ✗</option>
+    </select>
+    <button class="btn small ghost" id="missing-close" title="Close">✕</button>
+  </div>
+  <p class="hint">Their notes hold only the abstract. Open a link, download the PDF in your browser, then add the
+    files with <a href="#" id="missing-add">+ New → My PDFs</a>: each one is matched to its paper, and the next export
+    has the full text.</p>
+  <div class="mail" id="missing-mail"></div>
+  <div class="mactions">
+    <button class="btn small" id="missing-fetch">Search for these PDFs again</button>
+    <span class="hint" id="missing-status"></span>
+  </div>
+  <div class="report" id="missing-report" hidden></div>
+  <div class="rows" id="missing-list"></div>
+</dialog>
+<dialog class="modal" id="added">
+  <div class="mhead"><h2 id="added-title"></h2><button class="btn small ghost" id="added-close" title="Close">✕</button></div>
+  <div class="report" id="added-report"></div>
+</dialog>
 <div class="toast" id="toast"></div>
 
 <script src="/static/vendor/marked.min.js"></script>

@@ -12,7 +12,7 @@ from typing import Annotated, Any
 import typer
 from pydantic import BaseModel
 
-from litforge.config import Config, EnvSettings, Paths, load_config, resolve_paths
+from litforge.config import Config, EnvSettings, Paths, contact_email, load_config, resolve_paths
 from litforge.discovery.fetch import fetch_open_access
 from litforge.discovery.http import HttpClient
 from litforge.discovery.run import DiscoveryReport, Sources, enrich_project, run_citations, run_import, run_search
@@ -377,7 +377,7 @@ def _sources(st: State, refresh: bool) -> Sources:
     env = EnvSettings()
     http = HttpClient(cache_dir=st.paths.http_cache, cache_ttl_s=st.config.discovery.cache_ttl_days * 86400,
                       refresh=refresh)
-    return Sources(http, env.openalex_api_key, env.mailto or st.config.discovery.mailto)
+    return Sources(http, env.openalex_api_key, contact_email(st.paths, st.config))
 
 
 def _print_report(report: DiscoveryReport) -> None:
@@ -574,11 +574,57 @@ def fetch(
 
 def _fetch(st: State, conn: sqlite3.Connection, pid: str, only: str) -> None:
     report = fetch_open_access(conn, st.paths, st.config, HttpClient(), pid, only, log=st.log,
-                               progress=typer.echo)
+                               progress=typer.echo, mailto=contact_email(st.paths, st.config))
     typer.echo(f"downloaded {report.downloaded} of {report.candidates} papers without a PDF, "
                f"{report.parsed} with full text; {report.no_source} have no open-access copy")
     for err in report.failed:
         typer.secho(f"  failed: {err}", fg="yellow")
+
+
+@app.command()
+def enhance(
+    ctx: typer.Context,
+    project: ProjectOpt = None,
+    only: Annotated[
+        str, typer.Option("--only", help="Which papers: relevant (marked ✓), not-irrelevant (all but ✗) or all")
+    ] = "relevant",
+    level: Annotated[str, typer.Option(
+        "--level", help="medium: Pix2Text reads the formulas, text from the PDF (fast; GPU if installed). "
+                        "high: the local vision model rewrites whole pages (best; also fixes scanned text)")] = "high",
+) -> None:
+    """Better math: rewrite pages with equations, tables or broken text (the next export uses them)."""
+    import os
+
+    from litforge.parsing.formulas import FormulaEngine, Pix2TextEngine
+    from litforge.parsing.vision import OllamaVision, Vision, enhance_project
+    from litforge.screening.llm import LlmError
+
+    st = _state(ctx)
+    conn = st.db()
+    _, pid = _project(st, conn, project, required=True)
+    assert pid is not None
+    if only not in MARK_SCOPES:
+        typer.secho(f"--only must be one of: {', '.join(MARK_SCOPES)}", fg="red", err=True)
+        raise typer.Exit(2)
+    if level not in ("medium", "high"):
+        typer.secho("--level must be medium or high", fg="red", err=True)
+        raise typer.Exit(2)
+    try:
+        engine: Vision | FormulaEngine
+        if level == "medium":
+            engine = Pix2TextEngine()
+            typer.echo(f"Pix2Text on the {engine.device.upper()}")
+        else:
+            engine = OllamaVision(os.environ.get("LITFORGE_OLLAMA_URL") or st.config.screening.ollama_url,
+                                  st.config.vision)
+            engine.check()
+        report = enhance_project(conn, st.paths, st.config, pid, engine, only, log=st.log, progress=typer.echo)
+    except (LlmError, RuntimeError) as exc:
+        typer.secho(str(exc), fg="red", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"{report.pages_improved} pages rewritten in {report.papers} papers"
+               + (f"; {report.pages_rejected} kept as extracted (did not match the page)" if report.pages_rejected
+                  else "") + ". Run `litforge export` to write the notes.")
 
 
 @app.command()

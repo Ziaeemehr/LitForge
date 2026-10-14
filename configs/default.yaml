@@ -44,5 +44,14 @@ screening:
   default_top: 100                     # papers of a run screened when no count is given
   timeout_s: 120
 
+vision:
+  # Local vision model (Ollama) that rewrites pages with equations, tables or broken text as Markdown
+  # with LaTeX; the parser's text is kept for any page whose transcription does not match it.
+  # qwen2.5vl:7b needs about 6 GB of GPU memory. Pull with `ollama pull qwen2.5vl:7b`.
+  model: qwen2.5vl:7b
+  dpi: 150
+  formula_dpi: 150   # medium level (Pix2Text, CPU): formulas only, text from the PDF
+  timeout_s: 300
+
 privacy:
   allow_cloud: false
