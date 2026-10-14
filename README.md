@@ -38,6 +38,21 @@ uv run litforge enrich                               # fill in missing DOI, year
 uv run litforge papers --no-pdf                      # ranked list of papers still missing a PDF
 ```
 
+### Papers similar to a paper you have
+
+```bash
+uv run litforge similar 10.7554/eLife.56261           # by DOI (or arXiv id, or a PDF file)
+uv run litforge similar --abstract-file abstract.txt  # from an abstract only
+```
+
+Candidates come from the seed's references, papers citing it, OpenAlex related works and
+searches built from its key phrases (for an abstract-only seed, also the citations of the closest
+matches). They are ranked by text similarity, shared references and citation links, and each
+result says why it was found. Meaning-based similarity uses a small embedding model that runs on
+a laptop CPU (`uv sync --extra embed`; downloaded once to `data/cache/models`). On a GPU machine
+set `similar.embedding_model` (e.g. `BAAI/bge-large-en-v1.5`) and `embedding_device: cuda` in the
+config.
+
 Results from all sources are merged (by DOI, arXiv id, OpenAlex id, then title and year),
 ranked by relevance, and added to the active project. Every run is recorded together with why
 each paper was found. When you later `add` the PDF of a discovered paper, it is attached to the

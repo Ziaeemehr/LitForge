@@ -20,6 +20,8 @@ FRONTIER_OA = {
     "best_oa_location": {"landing_page_url": "https://arxiv.org/abs/1911.01429", "pdf_url": "https://arxiv.org/pdf/1911.01429"},
     "open_access": {"oa_url": "https://arxiv.org/pdf/1911.01429"},
     "abstract_inverted_index": {"Many": [0], "domains": [1], "use": [2], "simulators": [3]},
+    "referenced_works": ["https://openalex.org/WR1", "https://openalex.org/WR2", "https://openalex.org/WR3"],
+    "related_works": ["https://openalex.org/W2945000001"],
 }
 APT_OA = {
     "id": "https://openalex.org/W2945000001",
@@ -31,6 +33,7 @@ APT_OA = {
     "primary_location": {"landing_page_url": "https://arxiv.org/abs/1905.07488", "source": {"display_name": "ICML"}},
     "best_oa_location": None,
     "abstract_inverted_index": {"simulation": [0], "inference": [1]},
+    "referenced_works": ["https://openalex.org/WR1", "https://openalex.org/WR2"],
 }
 CITING_OA = {
     "id": "https://openalex.org/W3000000003",
@@ -40,6 +43,7 @@ CITING_OA = {
     "cited_by_count": 12,
     "authorships": [],
     "primary_location": {"source": {"display_name": "NeuroImage"}},
+    "referenced_works": ["https://openalex.org/W2984417636", "https://openalex.org/WR3"],
 }
 FRONTIER_CROSSREF = {
     "DOI": "10.1073/PNAS.1912789117",
@@ -103,6 +107,9 @@ def default_routes() -> list[tuple[str, Response]]:
     return [
         ("filter=cited_by:W2984417636", ok({"results": [APT_OA]}, cost)),
         ("filter=cites:W2984417636", ok({"results": [CITING_OA]}, cost)),
+        ("filter=ids.openalex:", ok({"results": [APT_OA]}, cost)),
+        ("filter=cited_by:", ok({"results": []}, cost)),  # other works: no data, like the real API
+        ("filter=cites:", ok({"results": [CITING_OA]}, cost)),
         ("works/doi:10.1073/pnas.1912789117", ok(FRONTIER_OA)),
         ("works/doi:10.48550/arXiv.1905.07488", ok(APT_OA)),
         ("api.openalex.org/works?", ok({"results": [FRONTIER_OA, APT_OA]}, cost)),

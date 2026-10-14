@@ -44,6 +44,15 @@ class DiscoveryConfig(BaseModel):
     mailto: str | None = None  # optional contact for API "polite pools"; never filled in automatically
 
 
+class SimilarConfig(BaseModel):
+    # Small CPU-friendly default (runs on a laptop). On a GPU machine try e.g. BAAI/bge-large-en-v1.5
+    # with embedding_device: cuda (requires the fastembed-gpu package). null disables embeddings.
+    embedding_model: str | None = "BAAI/bge-small-en-v1.5"
+    embedding_device: str = "cpu"  # cpu | cuda
+    per_channel_limit: int = 50  # max papers fetched per channel (references, citing, keywords ...)
+    keyword_queries: int = 3
+
+
 class PrivacyConfig(BaseModel):
     allow_cloud: bool = False
 
@@ -52,6 +61,7 @@ class Config(BaseModel):
     parsing: ParsingConfig = Field(default_factory=ParsingConfig)
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
     discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
+    similar: SimilarConfig = Field(default_factory=SimilarConfig)
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
 
 
@@ -93,6 +103,10 @@ class Paths:
     @property
     def logs(self) -> Path:
         return self.root / "logs"
+
+    @property
+    def model_cache(self) -> Path:
+        return self.root / "cache" / "models"
 
     @property
     def http_cache(self) -> Path:

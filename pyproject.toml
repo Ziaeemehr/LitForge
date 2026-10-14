@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 docling = ["docling>=2.0"]
+embed = ["fastembed>=0.4"]
 
 [project.scripts]
 litforge = "litforge.cli:app"

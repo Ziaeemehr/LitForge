@@ -27,5 +27,14 @@ discovery:
   cache_ttl_days: 7    # API responses are cached under data/cache/http
   mailto: null         # optional contact e-mail sent to OpenAlex/Crossref ("polite pool")
 
+similar:
+  # Embedding model for meaning-based ranking (fastembed, ONNX). The default is small and runs on
+  # a laptop CPU. On a GPU machine: embedding_model: BAAI/bge-large-en-v1.5, embedding_device: cuda
+  # (install fastembed-gpu). Set embedding_model: null to rank by TF-IDF only.
+  embedding_model: BAAI/bge-small-en-v1.5
+  embedding_device: cpu
+  per_channel_limit: 50
+  keyword_queries: 3
+
 privacy:
   allow_cloud: false

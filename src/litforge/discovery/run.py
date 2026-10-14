@@ -40,6 +40,7 @@ class RankedPaper(BaseModel):
     new_to_project: bool
     has_pdf: bool
     oa_url: str | None
+    reasons: list[str] = []
 
 
 class DiscoveryReport(BaseModel):
@@ -112,24 +113,40 @@ class _Run:
         self.report.hits += len(records)
         return ids
 
-    def finish(self, http: HttpClient | None, top_n: int) -> DiscoveryReport:
+    def finish(
+        self,
+        http: HttpClient | None,
+        top_n: int,
+        scores: dict[str, float] | None = None,
+        reasons: dict[str, list[str]] | None = None,
+        components: dict[str, dict[str, float]] | None = None,
+    ) -> DiscoveryReport:
+        """Persist the ranking (default: lexical + RRF; callers may pass their own scores)."""
+        wanted = sorted({h[0] for h in self.hits} | set(scores or {}))
         rows = {r["id"]: r for r in self.conn.execute(
             f"""SELECT p.id, p.title, p.abstract, p.year, p.venue, p.doi, p.arxiv_id, p.oa_url,
                        EXISTS(SELECT 1 FROM artifacts a WHERE a.paper_id = p.id AND a.status = 'ok') AS has_pdf
-                FROM papers p WHERE p.id IN ({",".join("?" * len({h[0] for h in self.hits}))})""",
-            [*{h[0] for h in self.hits}],
-        )} if self.hits else {}
-        scores = rank(self.hits, {pid: (r["title"], r["abstract"]) for pid, r in rows.items()}, self.queries)
+                FROM papers p WHERE p.id IN ({",".join("?" * len(wanted))})""",
+            wanted,
+        )} if wanted else {}
+        if scores is None:
+            scores = rank(self.hits, {pid: (r["title"], r["abstract"]) for pid, r in rows.items()}, self.queries)
+        reasons = reasons or {}
+        components = components or {}
         sources: dict[str, set[str]] = {}
         for paper_id, source, _q, _pos in self.hits:
             sources.setdefault(paper_id, set()).add(source)
+        for paper_id in scores:
+            sources.setdefault(paper_id, set())
         report = self.report
         with transaction(self.conn):
             for paper_id, score in scores.items():
                 self.conn.execute(
-                    "INSERT INTO discovery_results(run_id, paper_id, score, n_hits, new_to_project) VALUES (?,?,?,?,?)",
+                    """INSERT INTO discovery_results(run_id, paper_id, score, n_hits, new_to_project, reasons_json,
+                       components_json) VALUES (?,?,?,?,?,?,?)""",
                     (report.run_id, paper_id, score, sum(1 for h in self.hits if h[0] == paper_id),
-                     int(paper_id in self.new_ids)),
+                     int(paper_id in self.new_ids), dumps(reasons.get(paper_id, [])),
+                     dumps(components.get(paper_id, {}))),
                 )
             report.papers = len(scores)
             report.new_to_project = len(self.new_ids)
@@ -146,7 +163,8 @@ class _Run:
             RankedPaper(paper_id=pid, title=rows[pid]["title"], year=rows[pid]["year"], venue=rows[pid]["venue"],
                         doi=rows[pid]["doi"], arxiv_id=rows[pid]["arxiv_id"], score=score,
                         sources=sorted(sources[pid]), new_to_project=pid in self.new_ids,
-                        has_pdf=bool(rows[pid]["has_pdf"]), oa_url=rows[pid]["oa_url"])
+                        has_pdf=bool(rows[pid]["has_pdf"]), oa_url=rows[pid]["oa_url"],
+                        reasons=reasons.get(pid, []))
             for pid, score in ordered[:top_n]
         ]
         return report
@@ -221,15 +239,19 @@ def run_citations(
                 run.error(f"{rel} of {seed}", exc)
                 continue
             ids = run.add(records, "openalex", rel, seed_paper_id=seed_id)
-            with transaction(conn):
-                for other in ids:
-                    citing, cited = (seed_id, other) if rel == "references" else (other, seed_id)
-                    conn.execute(
-                        "INSERT OR IGNORE INTO paper_relations(citing_id, cited_id, source, created_at)"
-                        " VALUES (?,?,?,?)",
-                        (citing, cited, "openalex", ts),
-                    )
+            record_relations(conn, seed_id, ids, rel, ts)
     return run.finish(sources.http, top_n)
+
+
+def record_relations(conn: sqlite3.Connection, seed_id: str, ids: list[str], rel: str, ts: str) -> None:
+    """rel='references': seed cites ids; rel='cited_by': ids cite seed."""
+    with transaction(conn):
+        for other in ids:
+            citing, cited = (seed_id, other) if rel == "references" else (other, seed_id)
+            conn.execute(
+                "INSERT OR IGNORE INTO paper_relations(citing_id, cited_id, source, created_at) VALUES (?,?,?,?)",
+                (citing, cited, "openalex", ts),
+            )
 
 
 def run_import(conn: sqlite3.Connection, project_id: str, path: Path, top_n: int = 20) -> DiscoveryReport:

@@ -24,7 +24,12 @@ ATOM = {"a": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/a
 _OPENALEX_SELECT = ",".join([
     "id", "doi", "title", "publication_year", "type", "cited_by_count", "authorships",
     "primary_location", "best_oa_location", "open_access", "abstract_inverted_index",
+    "referenced_works", "related_works",
 ])
+
+
+def _short_id(url: str) -> str:
+    return url.rsplit("/", 1)[-1]
 
 
 # Registry records that are not research papers.
@@ -113,6 +118,14 @@ class OpenAlex:
         """Works citing `openalex_id`, most cited first."""
         return self._list({"filter": f"cites:{openalex_id}", "sort": "cited_by_count:desc"}, limit)
 
+    def get_many(self, openalex_ids: list[str]) -> list[WorkRecord]:
+        """Fetch works by OpenAlex id, 50 per request (one cheap filter query each)."""
+        out: list[WorkRecord] = []
+        for i in range(0, len(openalex_ids), 50):
+            batch = openalex_ids[i : i + 50]
+            out += self._list({"filter": f"ids.openalex:{'|'.join(batch)}"}, len(batch))
+        return out
+
     def title_lookup(self, title: str, limit: int = 5) -> list[WorkRecord]:
         return self._list({"filter": f"title.search:{_clean_query(title)}"}, limit)
 
@@ -139,6 +152,8 @@ class OpenAlex:
             oa_url=best_oa.get("pdf_url") or best_oa.get("landing_page_url")
             or (work.get("open_access") or {}).get("oa_url"),
             work_type=work.get("type"),
+            references=[_short_id(u) for u in work.get("referenced_works") or []],
+            related=[_short_id(u) for u in work.get("related_works") or []],
         ).normalized()
 
 

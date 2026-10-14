@@ -44,6 +44,8 @@ class WorkRecord(BaseModel):
     cited_by_count: int | None = None
     oa_url: str | None = None
     work_type: str | None = None
+    references: list[str] = Field(default_factory=list)  # OpenAlex ids this work cites
+    related: list[str] = Field(default_factory=list)  # OpenAlex "related works" ids
 
     def normalized(self) -> WorkRecord:
         rec = self.model_copy()

@@ -15,6 +15,8 @@ from pydantic import BaseModel
 from litforge.config import Config, EnvSettings, Paths, load_config, resolve_paths
 from litforge.discovery.http import HttpClient
 from litforge.discovery.run import DiscoveryReport, Sources, enrich_project, run_citations, run_import, run_search
+from litforge.discovery.similar import run_similar
+from litforge.discovery.textsim import load_embedder
 from litforge.doctor import run_checks
 from litforge.export.markdown import export_markdown
 from litforge.indexing.fts import current_runs, index_run, search
@@ -354,6 +356,8 @@ def _print_report(report: DiscoveryReport) -> None:
         ident = p.doi or (f"arXiv:{p.arxiv_id}" if p.arxiv_id else "")
         typer.echo(f"{n:>3}. [{p.score:.2f}] {p.title or '(no title)'} ({p.year or '?'})")
         typer.echo(f"       {ident}  {'/'.join(p.sources)}  {flags}".rstrip())
+        if p.reasons:
+            typer.echo(f"       why: {'; '.join(p.reasons)}")
 
 
 @app.command()
@@ -397,6 +401,46 @@ def discover(
     for report in reports:
         typer.secho(f"{report.kind} in '{name}' ({report.status})", bold=True)
         _print_report(report)
+
+
+@app.command()
+def similar(
+    ctx: typer.Context,
+    seeds: Annotated[list[str] | None, typer.Argument(help="DOI, arXiv id, OpenAlex id, paper id or PDF file")] = None,
+    title: Annotated[str | None, typer.Option(help="Seed paper title")] = None,
+    abstract: Annotated[str | None, typer.Option(help="Seed abstract text")] = None,
+    abstract_file: Annotated[Path | None, typer.Option(help="Text file with the seed abstract", exists=True)] = None,
+    project: ProjectOpt = None,
+    top: Annotated[int, typer.Option(help="How many ranked results to show")] = 30,
+    no_embeddings: Annotated[bool, typer.Option("--no-embeddings", help="Rank by TF-IDF only")] = False,
+    refresh: Annotated[bool, typer.Option("--refresh", help="Ignore cached API responses")] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Find papers similar to seed papers (citations, related works, key phrases, text similarity)."""
+    st = _state(ctx)
+    conn = st.db()
+    if abstract_file is not None:
+        abstract = abstract_file.read_text(encoding="utf-8")
+    if not seeds and not title and not abstract:
+        typer.secho("give a seed (DOI, arXiv id, PDF ...) or --title/--abstract", fg="red", err=True)
+        raise typer.Exit(2)
+    if project is None and get_active(st.paths) is None:
+        _create(st, "default", None, None)
+    name, pid = _project(st, conn, project, required=True)
+    assert pid is not None
+    cfg = st.config.similar
+    embedder = None
+    if not no_embeddings and cfg.embedding_model:
+        embedder = load_embedder(cfg.embedding_model, st.paths.model_cache, cfg.embedding_device)
+        if embedder is None:
+            typer.secho("embeddings unavailable (install with `uv sync --extra embed`); using TF-IDF", fg="yellow")
+    report = run_similar(conn, st.paths, st.config, _sources(st, refresh), pid, seeds, title, abstract,
+                         embedder, top, st.log)
+    if as_json:
+        _emit_json([report])
+        return
+    typer.secho(f"similar papers in '{name}' ({report.status})", bold=True)
+    _print_report(report)
 
 
 @app.command("import")
