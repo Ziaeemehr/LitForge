@@ -11,6 +11,7 @@
   var state = {
     mode: 'similar', projects: [], project: store.get('project', null), runId: null, data: null,
     filter: '', oa: false, onlyNew: false, hide: false, channel: null, sort: store.get('sort', 'score'),
+    screenFilter: '', criteria: null, criteriaFor: null,
     sel: -1, view: [], page: 'new', pdf: null, list: null, pdfs: [], job: null, anchor: -1, exportsRoot: '', dirEdited: false
   };
 
@@ -48,6 +49,17 @@
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
+  }
+
+  var SCREEN_ORDER = { include: 0, uncertain: 1, exclude: 2 };
+  function screenRank(p) { return p.screening ? SCREEN_ORDER[p.screening.decision] : 3; }
+  function screenScore(p) { return p.screening ? p.screening.score : 0; }
+  function screenBadge(p) {
+    var s = p.screening;
+    if (!s) return '';
+    var tip = (s.stale ? 'Criteria changed since screening. ' : '') + (s.error ? 'Model error: ' + s.error : s.reason || '');
+    return '<span class="badge scr ' + esc(s.decision) + (s.stale ? ' stale' : '') + '" title="' + esc(tip) + '">' +
+      esc(s.decision) + ' ' + s.score.toFixed(2) + '</span>';
   }
 
   function projectName() { return ($('project-name').value || state.project || 'default').trim(); }
@@ -285,7 +297,8 @@
     var years = s.year_min ? (s.year_min === s.year_max ? s.year_min : s.year_min + '–' + s.year_max) : '–';
     var cards = [
       [s.papers, 'papers'], [s.new, 'new to project'], [s.high_impact, 'top-10% cited in field'],
-      [s.open_access, 'open access'], [years, 'years'], [s.relevant + ' / ' + s.irrelevant, 'marked ✓ / ✗']
+      [s.open_access, 'open access'], [years, 'years'], [s.relevant + ' / ' + s.irrelevant, 'marked ✓ / ✗'],
+      [s.screened ? s.screen_include + ' / ' + s.screen_uncertain + ' / ' + s.screen_exclude : '–', 'screened in / ? / out']
     ];
     $('stats').innerHTML = cards.map(function (c) {
       return '<div class="card stat"><b>' + esc(c[0]) + '</b><span>' + esc(c[1]) + '</span></div>';
@@ -293,7 +306,46 @@
     renderYears(s.years);
     renderBars($('chart-channels'), s.channels.map(function (c) { return [c[0], CHANNEL_LABEL[c[0]] || c[0], c[1]]; }), true);
     renderBars($('chart-venues'), s.venues.map(function (v) { return [v[0], v[0], v[1]]; }), false);
+    if (state.criteria && state.criteriaFor === state.project) showCriteria(state.criteria); else loadCriteria();
     renderList();
+  }
+
+  /* ---------- screening ---------- */
+
+  function loadCriteria() {
+    if (!state.project) return;
+    var project = state.project;
+    state.criteriaFor = project;
+    api('/api/criteria?project=' + encodeURIComponent(project)).then(function (c) {
+      if (state.project === project) showCriteria(c);
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function showCriteria(c) {
+    var fresh = state.criteria !== c;
+    state.criteria = c;
+    if (fresh) {  // keep what the user is typing when only the summary needs refreshing
+      $('crit-question').value = c.question || '';
+      $('crit-include').value = (c.include || []).join('\n');
+      $('crit-exclude').value = (c.exclude || []).join('\n');
+    }
+    if (!$('screen-n').dataset.touched) $('screen-n').value = c.default_top;
+    $('screen-model').textContent = 'model: ' + c.model;
+    var s = state.data && state.data.stats;
+    $('screen-summary').textContent = !c.question ? 'set a research question to screen with the local model' :
+      (s && s.screened ? s.screened + ' screened: ' + s.screen_include + ' include, ' + s.screen_uncertain +
+        ' uncertain, ' + s.screen_exclude + ' exclude' : 'not screened yet');
+    if (!c.question && fresh) $('screen-panel').open = true;
+  }
+
+  function saveCriteria() {
+    var project = state.project;
+    return post('/api/criteria', { project: project, question: $('crit-question').value,
+      include: $('crit-include').value, exclude: $('crit-exclude').value }).then(function (c) {
+      state.criteriaFor = project;
+      showCriteria(c);
+      return c;
+    });
   }
 
   function renderYears(pairs) {
@@ -348,6 +400,9 @@
       if (state.onlyNew && !p.new_to_project) return false;
       if (state.hide && p.mark === 'irrelevant') return false;
       if (state.channel && p.channels.indexOf(state.channel) < 0) return false;
+      if (state.screenFilter === 'none' && p.screening) return false;
+      if (state.screenFilter && state.screenFilter !== 'none' &&
+          (!p.screening || p.screening.decision !== state.screenFilter)) return false;
       if (f) {
         var hay = [p.title, p.venue, (p.authors || []).join(' '), p.doi, (p.reasons || []).join(' ')].join(' ').toLowerCase();
         if (hay.indexOf(f) < 0) return false;
@@ -356,6 +411,9 @@
     });
     var key = state.sort;
     list.sort(function (a, b) {
+      if (key === 'screening') {
+        return screenRank(a) - screenRank(b) || screenScore(b) - screenScore(a) || b.priority - a.priority;
+      }
       if (key === 'year') return (b.year || 0) - (a.year || 0) || b.priority - a.priority;
       if (key === 'cited') return (b.cited_by_count || 0) - (a.cited_by_count || 0) || b.priority - a.priority;
       if (key === 'relevance') return b.score - a.score;
@@ -379,7 +437,7 @@
         .map(function (r) { return '<span class="chip">' + esc(r) + '</span>'; }).join('') +
         (p.impact_notes || []).filter(function (n) { return /^top|in this set|RETRACTED/.test(n); })
           .map(function (n) { return '<span class="chip impact' + (n === 'RETRACTED' ? ' bad' : '') + '">' + esc(n) + '</span>'; }).join('');
-      var badges = (isSeed ? '<span class="badge seed">seed</span>' : '') +
+      var badges = screenBadge(p) + (isSeed ? '<span class="badge seed">seed</span>' : '') +
         (p.new_to_project && !isSeed ? '<span class="badge new">new</span>' : '') +
         (p.has_pdf ? '<span class="badge pdf">pdf</span>' : '') +
         (p.oa_url && !p.has_pdf ? '<span class="badge oa">open</span>' : '');
@@ -502,6 +560,20 @@
           html += '<ul class="reasons">' + p.impact_notes.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>';
         }
       }
+      var sc = d.screening;
+      if (sc) {
+        var crit = function (r) {
+          return '<li><b class="scr-' + esc(r.status) + '">' + esc(r.status.replace('_', ' ')) + '</b> ' + esc(r.criterion) +
+            (r.evidence ? '<br><q>' + esc(r.evidence) + '</q>' +
+              (r.verified === false ? ' <small class="bad">not found in the abstract</small>' : '') : '') + '</li>';
+        };
+        html += '<h3>Screening: ' + esc(sc.decision) + ' (' + sc.score.toFixed(2) + ')' +
+          (sc.stale ? ' <small class="bad">criteria changed since</small>' : '') + '</h3>' +
+          (sc.error ? '<p class="bad">Model error: ' + esc(sc.error) + '</p>' : '<p>' + esc(sc.reason) + '</p>') +
+          '<ul class="reasons">' + sc.inclusion.map(crit).join('') + sc.exclusion.map(crit).join('') + '</ul>' +
+          '<small class="hint">relevance ' + esc(sc.relevance) + '/5 · ' + esc(sc.model) + ' · ' +
+          esc((sc.screened_at || '').replace('T', ' ').slice(0, 16)) + '</small>';
+      }
       if ((p.reasons || []).length) {
         html += '<h3>Found because</h3><ul class="reasons">' + p.reasons.map(function (r) { return '<li>' + esc(r) + '</li>'; }).join('') + '</ul>';
       }
@@ -531,6 +603,7 @@
     $('btn-run').disabled = busy;
     $('btn-more').disabled = busy;
     $('btn-export').disabled = busy;
+    $('btn-screen').disabled = busy;
   }
 
   function logLine(text, cls) {
@@ -559,7 +632,7 @@
         }
         running.remove();
         setBusy(false);
-        if (j.status === 'failed') { logLine(j.error, 'err'); toast({ export: 'Export failed', pdfs: 'Adding PDFs failed' }[j.kind] || 'Search failed'); return; }
+        if (j.status === 'failed') { logLine(j.error, 'err'); toast({ export: 'Export failed', pdfs: 'Adding PDFs failed', screen: 'Screening failed' }[j.kind] || 'Search failed'); return; }
         if (j.kind === 'export') toast(j.messages[j.messages.length - 1].replace(/^done: /, ''));
         state.project = j.project;
         store.set('project', j.project);
@@ -850,6 +923,25 @@
     });
     $('sort').onchange = function () { state.sort = this.value; store.set('sort', state.sort); state.anchor = -1; renderList(); };
     $('drawer-close').onclick = closeDrawer;
+    $('screen-filter').onchange = function () { state.screenFilter = this.value; state.anchor = -1; renderList(); };
+    $('screen-n').oninput = function () { this.dataset.touched = '1'; };
+    $('btn-crit-save').onclick = function () {
+      if (!state.project) { toast('Open a run first'); return; }
+      saveCriteria().then(function () { toast('Criteria saved'); }).catch(function (e) { toast(e.message); });
+    };
+    $('btn-screen').onclick = function () {
+      if (!state.runId) { toast('Open a run first'); return; }
+      var n = Math.max(1, parseInt($('screen-n').value, 10) || 100);
+      setBusy(true);
+      saveCriteria().then(function () { return post('/api/screen', { run_id: state.runId, top: n }); })
+        .then(function (job) {
+          state.sort = 'screening';
+          store.set('sort', 'screening');
+          $('sort').value = 'screening';
+          poll(job);
+        })
+        .catch(function (e) { setBusy(false); toast(e.message); });
+    };
 
     document.addEventListener('keydown', function (e) {
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.metaKey || e.ctrlKey || !state.data ||

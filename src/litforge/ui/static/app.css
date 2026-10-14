@@ -237,3 +237,20 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .chip.impact.bad { background: var(--bad-soft); color: var(--bad); font-weight: 700; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip.impact { background: #3a3218; color: #e8c766; } }
 :root[data-theme="dark"] .chip.impact { background: #3a3218; color: #e8c766; }
+
+/* screening */
+.badge.scr { text-transform: none; }
+.badge.scr.include { background: var(--good-soft); color: var(--good); }
+.badge.scr.uncertain { background: var(--chip); color: var(--warn); }
+.badge.scr.exclude { background: var(--bad-soft); color: var(--bad); }
+.badge.scr.stale { opacity: .55; text-decoration: line-through; }
+#screen-panel { margin-bottom: 12px; }
+#screen-panel summary { cursor: pointer; }
+#screen-panel textarea { width: 100%; box-sizing: border-box; font: inherit; }
+.screen-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.screen-actions input[type=number] { width: 64px; }
+.scr-met, .scr-not_violated { color: var(--good); }
+.scr-not_met, .scr-violated { color: var(--bad); }
+.scr-unclear { color: var(--muted); }
+.screen-actions .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+#dbody .bad { color: var(--bad); }

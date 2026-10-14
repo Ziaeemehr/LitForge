@@ -70,6 +70,9 @@ def test_page_and_assets_are_served(server: str) -> None:
     for asset in ("/static/app.js", "/static/md.js", "/static/vendor/katex.min.js", "/static/vendor/marked.min.js"):
         assert call(server, asset)[0] == 200, asset
     assert call(server, "/static/../server.py")[0] == 404
+    assert b'id="screen-panel"' in html and b'value="screening"' in html
+    _, js = call(server, "/static/app.js")
+    assert b"/api/screen" in js and b"/api/criteria" in js
 
 
 def test_similar_job_results_detail_and_marks(server: str) -> None:

@@ -139,6 +139,24 @@
         <div class="card chart"><h4>Found via <small>(click to filter)</small></h4><div id="chart-channels"></div></div>
         <div class="card chart"><h4>Top venues</h4><div id="chart-venues"></div></div>
       </div>
+      <details class="card" id="screen-panel">
+        <summary><b>Screening</b> <span class="meta" id="screen-summary"></span></summary>
+        <p class="hint">A local model reads each paper's title and abstract and checks it against these criteria. It only
+          suggests include / uncertain / exclude; your ✓/✗ marks decide. Nothing leaves this computer.</p>
+        <label class="f">Research question</label>
+        <textarea id="crit-question" rows="2"></textarea>
+        <label class="f">Inclusion criteria <small>(one per line)</small></label>
+        <textarea id="crit-include" rows="3"></textarea>
+        <label class="f">Exclusion criteria <small>(one per line)</small></label>
+        <textarea id="crit-exclude" rows="3"></textarea>
+        <div class="screen-actions">
+          <button class="btn small" id="btn-crit-save">Save criteria</button>
+          <span class="sep"></span>
+          Screen top <input type="number" id="screen-n" min="1" value="100"> papers
+          <button class="btn small primary" id="btn-screen">Screen</button>
+          <span class="hint" id="screen-model"></span>
+        </div>
+      </details>
       <div class="card">
         <div class="toolbar">
           <input type="text" id="filter" placeholder="Filter by title, author, venue…">
@@ -147,10 +165,18 @@
           <button class="toggle" id="t-hide">Hide ✗</button>
           <select id="sort">
             <option value="score">Sort: review priority</option>
+            <option value="screening">Sort: screening</option>
             <option value="relevance">Sort: relevance</option>
             <option value="importance">Sort: importance</option>
             <option value="year">Sort: newest</option>
             <option value="cited">Sort: most cited</option>
+          </select>
+          <select id="screen-filter" title="Show papers by screening decision">
+            <option value="">All decisions</option>
+            <option value="include">Include</option>
+            <option value="uncertain">Uncertain</option>
+            <option value="exclude">Exclude</option>
+            <option value="none">Not screened</option>
           </select>
           <span class="count" id="count"></span>
         </div>
