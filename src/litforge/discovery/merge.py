@@ -82,8 +82,13 @@ def apply_record(conn: sqlite3.Connection, paper_id: str, rec: WorkRecord, ts: s
         updates["doi_status"] = "verified"
     elif "doi" in updates:
         updates["doi_status"] = "unverified"
-    if rec.cited_by_count is not None:
-        updates["cited_by_count"] = rec.cited_by_count
+    # Impact metrics change over time: refresh them whenever a registry reports them.
+    for column in ("cited_by_count", "fwci", "citation_percentile", "recent_citations", "venue_id"):
+        value = getattr(rec, column)
+        if value is not None:
+            updates[column] = value
+    if rec.is_retracted is not None:
+        updates["is_retracted"] = int(rec.is_retracted)
     filled = [c for c in updates if c in FILL_COLUMNS or c == "authors_json"]
     updates["metadata_json"] = _merge_metadata(row["metadata_json"], rec, [c for c in filled if c in FILL_COLUMNS])
     updates["updated_at"] = ts
@@ -97,6 +102,7 @@ def upsert_record(conn: sqlite3.Connection, rec: WorkRecord, ts: str) -> tuple[s
     match, conflicts = find_match(conn, rec)
     if match is not None:
         apply_record(conn, match, rec, ts)
+        store_references(conn, match, rec)
         return match, False
     paper_id = new_id()
     conn.execute(
@@ -118,4 +124,12 @@ def upsert_record(conn: sqlite3.Connection, rec: WorkRecord, ts: str) -> tuple[s
             " VALUES (?,?,?,?)",
             (other, paper_id, "title", ts),
         )
+    apply_record(conn, paper_id, rec, ts)  # sets impact metrics on the new row
+    store_references(conn, paper_id, rec)
     return paper_id, True
+
+
+def store_references(conn: sqlite3.Connection, paper_id: str, rec: WorkRecord) -> None:
+    if rec.references:
+        conn.executemany("INSERT OR IGNORE INTO paper_references(paper_id, ref_id) VALUES (?,?)",
+                         [(paper_id, ref) for ref in rec.references])

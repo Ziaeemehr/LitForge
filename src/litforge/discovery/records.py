@@ -46,6 +46,12 @@ class WorkRecord(BaseModel):
     work_type: str | None = None
     references: list[str] = Field(default_factory=list)  # OpenAlex ids this work cites
     related: list[str] = Field(default_factory=list)  # OpenAlex "related works" ids
+    note: str | None = None  # free-text note from an imported list (e.g. Elicit's "Relevance")
+    fwci: float | None = None
+    citation_percentile: float | None = None
+    recent_citations: int | None = None
+    is_retracted: bool | None = None
+    venue_id: str | None = None  # OpenAlex venue id
 
     def normalized(self) -> WorkRecord:
         rec = self.model_copy()

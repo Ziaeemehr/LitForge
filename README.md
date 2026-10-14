@@ -28,6 +28,32 @@ uv run litforge export
 - `search` returns the paper, section, page and a quoted snippet for every hit.
 - `export` writes Markdown notes to `data/projects/my-review/exports/markdown/`.
 
+## Web interface
+
+```bash
+uv run litforge ui        # opens http://127.0.0.1:8765 in your browser
+```
+
+One page to give a DOI, PDF or abstract (or search queries, or an Elicit/Zotero export), choose a
+project and an output folder, and browse the results: summary numbers, publication years, how
+papers were found, top venues, filters, and a quick view with the abstract, score breakdown and
+full text (formulas rendered with KaTeX). Mark papers ✓/✗ and run "More like my ✓ papers" to
+iterate. It runs locally with the Python standard library and works the same on macOS and Linux;
+on a remote GPU machine use `ssh -L 8765:127.0.0.1:8765 host` and open the same address.
+
+### Relevance, importance and review priority
+
+Every result gets two scores, both between 0 and 1:
+
+- **Relevance** to your seed or query: meaning (embeddings), shared references, citation links,
+  agreement between search channels.
+- **Importance**, independent of your query: field- and year-normalized citation percentile
+  (OpenAlex), how many papers in the same result set cite it (core literature), citations in the
+  last two years, and the venue's 2-year mean citedness. Retracted papers get 0 and a warning.
+
+**Review priority** = 0.65 × relevance + 0.35 × importance, the default sort order, so a large
+result set can be read from the top.
+
 ## Find papers
 
 ```bash

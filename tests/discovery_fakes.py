@@ -16,7 +16,13 @@ FRONTIER_OA = {
     "cited_by_count": 988,
     "authorships": [{"author": {"display_name": "Kyle Cranmer"}}, {"author": {"display_name": "Johann Brehmer"}}],
     "primary_location": {"landing_page_url": "https://doi.org/10.1073/pnas.1912789117",
-                         "source": {"display_name": "Proceedings of the National Academy of Sciences"}},
+                         "source": {"id": "https://openalex.org/S125754415",
+                                    "display_name": "Proceedings of the National Academy of Sciences"}},
+    "fwci": 63.8,
+    "citation_normalized_percentile": {"value": 0.999},
+    "counts_by_year": [{"year": 2026, "cited_by_count": 194}, {"year": 2025, "cited_by_count": 230},
+                       {"year": 2024, "cited_by_count": 190}],
+    "is_retracted": False,
     "best_oa_location": {"landing_page_url": "https://arxiv.org/abs/1911.01429", "pdf_url": "https://arxiv.org/pdf/1911.01429"},
     "open_access": {"oa_url": "https://arxiv.org/pdf/1911.01429"},
     "abstract_inverted_index": {"Many": [0], "domains": [1], "use": [2], "simulators": [3]},
@@ -107,6 +113,9 @@ def default_routes() -> list[tuple[str, Response]]:
     return [
         ("filter=cited_by:W2984417636", ok({"results": [APT_OA]}, cost)),
         ("filter=cites:W2984417636", ok({"results": [CITING_OA]}, cost)),
+        ("api.openalex.org/sources", ok({"results": [
+            {"id": "https://openalex.org/S125754415", "display_name": "PNAS", "type": "journal",
+             "summary_stats": {"2yr_mean_citedness": 8.84, "h_index": 1165}}]}, cost)),
         ("filter=ids.openalex:", ok({"results": [APT_OA]}, cost)),
         ("filter=cited_by:", ok({"results": []}, cost)),  # other works: no data, like the real API
         ("filter=cites:", ok({"results": [CITING_OA]}, cost)),

@@ -115,13 +115,25 @@ def parse_ris(text: str, source: str) -> list[WorkRecord]:
 _CSV_COLUMNS = {
     "title": ("title", "paper title", "article title"),
     "doi": ("doi",),
-    "year": ("year", "publication year", "publication_year"),
+    "year": ("year", "publication year", "publication_year", "published date", "date"),
     "authors": ("authors", "author", "author names"),
     "abstract": ("abstract", "summary"),
     "venue": ("venue", "journal", "source", "source title", "publication"),
     "url": ("url", "link", "pdf url"),
     "arxiv": ("arxiv", "arxiv id", "arxiv_id"),
+    "note": ("relevance", "notes", "note", "reason"),
 }
+
+
+def _split_authors(text: str) -> list[str]:
+    """'A; B', 'A and B', or Elicit's 'Jessica Phillips-Silver, L. Trainor' (comma only when every
+    part looks like a full name, so 'Cranmer, Kyle' stays one author)."""
+    if ";" in text or " and " in text:
+        parts = re.split(r";|\band\b", text)
+    else:
+        commas = [p.strip() for p in text.split(",")]
+        parts = commas if len(commas) > 1 and all(" " in p for p in commas) else [text]
+    return [p.strip() for p in parts if p.strip()]
 
 
 def parse_csv(text: str, source: str) -> list[WorkRecord]:
@@ -140,8 +152,8 @@ def parse_csv(text: str, source: str) -> list[WorkRecord]:
         authors = get("authors")
         out.append(WorkRecord(
             source=source, source_id=str(n), title=get("title"), doi=get("doi"), year=_year(get("year")),
-            authors=[a.strip() for a in re.split(r";|\band\b", authors) if a.strip()] if authors else [],
-            abstract=get("abstract"), venue=get("venue"),
+            authors=_split_authors(authors) if authors else [],
+            abstract=get("abstract"), venue=get("venue"), note=get("note"),
             arxiv_id=normalize_arxiv_id(get("arxiv") or get("url") or ""),
         ).normalized())
     return out

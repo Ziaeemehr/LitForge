@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LitForge</title>
+<link rel="stylesheet" href="/static/vendor/katex.min.css">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <div class="brand">Lit<span>Forge</span></div>
+  <select id="project-select" title="Project"></select>
+  <div class="spacer"></div>
+  <button class="btn" id="btn-export" title="Write Markdown notes to the project's output folder">Export Markdown</button>
+</header>
+
+<div class="layout">
+  <aside class="card">
+    <div class="tabs">
+      <button data-mode="similar" class="on">Similar to a paper</button>
+      <button data-mode="search">Search</button>
+      <button data-mode="import">Import list</button>
+    </div>
+
+    <form id="form-similar">
+      <label class="f">DOI, arXiv id or OpenAlex id</label>
+      <input type="text" id="seed" placeholder="10.7554/eLife.56261  ·  2007.09114">
+      <label class="f">PDF</label>
+      <div class="drop" id="drop">Drop a PDF here or <a href="#" id="pick">choose a file</a></div>
+      <input type="file" id="file" accept="application/pdf" hidden>
+      <label class="f">Title <small>(optional)</small></label>
+      <input type="text" id="title">
+      <label class="f">Abstract <small>(or any description of the topic)</small></label>
+      <textarea id="abstract" placeholder="Paste an abstract…"></textarea>
+    </form>
+
+    <form id="form-search" hidden>
+      <label class="f">Queries <small>(one per line)</small></label>
+      <textarea id="queries" placeholder="simulation-based inference&#10;neural posterior estimation"></textarea>
+      <label class="f">Sources</label>
+      <div class="row2">
+        <label class="check"><input type="checkbox" name="src" value="openalex" checked> OpenAlex</label>
+        <label class="check"><input type="checkbox" name="src" value="crossref" checked> Crossref</label>
+        <label class="check"><input type="checkbox" name="src" value="arxiv" checked> arXiv</label>
+      </div>
+    </form>
+
+    <form id="form-import" hidden>
+      <label class="f">Reference list <small>(.csv, .bib or .ris from Elicit, Zotero…)</small></label>
+      <div class="drop" id="drop-list">Drop a file here or <a href="#" id="pick-list">choose a file</a></div>
+      <input type="file" id="file-list" accept=".csv,.bib,.ris" hidden>
+      <p class="hint">Elicit CSV exports keep the abstract and Elicit's relevance note. After importing,
+        use <b>Find similar to these</b> to expand the list through citations and meaning.</p>
+    </form>
+
+    <label class="f">Project name</label>
+    <input type="text" id="project-name" list="project-list" placeholder="my-review">
+    <datalist id="project-list"></datalist>
+    <label class="f">Output folder <small>(for exports)</small></label>
+    <input type="text" id="export-dir" placeholder="data/projects/&lt;name&gt;/exports">
+    <label class="check" id="emb-wrap"><input type="checkbox" id="embeddings" checked> Meaning-based ranking (embeddings)</label>
+
+    <button class="btn primary" id="btn-run">Find similar papers</button>
+    <button class="btn small ghost" id="btn-more" title="Use every paper you marked ✓ as a seed" style="margin-top:6px">More like my ✓ papers</button>
+    <div class="progress" id="progress"></div>
+
+    <div class="runs">
+      <h3>Previous runs</h3>
+      <div id="runs"></div>
+    </div>
+  </aside>
+
+  <main id="main">
+    <div class="card empty" id="empty">
+      <h2>Find papers related to a paper you have</h2>
+      <p>Give a DOI, a PDF or an abstract on the left, or import a list from Elicit or Zotero. Each result gets a
+        <b>relevance</b> score (meaning, shared references, citation links), an <b>importance</b> score
+        (field-normalized citations, centrality in the set, recent attention, venue) and a combined
+        <b>review priority</b>. Every result says why it was found.</p>
+      <p><kbd>j</kbd>/<kbd>k</kbd> move · <kbd>Enter</kbd> open · <kbd>r</kbd> relevant · <kbd>x</kbd> irrelevant · <kbd>Esc</kbd> close</p>
+    </div>
+    <div id="results" hidden>
+      <div class="runhead"><h2 id="run-title"></h2><span class="meta" id="run-meta"></span></div>
+      <div class="stats" id="stats"></div>
+      <div class="charts">
+        <div class="card chart"><h4>Publication years</h4><div id="chart-years"></div></div>
+        <div class="card chart"><h4>Found via <small>(click to filter)</small></h4><div id="chart-channels"></div></div>
+        <div class="card chart"><h4>Top venues</h4><div id="chart-venues"></div></div>
+      </div>
+      <div class="card">
+        <div class="toolbar">
+          <input type="text" id="filter" placeholder="Filter by title, author, venue…">
+          <button class="toggle" id="t-oa">Open access</button>
+          <button class="toggle" id="t-new">New only</button>
+          <button class="toggle" id="t-hide">Hide ✗</button>
+          <select id="sort">
+            <option value="score">Sort: review priority</option>
+            <option value="relevance">Sort: relevance</option>
+            <option value="importance">Sort: importance</option>
+            <option value="year">Sort: newest</option>
+            <option value="cited">Sort: most cited</option>
+          </select>
+          <span class="count" id="count"></span>
+        </div>
+        <div class="list" id="list"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<section class="drawer" id="drawer" aria-hidden="true">
+  <button class="btn small close" id="drawer-close">✕</button>
+  <div class="dhead" id="dhead"></div>
+  <div class="dbody" id="dbody"></div>
+</section>
+<div class="toast" id="toast"></div>
+
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
+<script src="/static/vendor/katex.min.js"></script>
+<script src="/static/md.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -354,10 +354,13 @@ def _print_report(report: DiscoveryReport) -> None:
     for n, p in enumerate(report.top, 1):
         flags = ("new " if p.new_to_project else "") + ("pdf" if p.has_pdf else "")
         ident = p.doi or (f"arXiv:{p.arxiv_id}" if p.arxiv_id else "")
-        typer.echo(f"{n:>3}. [{p.score:.2f}] {p.title or '(no title)'} ({p.year or '?'})")
+        typer.echo(f"{n:>3}. [{p.priority:.2f}] {p.title or '(no title)'} ({p.year or '?'})"
+                   f"  relevance {p.score:.2f} · importance {p.importance:.2f}")
         typer.echo(f"       {ident}  {'/'.join(p.sources)}  {flags}".rstrip())
         if p.reasons:
             typer.echo(f"       why: {'; '.join(p.reasons)}")
+        if p.importance_notes:
+            typer.echo(f"       impact: {'; '.join(p.importance_notes)}")
 
 
 @app.command()
@@ -505,6 +508,22 @@ def papers(
         pdf = "pdf" if r["has_pdf"] else ("oa " if r["oa_url"] else "   ")
         score = f"{r['score']:.2f}" if r["score"] is not None else "  - "
         typer.echo(f"{score} {pdf} {r['year'] or '????'}  {(r['title'] or '(no title)')[:90]}")
+
+
+@app.command()
+def ui(
+    ctx: typer.Context,
+    port: Annotated[int, typer.Option(help="Port (0 = pick a free one)")] = 8765,
+    host: Annotated[str, typer.Option(help="Interface to bind (keep 127.0.0.1)")] = "127.0.0.1",
+    no_browser: Annotated[bool, typer.Option("--no-browser", help="Don't open a browser window")] = False,
+) -> None:
+    """Open the web interface (runs locally; works the same on macOS and Linux)."""
+    from litforge.ui.server import serve
+
+    st = _state(ctx)
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        typer.secho(f"warning: serving on {host}; anyone who can reach this address can use the UI", fg="yellow")
+    serve(st.paths, st.config, host, port, not no_browser)
 
 
 if __name__ == "__main__":

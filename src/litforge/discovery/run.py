@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from litforge.discovery.http import BudgetExhausted, HttpClient, HttpError
+from litforge.discovery.importance import fetch_missing_venues, importance_scores, priority
 from litforge.discovery.importers import read_references
 from litforge.discovery.merge import apply_record, ensure_norm_titles, upsert_record
 from litforge.discovery.rank import rank
@@ -41,6 +42,9 @@ class RankedPaper(BaseModel):
     has_pdf: bool
     oa_url: str | None
     reasons: list[str] = []
+    importance: float = 0.0
+    priority: float = 0.0
+    importance_notes: list[str] = []
 
 
 class DiscoveryReport(BaseModel):
@@ -120,6 +124,7 @@ class _Run:
         scores: dict[str, float] | None = None,
         reasons: dict[str, list[str]] | None = None,
         components: dict[str, dict[str, float]] | None = None,
+        openalex: OpenAlex | None = None,
     ) -> DiscoveryReport:
         """Persist the ranking (default: lexical + RRF; callers may pass their own scores)."""
         wanted = sorted({h[0] for h in self.hits} | set(scores or {}))
@@ -133,6 +138,11 @@ class _Run:
             scores = rank(self.hits, {pid: (r["title"], r["abstract"]) for pid, r in rows.items()}, self.queries)
         reasons = reasons or {}
         components = components or {}
+        with transaction(self.conn):
+            if openalex is not None:
+                fetch_missing_venues(self.conn, openalex, list(scores))
+        imp = importance_scores(self.conn, list(scores))
+        prio = {pid: priority(score, imp.get(pid, {}).get("score", 0.0)) for pid, score in scores.items()}
         sources: dict[str, set[str]] = {}
         for paper_id, source, _q, _pos in self.hits:
             sources.setdefault(paper_id, set()).add(source)
@@ -141,12 +151,14 @@ class _Run:
         report = self.report
         with transaction(self.conn):
             for paper_id, score in scores.items():
+                info = imp.get(paper_id, {"score": 0.0, "components": {}, "notes": []})
+                comp = {**components.get(paper_id, {}), "importance": info["components"], "notes": info["notes"]}
                 self.conn.execute(
                     """INSERT INTO discovery_results(run_id, paper_id, score, n_hits, new_to_project, reasons_json,
-                       components_json) VALUES (?,?,?,?,?,?,?)""",
+                       components_json, importance, priority) VALUES (?,?,?,?,?,?,?,?,?)""",
                     (report.run_id, paper_id, score, sum(1 for h in self.hits if h[0] == paper_id),
-                     int(paper_id in self.new_ids), dumps(reasons.get(paper_id, [])),
-                     dumps(components.get(paper_id, {}))),
+                     int(paper_id in self.new_ids), dumps(reasons.get(paper_id, [])), dumps(comp),
+                     info["score"], prio[paper_id]),
                 )
             report.papers = len(scores)
             report.new_to_project = len(self.new_ids)
@@ -158,13 +170,14 @@ class _Run:
                 "UPDATE discovery_runs SET status=?, stats_json=?, finished_at=? WHERE id=?",
                 (report.status, dumps(report.model_dump(exclude={"top"})), now(), report.run_id),
             )
-        ordered = sorted(scores.items(), key=lambda kv: (-kv[1], rows[kv[0]]["title"] or ""))
+        ordered = sorted(scores.items(), key=lambda kv: (-prio[kv[0]], -kv[1], rows[kv[0]]["title"] or ""))
         report.top = [
             RankedPaper(paper_id=pid, title=rows[pid]["title"], year=rows[pid]["year"], venue=rows[pid]["venue"],
                         doi=rows[pid]["doi"], arxiv_id=rows[pid]["arxiv_id"], score=score,
                         sources=sorted(sources[pid]), new_to_project=pid in self.new_ids,
                         has_pdf=bool(rows[pid]["has_pdf"]), oa_url=rows[pid]["oa_url"],
-                        reasons=reasons.get(pid, []))
+                        reasons=reasons.get(pid, []), importance=imp.get(pid, {}).get("score", 0.0),
+                        priority=prio[pid], importance_notes=imp.get(pid, {}).get("notes", []))
             for pid, score in ordered[:top_n]
         ]
         return report
@@ -175,7 +188,7 @@ class _Run:
 
 def run_search(
     conn: sqlite3.Connection, sources: Sources, project_id: str, queries: list[str], source_names: list[str],
-    limit: int, top_n: int = 20,
+    limit: int, top_n: int = 20, progress: Callable[[str], None] | None = None,
 ) -> DiscoveryReport:
     run = _Run(conn, project_id, "search", {"queries": queries, "sources": source_names, "limit": limit})
     for name in source_names:
@@ -185,6 +198,8 @@ def run_search(
             run.error(name, exc)
             continue
         for query in queries:
+            if progress:
+                progress(f"searching {name}: {query}")
             try:
                 records = adapter.search(query, limit)
             except SOURCE_ERRORS as exc:
@@ -193,7 +208,7 @@ def run_search(
                     break
                 continue
             run.add(records, name, "query", query)
-    return run.finish(sources.http, top_n)
+    return run.finish(sources.http, top_n, openalex=sources.openalex)
 
 
 def _resolve_seed(conn: sqlite3.Connection, sources: Sources, seed: str) -> WorkRecord | None:
@@ -240,7 +255,7 @@ def run_citations(
                 continue
             ids = run.add(records, "openalex", rel, seed_paper_id=seed_id)
             record_relations(conn, seed_id, ids, rel, ts)
-    return run.finish(sources.http, top_n)
+    return run.finish(sources.http, top_n, openalex=sources.openalex)
 
 
 def record_relations(conn: sqlite3.Connection, seed_id: str, ids: list[str], rel: str, ts: str) -> None:
@@ -261,8 +276,13 @@ def run_import(conn: sqlite3.Connection, project_id: str, path: Path, top_n: int
     except (OSError, ValueError) as exc:
         run.error(path.name, exc)
         return run.finish(None, top_n)
-    run.add([r for r in records if r.title or r.doi], f"import:{path.name}", "import")
-    return run.finish(None, top_n)
+    kept = [r for r in records if r.title or r.doi]
+    ids = run.add(kept, f"import:{path.name}", "import")
+    # Keep the list's own order as the ranking and its notes (e.g. Elicit "Relevance") as reasons.
+    scores = {pid: round(1 - i / max(len(ids), 1), 4) for i, pid in enumerate(dict.fromkeys(ids))}
+    label = "Elicit" if path.stem.lower().startswith("elicit") else path.stem[:40]
+    reasons = {pid: [f"{label}: {rec.note}"] for pid, rec in zip(ids, kept, strict=True) if rec.note}
+    return run.finish(None, top_n, scores, reasons)
 
 
 class EnrichResult(BaseModel):

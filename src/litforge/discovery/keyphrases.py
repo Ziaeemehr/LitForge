@@ -120,7 +120,10 @@ def keyphrases(title: str | None, abstract: str | None, k: int = 5) -> list[str]
 
 
 def _overlaps(a: str, b: str) -> bool:
-    wa, wb = set(a.split()), set(b.split())
+    def stem(w: str) -> str:  # crude plural folding: "stimulations" ~ "stimulation"
+        return w[:-1] if len(w) > 4 and w.endswith("s") and not w.endswith("ss") else w
+
+    wa, wb = {stem(w) for w in a.split()}, {stem(w) for w in b.split()}
     return len(wa & wb) / min(len(wa), len(wb)) > 0.5
 
 

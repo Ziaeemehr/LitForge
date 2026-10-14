@@ -47,7 +47,7 @@ def test_search_merges_sources_and_is_repeatable(conn: sqlite3.Connection, sourc
     assert top.title == "The frontier of simulation-based inference"
     assert top.sources == ["arxiv", "crossref", "openalex"]
     assert report.top[-1].title == "Strong lensing cosmology"  # irrelevant result ranks last
-    assert report.cost_usd == pytest.approx(0.001)
+    assert report.cost_usd == pytest.approx(0.002)  # one search + one venue-stats lookup
 
     again = run_search(conn, sources, pid, ["simulation-based inference"], ["openalex", "crossref", "arxiv"], 10)
     assert again.created == 0 and again.new_to_project == 0 and len(_papers(conn)) == 3

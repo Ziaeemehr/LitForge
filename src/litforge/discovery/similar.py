@@ -18,6 +18,7 @@ Ranking (deterministic, components stored per paper):
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,7 +34,7 @@ from litforge.discovery.run import (
     _Run,
     record_relations,
 )
-from litforge.discovery.textsim import Embedder, embedding_similarity, tfidf_similarity
+from litforge.discovery.textsim import CachedEmbedder, Embedder, embedding_similarity_many, tfidf_similarity
 from litforge.indexing.fts import current_runs, index_run
 from litforge.ingest import ingest_paths
 from litforge.metadata.extract import normalize_title
@@ -44,6 +45,7 @@ from litforge.storage.db import now
 WEIGHTS = {"text": 0.50, "coupling": 0.20, "direct": 0.15, "channels": 0.15}
 CHANNELS = ("references", "cited_by", "related", "keywords", "neighbours")
 NEIGHBOURS = 3  # stand-in seeds for text-only searches
+EMBED_CHARS = 1200  # text per paper fed to the embedding model
 EMBEDDING_FLOOR = 0.5  # cosine similarity of clearly unrelated texts is ~0.5-0.65 for bge models
 
 
@@ -85,9 +87,14 @@ def _resolve(conn: sqlite3.Connection, paths: Paths, config: Config, sources: So
     if path.suffix.lower() == ".pdf" and path.is_file():
         return _seed_from_pdf(conn, paths, config, sources, project_id, path, log)
     rec = _resolve_seed(conn, sources, identifier)
+    row = conn.execute("SELECT id, title, abstract FROM papers WHERE id=?", (identifier,)).fetchone()
+    if rec is None and row is not None and (row["title"] or row["abstract"]):
+        # In the library (e.g. imported from Elicit) but unknown to OpenAlex: use its text.
+        return Seed(label=(row["title"] or identifier)[:80], title=row["title"], abstract=row["abstract"],
+                    paper_id=row["id"])
     if rec is None:
         raise LookupError(f"'{identifier}' not found (expected a DOI, arXiv id, OpenAlex id, paper id or PDF)")
-    return Seed(label=identifier, title=rec.title, abstract=rec.abstract, record=rec)
+    return Seed(label=(rec.title or identifier)[:80], title=rec.title, abstract=rec.abstract, record=rec)
 
 
 def _seed_from_text(sources: Sources, title: str | None, abstract: str | None) -> Seed:
@@ -114,7 +121,11 @@ def run_similar(
     embedder: Embedder | None = None,
     top_n: int = 30,
     log: EventLog = NULL_LOG,
+    progress: Callable[[str], None] | None = None,
 ) -> DiscoveryReport:
+    say = progress or (lambda msg: None)
+    if embedder is not None and not isinstance(embedder, CachedEmbedder):
+        embedder = CachedEmbedder(embedder, paths.model_cache / "vectors.sqlite")
     cfg = config.similar
     limit = cfg.per_channel_limit
     params: dict[str, object] = {"seeds": identifiers or [], "title": title, "abstract": (abstract or "")[:500],
@@ -123,6 +134,7 @@ def run_similar(
 
     seeds: list[Seed] = []
     for ident in identifiers or []:
+        say(f"resolving seed {ident}")
         try:
             seeds.append(_resolve(conn, paths, config, sources, project_id, ident, log))
         except (*SOURCE_ERRORS, LookupError) as exc:
@@ -157,6 +169,7 @@ def run_similar(
             seed_ids.add(seed.paper_id)
         oa_id = seed.record.openalex_id if seed.record else None
         if oa_id and seed.paper_id:
+            say(f"following citations of {seed.label[:60]}")
             ts = now()
             for channel, fetch in (("references", sources.openalex.references), ("cited_by", sources.openalex.citing)):
                 try:
@@ -175,14 +188,27 @@ def run_similar(
                     collect(records, run.add(records, "openalex", "related", seed_paper_id=seed.paper_id), "related")
                 except SOURCE_ERRORS as exc:
                     run.error(f"related works of {seed.label}", exc)
-        for query in build_queries(seed.title, seed.abstract, cfg.keyword_queries, embedder):
+
+    # Key-phrase searches: per seed for one or two seeds; for larger seed sets one shared set of
+    # queries from all their text, so cost and time do not grow with the number of seeds.
+    text_seeds = [s for s in seeds if s.text]
+    if len(text_seeds) <= 2:
+        query_plan = [(build_queries(s.title, s.abstract, cfg.keyword_queries, embedder), s.paper_id)
+                      for s in text_seeds]
+    else:
+        titles = ". ".join(s.title for s in text_seeds if s.title)
+        abstracts = " ".join((s.abstract or "")[:600] for s in text_seeds)
+        query_plan = [(build_queries(titles, abstracts, cfg.keyword_queries + 1, embedder), None)]
+    for queries, seed_pid in query_plan:
+        for query in queries:
+            say(f"searching: {query}")
             for source in (sources.openalex, sources.arxiv):
                 try:
                     records = source.search(query, min(limit, 25))
                 except SOURCE_ERRORS as exc:
                     run.error(f"{source.name} '{query}'", exc)
                     continue
-                ids = run.add(records, source.name, "keywords", query, seed_paper_id=seed.paper_id)
+                ids = run.add(records, source.name, "keywords", query, seed_paper_id=seed_pid)
                 collect(records, ids, "keywords")
                 for pid in ids:
                     keyword_by_paper.setdefault(pid, query)
@@ -199,6 +225,7 @@ def run_similar(
         neighbours = [pid for pid in ranked if rows[pid]["openalex_id"]][:NEIGHBOURS]
         for npid in neighbours:
             label = (rows[npid]["title"] or "")[:60]
+            say(f"following citations of close match: {label}")
             seeds.append(Seed(label=label, references=cand_refs.get(npid, set()), stand_in=True))
             for channel, fetch in (("references", sources.openalex.references), ("cited_by", sources.openalex.citing)):
                 try:
@@ -213,11 +240,12 @@ def run_similar(
                         neighbour_of.setdefault(pid, label)
 
     candidates = [pid for pid in channel_hits if pid not in seed_ids]
+    say(f"ranking {len(candidates)} candidates" + (" with embeddings" if embedder else ""))
     scores, reasons, components = _score(conn, seeds, candidates, channel_hits, cand_refs, direct,
                                          keyword_by_paper, neighbour_of, embedder)
     for pid in seed_ids:  # seeds are listed first, marked as such
         scores[pid], reasons[pid] = 1.0, ["seed paper"]
-    return run.finish(sources.http, top_n, scores, reasons, components)
+    return run.finish(sources.http, top_n, scores, reasons, components, openalex=sources.openalex)
 
 
 def _rescale(values: dict[str, float], floor: float) -> dict[str, float]:
@@ -256,9 +284,11 @@ def _score(
     for text in seed_texts:
         for p, v in zip(candidates, tfidf_similarity(text, docs), strict=True):
             tfidf[p] = max(tfidf[p], v)
-        if embedder is not None:
-            for p, v in zip(candidates, embedding_similarity(embedder, text, docs), strict=True):
-                emb[p] = max(emb[p], v)
+    if embedder is not None and seed_texts:
+        # Title plus the opening of the abstract carries the topic; long texts only cost time.
+        short = [d[:EMBED_CHARS] for d in docs]
+        emb = dict(zip(candidates, embedding_similarity_many(embedder, [t[:EMBED_CHARS] for t in seed_texts], short),
+                       strict=True))
     tfidf_n = _rescale(tfidf, 0.0)
     if embedder is None:
         text_score = tfidf_n

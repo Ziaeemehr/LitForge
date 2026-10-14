@@ -33,6 +33,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/litforge"]
+artifacts = ["src/litforge/ui/static/**"]
 
 [tool.ruff]
 line-length = 120

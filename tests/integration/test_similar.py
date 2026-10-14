@@ -106,3 +106,16 @@ def test_cli_similar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     result = runner.invoke(cli.app, base + ["similar", "--abstract-file", str(abstract), "--no-embeddings"])
     assert result.exit_code == 0, result.output
     assert runner.invoke(cli.app, base + ["similar"]).exit_code == 2  # nothing to search from
+
+
+def test_similar_results_carry_importance(conn: sqlite3.Connection, paths: Paths, config: Config,
+                                          sources: Sources, pid: str) -> None:
+    report = run_similar(conn, paths, config, sources, pid, ["10.1073/pnas.1912789117"])
+    seed = next(p for p in report.top if p.reasons == ["seed paper"])
+    assert "top 1% cited in its field" in seed.importance_notes
+    assert "cited by 1 paper in this set" in seed.importance_notes  # the citing paper
+    assert any(n.startswith("venue mean citedness 8.8") for n in seed.importance_notes)
+    assert seed.importance > 0.5 and seed.priority >= max(p.priority for p in report.top) - 1e-9
+    row = conn.execute("SELECT mean_citedness FROM venues WHERE id='S125754415'").fetchone()
+    assert row["mean_citedness"] == 8.84
+    assert all(0 <= p.priority <= 1 for p in report.top)

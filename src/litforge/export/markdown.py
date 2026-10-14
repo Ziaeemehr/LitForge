@@ -19,10 +19,17 @@ def slugify(text: str, max_len: int = 60) -> str:
     return slug[:max_len].rstrip("-") or "paper"
 
 
-def export_markdown(conn: sqlite3.Connection, paths: Paths, project: str, project_id: str) -> Path:
+def default_export_dir(conn: sqlite3.Connection, paths: Paths, project: str, project_id: str) -> Path:
+    row = conn.execute("SELECT export_dir FROM projects WHERE id=?", (project_id,)).fetchone()
+    return Path(row["export_dir"]).expanduser() if row and row["export_dir"] else paths.project_dir(project) / "exports"
+
+
+def export_markdown(
+    conn: sqlite3.Connection, paths: Paths, project: str, project_id: str, out_dir: Path | None = None
+) -> Path:
     """Write exports/markdown/{README.md, knowledge_base/*.md, assets/<slug>/...}. Private by default:
     contains full extracted text and figure crops, so do not publish without a copyright review."""
-    root = paths.project_dir(project) / "exports" / "markdown"
+    root = (out_dir or default_export_dir(conn, paths, project, project_id)) / "markdown"
     kb = root / "knowledge_base"
     kb.mkdir(parents=True, exist_ok=True)
     rows = conn.execute(

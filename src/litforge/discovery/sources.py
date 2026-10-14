@@ -24,7 +24,8 @@ ATOM = {"a": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/a
 _OPENALEX_SELECT = ",".join([
     "id", "doi", "title", "publication_year", "type", "cited_by_count", "authorships",
     "primary_location", "best_oa_location", "open_access", "abstract_inverted_index",
-    "referenced_works", "related_works",
+    "referenced_works", "related_works", "fwci", "citation_normalized_percentile", "is_retracted",
+    "counts_by_year",
 ])
 
 
@@ -47,6 +48,14 @@ class SearchSource(Protocol):
     name: str
 
     def search(self, query: str, limit: int) -> list[WorkRecord]: ...
+
+
+def _recent_citations(counts: list[dict[str, int]] | None) -> int | None:
+    """Citations in the two most recent years OpenAlex reports (includes the current year)."""
+    if not counts:
+        return None
+    latest = max(c["year"] for c in counts)
+    return sum(c.get("cited_by_count", 0) for c in counts if c["year"] >= latest - 1)
 
 
 def _clean_query(query: str) -> str:
@@ -126,6 +135,18 @@ class OpenAlex:
             out += self._list({"filter": f"ids.openalex:{'|'.join(batch)}"}, len(batch))
         return out
 
+    def venues(self, source_ids: list[str]) -> list[dict[str, Any]]:
+        """Venue impact stats (2-year mean citedness, h-index), 50 venues per request."""
+        out: list[dict[str, Any]] = []
+        for i in range(0, len(source_ids), 50):
+            batch = source_ids[i : i + 50]
+            data = self.http.get_json(self.http.url(f"{OPENALEX}/sources", {
+                "filter": f"ids.openalex:{'|'.join(batch)}", "per-page": len(batch),
+                "select": "id,display_name,type,summary_stats", "api_key": self.api_key, "mailto": self.mailto,
+            }))
+            out += data.get("results", [])
+        return out
+
     def title_lookup(self, title: str, limit: int = 5) -> list[WorkRecord]:
         return self._list({"filter": f"title.search:{_clean_query(title)}"}, limit)
 
@@ -154,6 +175,11 @@ class OpenAlex:
             work_type=work.get("type"),
             references=[_short_id(u) for u in work.get("referenced_works") or []],
             related=[_short_id(u) for u in work.get("related_works") or []],
+            fwci=work.get("fwci"),
+            citation_percentile=(work.get("citation_normalized_percentile") or {}).get("value"),
+            recent_citations=_recent_citations(work.get("counts_by_year")),
+            is_retracted=work.get("is_retracted"),
+            venue_id=_short_id((primary.get("source") or {}).get("id") or "") or None,
         ).normalized()
 
 
