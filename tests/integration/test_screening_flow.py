@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,9 +11,13 @@ from typing import Any
 
 import pytest
 
-from litforge.screening.criteria import Criteria
-from litforge.screening.llm import LlmError, OllamaClient
+from litforge.config import Paths
+from litforge.projects import create_project
+from litforge.screening.criteria import Criteria, save_criteria
+from litforge.screening.llm import FakeLlm, LlmError, OllamaClient
 from litforge.screening.prompt import build_messages, response_schema
+from litforge.screening.run import screen_run
+from litforge.storage.db import new_id, now, transaction
 
 
 class _Ollama(BaseHTTPRequestHandler):
@@ -81,3 +86,96 @@ def test_ollama_invalid_json_is_llm_error(ollama: str) -> None:
     _Ollama.reply = "not json"
     with pytest.raises(LlmError, match="invalid JSON"):
         OllamaClient(ollama, "qwen3:4b").chat_json([{"role": "user", "content": "x"}], {})
+
+
+CRIT = Criteria(question="neural mass model inference", include=["uses a neural mass model"],
+                exclude=["animal study only"])
+
+
+def make_run(conn: sqlite3.Connection, paths: Paths,
+             papers: list[tuple[str, str | None]]) -> tuple[str, str, list[str]]:
+    """A project with one discovery run; papers ranked in the given order (first = highest priority)."""
+    pid = create_project(conn, paths, "scr")
+    run_id, ids = new_id(), []
+    with transaction(conn):
+        save_criteria(conn, pid, CRIT)
+        conn.execute("INSERT INTO discovery_runs(id, project_id, kind, status, started_at) VALUES (?,?,?,?,?)",
+                     (run_id, pid, "search", "done", now()))
+        for i, (title, abstract) in enumerate(papers):
+            paper_id = new_id()
+            ids.append(paper_id)
+            conn.execute("INSERT INTO papers(id, title, abstract, created_at, updated_at) VALUES (?,?,?,?,?)",
+                         (paper_id, title, abstract, now(), now()))
+            conn.execute("INSERT INTO project_papers(project_id, paper_id, source, added_at) VALUES (?,?,?,?)",
+                         (pid, paper_id, "discovery", now()))
+            conn.execute("INSERT INTO discovery_results(run_id, paper_id, score, n_hits, new_to_project, priority)"
+                         " VALUES (?,?,?,?,?,?)", (run_id, paper_id, 1 - i / 10, 1, 1, 1 - i / 10))
+    return pid, run_id, ids
+
+
+def answer(messages: list[dict[str, str]]) -> dict[str, Any]:
+    text = messages[-1]["content"]
+    mouse = "mice" in text
+    return {"relevance": 1 if mouse else 4,
+            "inclusion": [{"status": "met", "evidence": "neural mass model"}],
+            "exclusion": [{"status": "violated" if mouse else "not_violated", "evidence": "in mice" if mouse else ""}],
+            "reason": "r"}
+
+
+PAPERS = [("Neural mass model fit", "A neural mass model fitted to EEG."),
+          ("Mouse study", "A neural mass model in mice only."),
+          ("No abstract", None)]
+
+
+def test_screen_run_writes_results_and_caches(conn: sqlite3.Connection, paths: Paths) -> None:
+    pid, run_id, ids = make_run(conn, paths, PAPERS)
+    llm = FakeLlm(answer)
+    report = screen_run(conn, llm, run_id, top=10)
+    assert (report.candidates, report.screened, report.cached, report.failed) == (3, 3, 0, 0)
+    rows = {r["paper_id"]: r for r in conn.execute("SELECT * FROM screening_results WHERE project_id=?", (pid,))}
+    assert rows[ids[0]]["decision"] == "include"
+    assert rows[ids[1]]["decision"] == "exclude"
+    assert rows[ids[2]]["model"] == "fake"
+    again = screen_run(conn, llm, run_id, top=10)
+    assert (again.screened, again.cached, llm.calls) == (0, 3, 3)
+
+
+def test_screen_run_top_limits_and_order(conn: sqlite3.Connection, paths: Paths) -> None:
+    _, run_id, ids = make_run(conn, paths, PAPERS)
+    report = screen_run(conn, FakeLlm(answer), run_id, top=1)
+    assert report.candidates == 1
+    assert [r[0] for r in conn.execute("SELECT paper_id FROM screening_results")] == [ids[0]]
+    with pytest.raises(ValueError, match="at least 1"):
+        screen_run(conn, FakeLlm(answer), run_id, top=0)
+
+
+def test_changed_criteria_rescreen(conn: sqlite3.Connection, paths: Paths) -> None:
+    pid, run_id, _ = make_run(conn, paths, PAPERS[:1])
+    llm = FakeLlm(answer)
+    screen_run(conn, llm, run_id, top=5)
+    with transaction(conn):
+        save_criteria(conn, pid, Criteria(question="other question", include=["x"], exclude=["y"]))
+    assert screen_run(conn, llm, run_id, top=5).screened == 1 and llm.calls == 2
+
+
+def test_model_failure_retries_once_then_records_uncertain(conn: sqlite3.Connection, paths: Paths) -> None:
+    _, run_id, ids = make_run(conn, paths, PAPERS[:1])
+    llm = FakeLlm(lambda m: "garbage")
+    report = screen_run(conn, llm, run_id, top=5)
+    assert report.failed == 1 and llm.calls == 2
+    row = conn.execute("SELECT decision, error FROM screening_results WHERE paper_id=?", (ids[0],)).fetchone()
+    assert row["decision"] == "uncertain" and row["error"]
+    assert screen_run(conn, FakeLlm(answer), run_id, top=5).screened == 1  # failed results are retried
+
+
+def test_no_criteria_or_unreachable_model_touches_nothing(conn: sqlite3.Connection, paths: Paths) -> None:
+    pid, run_id, _ = make_run(conn, paths, PAPERS)
+    with pytest.raises(LlmError):
+        screen_run(conn, OllamaClient("http://127.0.0.1:9", "qwen3:4b", timeout_s=1), run_id, top=5)
+    with transaction(conn):
+        save_criteria(conn, pid, Criteria(question=""))
+    with pytest.raises(ValueError, match="criteria"):
+        screen_run(conn, FakeLlm(answer), run_id, top=5)
+    assert conn.execute("SELECT COUNT(*) FROM screening_results").fetchone()[0] == 0
+    with pytest.raises(LookupError):
+        screen_run(conn, FakeLlm(answer), "nope", top=5)
