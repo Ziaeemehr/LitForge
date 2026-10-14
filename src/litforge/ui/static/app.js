@@ -105,6 +105,8 @@
     var cur = state.projects.find(function (p) { return p.name === state.project; });
     $('current-project').innerHTML = cur ? esc(cur.name) + ' <small>· ' + cur.papers + ' papers</small>'
       : '<small>No project yet: start with + New</small>';
+    $('btn-delete-project').hidden = !cur;
+    $('btn-delete-project').onclick = cur ? function () { deleteProject(cur); } : null;
   }
 
   // Exports and new searches use the selected project.
@@ -145,25 +147,26 @@
       e.preventDefault();
       post('/api/open-exports', { project: p.name }).catch(function (err) { toast(err.message); });
     };
-    $('delete-project').onclick = function (e) {
-      e.preventDefault();
-      var typed = window.prompt('Delete project "' + p.name + '" with its ' + p.papers + ' papers list, runs and marks?\n' +
-        'Papers and PDFs stay in the library.\nType the project name to confirm:');
-      if (typed === null) return;
-      if (typed.trim() !== p.name) { toast('Name did not match; nothing deleted'); return; }
-      var dropExports = window.confirm('Also delete its exports (the notes and PDFs in ' + p.export_dir + '/markdown)?\n\n' +
-        'OK = delete them too · Cancel = keep them');
-      post('/api/delete-project', { project: p.name, delete_exports: dropExports }).then(function (r) {
-        toast('Deleted ' + p.name + (r.kept_exports ? '; exports kept in ' + r.kept_exports : ''));
-        state.project = null;
-        store.set('project', null);
-        state.runId = null;
-        state.data = null;
-        state.dirEdited = false;
-        render();
-        return loadProjects();
-      }).catch(function (err) { toast(err.message); });
-    };
+    $('delete-project').onclick = function (e) { e.preventDefault(); deleteProject(p); };
+  }
+
+  function deleteProject(p) {
+    var typed = window.prompt('Delete project "' + p.name + '" with its ' + p.papers + ' papers list, runs and marks?\n' +
+      'Papers and PDFs stay in the library.\nType the project name to confirm:');
+    if (typed === null) return;
+    if (typed.trim() !== p.name) { toast('Name did not match; nothing deleted'); return; }
+    var dropExports = window.confirm('Also delete its exports (the notes and PDFs in ' + p.export_dir + '/markdown)?\n\n' +
+      'OK = delete them too · Cancel = keep them');
+    post('/api/delete-project', { project: p.name, delete_exports: dropExports }).then(function (r) {
+      toast('Deleted ' + p.name + (r.kept_exports ? '; exports kept in ' + r.kept_exports : ''));
+      state.project = null;
+      store.set('project', null);
+      state.runId = null;
+      state.data = null;
+      state.dirEdited = false;
+      render();
+      return loadProjects();
+    }).catch(function (err) { toast(err.message); });
   }
 
   // Sidebar: the latest searches of all projects, like a chat app's history.
