@@ -1,0 +1,25 @@
+# LitForge default configuration. Override with LITFORGE_CONFIG=<path>.
+
+parsing:
+  fast_path: pymupdf
+  complex_fallback: docling
+  ocr: selective
+  keep_originals: true
+  # Figure crops are rendered at this resolution.
+  figure_dpi: 150
+  # Router thresholds: initial heuristics, to be calibrated on the benchmark set.
+  router:
+    min_chars_per_page: 200          # below this a page counts as text-sparse
+    max_sparse_page_ratio: 0.5       # above this ratio of sparse pages -> needs_ocr
+    max_replacement_char_ratio: 0.01 # U+FFFD or control chars -> needs_docling
+    max_fragmented_line_ratio: 0.35  # very short lines suggest garbled order
+    max_table_count: 6               # many tables -> needs_docling
+
+indexing:
+  chunk_target_tokens: 600
+  chunk_overlap_tokens: 80
+  index_references: false
+  index_captions: true
+
+privacy:
+  allow_cloud: false

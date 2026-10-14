@@ -1,0 +1,19 @@
+# Local data: PDFs, parsed output, databases, logs
+data/
+
+# Environment and secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store
