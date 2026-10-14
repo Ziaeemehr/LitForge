@@ -224,7 +224,7 @@ class App:
     def screen_job(self, body: dict[str, Any]) -> Job:
         """Screen the top papers of a run with the local model; reports back the run so the page reloads it."""
         run_id = str(body["run_id"])
-        top = int(body.get("top") or self.config.screening.default_top)
+        top = self.config.screening.default_top if body.get("top") is None else int(body["top"])
         if top < 1:
             raise ValueError("top must be at least 1")
         conn = self.db()

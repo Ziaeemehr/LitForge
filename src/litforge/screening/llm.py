@@ -16,6 +16,10 @@ class LlmError(RuntimeError):
     pass
 
 
+class LlmUnavailable(LlmError):
+    """The server cannot be reached: stop the run instead of recording every paper as failed."""
+
+
 class Llm(Protocol):
     name: str
 
@@ -38,7 +42,7 @@ class OllamaClient:
         except urllib.error.HTTPError as exc:
             raise LlmError(f"Ollama error {exc.code}: {exc.read().decode(errors='replace')[:200]}") from exc
         except (urllib.error.URLError, OSError) as exc:
-            raise LlmError(f"Ollama not reachable at {self.url} ({exc}); start it with `ollama serve`") from exc
+            raise LlmUnavailable(f"Ollama not reachable at {self.url} ({exc}); start it with `ollama serve`") from exc
 
     def check(self) -> None:
         names = {m.get("name") for m in self._call("/api/tags").get("models", [])}

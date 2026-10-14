@@ -106,3 +106,8 @@ def test_fingerprint_changes_with_model_criteria_and_text() -> None:
     assert base != fingerprint(C, "qwen3:4b", "t", "a2")
     assert base != fingerprint(Criteria(question="other"), "qwen3:4b", "t", "a")
     assert PROMPT_VERSION
+
+
+def test_infinite_relevance_does_not_crash() -> None:
+    assert decide({"relevance": float("inf")}, C, "T", ABSTRACT).relevance == 0
+    assert decide({"relevance": float("nan")}, C, "T", ABSTRACT).relevance == 0

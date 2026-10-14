@@ -61,7 +61,7 @@ def decide(raw: dict[str, Any], c: Criteria, title: str | None, abstract: str | 
     source = _norm(f"{title or ''} {abstract or ''}")
     try:
         relevance = max(0, min(5, int(raw.get("relevance", 0))))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # also NaN / Infinity, which json.loads accepts
         relevance = 0
     inclusion = _items(raw.get("inclusion"), c.include, INCLUSION, source)
     exclusion = _items(raw.get("exclusion"), c.exclude, EXCLUSION, source)

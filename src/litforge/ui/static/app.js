@@ -11,7 +11,7 @@
   var state = {
     mode: 'similar', projects: [], project: store.get('project', null), runId: null, data: null,
     filter: '', oa: false, onlyNew: false, hide: false, channel: null, sort: store.get('sort', 'score'),
-    screenFilter: '', criteria: null, criteriaFor: null,
+    screenFilter: '', criteria: null, criteriaFor: null, criteriaLoading: null,
     sel: -1, view: [], page: 'new', pdf: null, list: null, pdfs: [], job: null, anchor: -1, exportsRoot: '', dirEdited: false
   };
 
@@ -312,13 +312,27 @@
 
   /* ---------- screening ---------- */
 
+  // The form belongs to state.criteriaFor; until the current project's criteria arrive, Save and Screen are
+  // disabled so the previous project's text is never saved under the new project.
+  function criteriaReady(ready) {
+    $('btn-crit-save').disabled = !ready;
+    $('btn-screen').disabled = !ready;
+  }
+
   function loadCriteria() {
-    if (!state.project) return;
+    if (!state.project || state.criteriaLoading === state.project) return;
     var project = state.project;
-    state.criteriaFor = project;
+    state.criteriaLoading = project;
+    criteriaReady(false);
     api('/api/criteria?project=' + encodeURIComponent(project)).then(function (c) {
-      if (state.project === project) showCriteria(c);
-    }).catch(function (e) { toast(e.message); });
+      if (state.project !== project) return;
+      state.criteriaFor = project;
+      state.criteria = null;  // a different project: replace the form's text
+      showCriteria(c);
+      criteriaReady(true);
+    }).catch(function (e) { toast(e.message); }).then(function () {
+      if (state.criteriaLoading === project) state.criteriaLoading = null;
+    });
   }
 
   function showCriteria(c) {
@@ -603,7 +617,7 @@
     $('btn-run').disabled = busy;
     $('btn-more').disabled = busy;
     $('btn-export').disabled = busy;
-    $('btn-screen').disabled = busy;
+    $('btn-screen').disabled = busy || state.criteriaFor !== state.project;
   }
 
   function logLine(text, cls) {
@@ -926,12 +940,13 @@
     $('screen-filter').onchange = function () { state.screenFilter = this.value; state.anchor = -1; renderList(); };
     $('screen-n').oninput = function () { this.dataset.touched = '1'; };
     $('btn-crit-save').onclick = function () {
-      if (!state.project) { toast('Open a run first'); return; }
+      if (!state.project || state.criteriaFor !== state.project) { toast('Open a run first'); return; }
       saveCriteria().then(function () { toast('Criteria saved'); }).catch(function (e) { toast(e.message); });
     };
     $('btn-screen').onclick = function () {
-      if (!state.runId) { toast('Open a run first'); return; }
-      var n = Math.max(1, parseInt($('screen-n').value, 10) || 100);
+      if (!state.runId || state.criteriaFor !== state.project) { toast('Open a run first'); return; }
+      var n = parseInt($('screen-n').value, 10);  // the server rejects values below 1
+      if (isNaN(n)) n = state.criteria ? state.criteria.default_top : 100;
       setBusy(true);
       saveCriteria().then(function () { return post('/api/screen', { run_id: state.runId, top: n }); })
         .then(function (job) {

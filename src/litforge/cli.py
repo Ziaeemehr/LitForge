@@ -468,7 +468,8 @@ def screen(
             raise typer.Exit(2)
         run = str(row["id"])
     try:
-        report = screen_run(conn, _make_llm(st.config, model), run, top or st.config.screening.default_top,
+        report = screen_run(conn, _make_llm(st.config, model), run,
+                            st.config.screening.default_top if top is None else top,
                             progress=None if as_json else typer.echo, log=st.log)
     except (ValueError, LookupError, LlmError) as exc:
         typer.secho(str(exc), fg="red", err=True)

@@ -309,6 +309,7 @@ def test_criteria_screen_job_and_screening_fields(screen_server: str) -> None:
     assert status == 200 and crit["include"] == ["a", "b"] and crit["model"]
     assert call(s, "/api/criteria?project=scr")[1]["question"] == "q"
 
+    assert call(s, "/api/screen", {"run_id": run_id, "top": 0})[0] == 400
     status, job = call(s, "/api/screen", {"run_id": run_id, "top": 3})
     assert status == 200
     job = wait_job(s, job["id"])

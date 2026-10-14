@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from litforge.observability import EventLog
 from litforge.screening.criteria import criteria_hash, load_criteria
 from litforge.screening.decide import Decision, decide, failed_decision
-from litforge.screening.llm import Llm, LlmError
+from litforge.screening.llm import Llm, LlmError, LlmUnavailable
 from litforge.screening.prompt import PROMPT_VERSION, build_messages, fingerprint, response_schema
 from litforge.storage.db import now, transaction
 
@@ -63,6 +63,8 @@ def screen_run(conn: sqlite3.Connection, llm: Llm, run_id: str, top: int,
             try:
                 decision = decide(llm.chat_json(messages, schema), criteria, p["title"], p["abstract"])
                 break
+            except LlmUnavailable:
+                raise
             except LlmError as exc:
                 error = str(exc)
         if decision is None:

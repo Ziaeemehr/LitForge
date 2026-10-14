@@ -219,3 +219,36 @@ def test_live_ollama_screens_obvious_cases(conn: sqlite3.Connection, paths: Path
     screen_run(conn, ollama_from_config(load_config().screening), run_id, top=2)
     got = {r["paper_id"]: r["decision"] for r in conn.execute("SELECT paper_id, decision FROM screening_results")}
     assert got[ids[0]] == "include" and got[ids[1]] != "include"
+
+
+def test_ollama_dying_mid_run_aborts_and_keeps_earlier_results(conn: sqlite3.Connection, paths: Paths) -> None:
+    from litforge.screening.llm import LlmUnavailable
+
+    _, run_id, ids = make_run(conn, paths, PAPERS)
+
+    def flaky(messages: list[dict[str, str]]) -> dict[str, Any]:
+        if "Mouse" in messages[-1]["content"]:
+            raise LlmUnavailable("Ollama not reachable")
+        return answer(messages)
+
+    with pytest.raises(LlmUnavailable):
+        screen_run(conn, FakeLlm(flaky), run_id, top=5)
+    assert [r[0] for r in conn.execute("SELECT paper_id FROM screening_results")] == [ids[0]]
+
+
+def test_ollama_unreachable_error_is_unavailable() -> None:
+    from litforge.screening.llm import LlmUnavailable
+
+    with pytest.raises(LlmUnavailable):
+        OllamaClient("http://127.0.0.1:9", "qwen3:4b", timeout_s=1).chat_json([], {})
+
+
+def test_cli_screen_rejects_top_zero(conn: sqlite3.Connection, paths: Paths, monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from litforge import cli
+
+    make_run(conn, paths, PAPERS)
+    monkeypatch.setattr(cli, "_make_llm", lambda config, model: FakeLlm(answer))
+    result = CliRunner().invoke(cli.app, ["--data-dir", str(paths.root), "screen", "--project", "scr", "--top", "0"])
+    assert result.exit_code == 2 and conn.execute("SELECT COUNT(*) FROM screening_results").fetchone()[0] == 0
