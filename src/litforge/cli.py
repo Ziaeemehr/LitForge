@@ -19,7 +19,14 @@ from litforge.indexing.fts import current_runs, index_run, search
 from litforge.ingest import ingest_paths
 from litforge.observability import EventLog
 from litforge.parsing.run import artifacts_for_project, parse_artifact
-from litforge.projects import ProjectNotFound, create_project, get_project_id, list_projects
+from litforge.projects import (
+    ProjectNotFound,
+    create_project,
+    get_active,
+    get_project_id,
+    list_projects,
+    set_active,
+)
 from litforge.storage.db import open_db
 
 app = typer.Typer(help="Local-first scientific literature library.", no_args_is_help=True)
@@ -42,14 +49,34 @@ def _state(ctx: typer.Context) -> State:
     return ctx.obj  # type: ignore[no-any-return]
 
 
-def _project_id(conn: sqlite3.Connection, name: str | None) -> str | None:
+ProjectOpt = Annotated[str | None, typer.Option("--project", "-p", help="Project (default: the active project)")]
+
+
+def _project(
+    st: State, conn: sqlite3.Connection, name: str | None, required: bool = False
+) -> tuple[str | None, str | None]:
+    """Resolve (name, id): explicit --project, else the active project, else None (whole library)."""
+    name = name or get_active(st.paths)
     if name is None:
-        return None
+        if required:
+            typer.secho("no project selected; create one with `litforge new NAME`", fg="red", err=True)
+            raise typer.Exit(2)
+        return None, None
     try:
-        return get_project_id(conn, name)
+        return name, get_project_id(conn, name)
     except ProjectNotFound as exc:
         typer.secho(str(exc), fg="red", err=True)
         raise typer.Exit(2) from exc
+
+
+def _create(st: State, name: str, topic: str | None, question: str | None) -> None:
+    try:
+        create_project(st.db(), st.paths, name, topic, question)
+    except ValueError as exc:
+        typer.secho(str(exc), fg="red", err=True)
+        raise typer.Exit(2) from exc
+    set_active(st.paths, name)
+    typer.echo(f"created project '{name}' (now active) at {st.paths.project_dir(name)}")
 
 
 def _emit_json(items: Sequence[BaseModel] | Sequence[dict[str, Any]]) -> None:
@@ -90,36 +117,51 @@ def project_create(
     topic: Annotated[str | None, typer.Option(help="Short topic description")] = None,
     question: Annotated[str | None, typer.Option(help="Research question")] = None,
 ) -> None:
-    """Create a project workspace."""
+    """Create a project and make it active."""
+    _create(_state(ctx), name, topic, question)
+
+
+@app.command()
+def new(
+    ctx: typer.Context,
+    name: str,
+    topic: Annotated[str | None, typer.Option(help="Short topic description")] = None,
+) -> None:
+    """Create a project and make it active (shortcut for `project create`)."""
+    _create(_state(ctx), name, topic, None)
+
+
+@project_app.command("use")
+def project_use(ctx: typer.Context, name: str) -> None:
+    """Make an existing project active, so --project can be omitted."""
     st = _state(ctx)
-    conn = st.db()
-    try:
-        create_project(conn, st.paths, name, topic, question)
-    except ValueError as exc:
-        typer.secho(str(exc), fg="red", err=True)
-        raise typer.Exit(2) from exc
-    typer.echo(f"created project '{name}' at {st.paths.project_dir(name)}")
+    _project(st, st.db(), name, required=True)
+    set_active(st.paths, name)
+    typer.echo(f"active project: {name}")
 
 
 @project_app.command("list")
 def project_list(ctx: typer.Context) -> None:
-    """List projects with paper counts."""
-    for row in list_projects(_state(ctx).db()):
-        typer.echo(f"{row['name']:<24} {row['papers']:>5} papers  {row['topic'] or ''}")
+    """List projects with paper counts (* = active)."""
+    st = _state(ctx)
+    active = get_active(st.paths)
+    for row in list_projects(st.db()):
+        mark = "*" if row["name"] == active else " "
+        typer.echo(f"{mark} {row['name']:<24} {row['papers']:>5} papers  {row['topic'] or ''}")
 
 
 @app.command()
 def ingest(
     ctx: typer.Context,
     sources: Annotated[list[Path], typer.Argument(help="PDF files or directories", exists=True)],
-    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
+    project: ProjectOpt = None,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Import PDFs into the library (idempotent: identical files are never duplicated)."""
     st = _state(ctx)
     conn = st.db()
-    results = ingest_paths(conn, st.paths, sources, _project_id(conn, project), dry_run, st.log)
+    results = ingest_paths(conn, st.paths, sources, _project(st, conn, project)[1], dry_run, st.log)
     if as_json:
         _emit_json(results)
         return
@@ -133,9 +175,38 @@ def ingest(
 
 
 @app.command()
+def add(
+    ctx: typer.Context,
+    sources: Annotated[list[Path], typer.Argument(help="PDF files or directories", exists=True)],
+    project: ProjectOpt = None,
+) -> None:
+    """Add PDFs to a project: import, parse and index in one step (safe to re-run)."""
+    st = _state(ctx)
+    conn = st.db()
+    if project is None and get_active(st.paths) is None:
+        _create(st, "default", None, None)
+    name, pid = _project(st, conn, project, required=True)
+    results = ingest_paths(conn, st.paths, sources, pid, False, st.log)
+    counts: dict[str, int] = {}
+    for r in results:
+        counts[r.status] = counts.get(r.status, 0) + 1
+        if r.status in ("quarantined", "error"):
+            typer.secho(f"  skipped {Path(r.path).name}: {r.message}", fg="yellow")
+    typer.echo(f"imported into '{name}': " + (", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "no PDFs"))
+    statuses: dict[str, int] = {}
+    with typer.progressbar(artifacts_for_project(conn, pid), label="parsing") as artifacts:
+        for art in artifacts:
+            res = parse_artifact(conn, st.paths, st.config, art, log=st.log)
+            statuses[res.status or "?"] = statuses.get(res.status or "?", 0) + 1
+    typer.echo("parsed: " + ", ".join(f"{k} {v}" for k, v in sorted(statuses.items())))
+    chunks = sum(index_run(conn, st.paths, st.config, run).chunks for run in current_runs(conn, pid))
+    typer.echo(f"indexed: {chunks} chunks. Try: litforge search \"your query\"")
+
+
+@app.command()
 def parse(
     ctx: typer.Context,
-    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
+    project: ProjectOpt = None,
     force: Annotated[bool, typer.Option("--force", help="Re-parse even when cached")] = False,
     no_docling: Annotated[bool, typer.Option("--no-docling", help="Never run the Docling fallback")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
@@ -144,7 +215,7 @@ def parse(
     """Parse ingested PDFs (cached by PDF hash + parser version + config; resumable)."""
     st = _state(ctx)
     conn = st.db()
-    artifacts = artifacts_for_project(conn, _project_id(conn, project))
+    artifacts = artifacts_for_project(conn, _project(st, conn, project)[1])
     if dry_run:
         typer.echo(f"[dry-run] {len(artifacts)} artifact(s) would be parsed or served from cache")
         return
@@ -165,7 +236,7 @@ def parse(
 @app.command()
 def index(
     ctx: typer.Context,
-    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
+    project: ProjectOpt = None,
     force: Annotated[bool, typer.Option("--force")] = False,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -173,7 +244,7 @@ def index(
     st = _state(ctx)
     conn = st.db()
     results = [index_run(conn, st.paths, st.config, run, force)
-               for run in current_runs(conn, _project_id(conn, project))]
+               for run in current_runs(conn, _project(st, conn, project)[1])]
     if as_json:
         _emit_json(results)
         return
@@ -186,15 +257,16 @@ def index(
 def search_cmd(
     ctx: typer.Context,
     query: str,
-    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
+    project: ProjectOpt = None,
     limit: Annotated[int, typer.Option("--limit", "-n")] = 10,
     max_per_paper: Annotated[int, typer.Option(help="Cap hits per paper")] = 3,
     raw: Annotated[bool, typer.Option("--raw", help="Pass query as raw FTS5 syntax")] = False,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Lexical (BM25) search; every hit carries paper, section, page and a quoted snippet."""
-    conn = _state(ctx).db()
-    hits = search(conn, query, _project_id(conn, project), limit, max_per_paper, raw)
+    st = _state(ctx)
+    conn = st.db()
+    hits = search(conn, query, _project(st, conn, project)[1], limit, max_per_paper, raw)
     if as_json:
         _emit_json(hits)
         return
@@ -210,8 +282,9 @@ def search_cmd(
 @app.command()
 def status(ctx: typer.Context, project: Annotated[str | None, typer.Option("--project", "-p")] = None) -> None:
     """Summarize library or project state."""
-    conn = _state(ctx).db()
-    pid = _project_id(conn, project)
+    st = _state(ctx)
+    conn = st.db()
+    project, pid = _project(st, conn, project)
     scope = "WHERE a.paper_id IN (SELECT paper_id FROM project_papers WHERE project_id=:pid)" if pid else ""
     art = conn.execute(f"SELECT a.status, COUNT(*) n FROM artifacts a {scope} GROUP BY a.status",
                        {"pid": pid}).fetchall()
@@ -235,18 +308,18 @@ def status(ctx: typer.Context, project: Annotated[str | None, typer.Option("--pr
 @app.command()
 def export(
     ctx: typer.Context,
-    project: Annotated[str, typer.Option("--project", "-p")],
+    project: ProjectOpt = None,
     fmt: Annotated[str, typer.Option("--format", help="Export format (markdown)")] = "markdown",
 ) -> None:
     """Export a project's papers as Markdown with relative asset links."""
     st = _state(ctx)
     conn = st.db()
-    pid = _project_id(conn, project)
-    assert pid is not None
+    name, pid = _project(st, conn, project, required=True)
+    assert name is not None and pid is not None
     if fmt != "markdown":
         typer.secho(f"format '{fmt}' not supported yet; available: markdown", fg="red", err=True)
         raise typer.Exit(2)
-    out = export_markdown(conn, st.paths, project, pid)
+    out = export_markdown(conn, st.paths, name, pid)
     typer.echo(f"exported to {out}")
 
 

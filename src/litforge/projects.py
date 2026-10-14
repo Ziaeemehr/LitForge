@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -73,3 +74,20 @@ def list_projects(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 def project_file(paths: Paths, name: str) -> Path:
     return paths.project_dir(name) / "project.yaml"
+
+
+def _state_file(paths: Paths) -> Path:
+    return paths.root / "state.json"
+
+
+def get_active(paths: Paths) -> str | None:
+    """Name of the active project (set by `new`/`project use`), if any."""
+    try:
+        return json.loads(_state_file(paths).read_text()).get("active_project")  # type: ignore[no-any-return]
+    except (OSError, ValueError):
+        return None
+
+
+def set_active(paths: Paths, name: str) -> None:
+    paths.root.mkdir(parents=True, exist_ok=True)
+    _state_file(paths).write_text(json.dumps({"active_project": name}) + "\n")

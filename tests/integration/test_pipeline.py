@@ -189,6 +189,26 @@ def test_export_markdown_has_relative_working_links(
             assert (md.parent / link).resolve().is_file(), link
 
 
+def test_cli_quick_start_uses_active_project(tmp_path: Path, corpus: Path) -> None:
+    runner = CliRunner()
+    base = ["--data-dir", str(tmp_path / "data")]
+    for args in (["new", "my-review", "--topic", "t"], ["add", str(corpus)], ["export"]):
+        result = runner.invoke(app, base + args)
+        assert result.exit_code == 0, (args, result.output)
+    result = runner.invoke(app, base + ["search", "zebrafinch", "--json"])
+    assert json.loads(result.output)[0]["page"] == 3
+    assert (tmp_path / "data/projects/my-review/exports/markdown/README.md").is_file()
+    listing = runner.invoke(app, base + ["project", "list"]).output
+    assert listing.startswith("* my-review")
+
+
+def test_cli_add_without_project_creates_default(tmp_path: Path, corpus: Path) -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["--data-dir", str(tmp_path / "data"), "add", str(corpus / "two_column.pdf")])
+    assert result.exit_code == 0, result.output
+    assert "created project 'default'" in result.output
+
+
 def test_cli_end_to_end(tmp_path: Path, corpus: Path) -> None:
     runner = CliRunner()
     base = ["--data-dir", str(tmp_path / "data")]
