@@ -21,5 +21,11 @@ indexing:
   index_references: false
   index_captions: true
 
+discovery:
+  sources: [openalex, crossref, arxiv]
+  limit: 25            # results per source and query
+  cache_ttl_days: 7    # API responses are cached under data/cache/http
+  mailto: null         # optional contact e-mail sent to OpenAlex/Crossref ("polite pool")
+
 privacy:
   allow_cloud: false

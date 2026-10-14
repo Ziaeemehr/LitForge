@@ -26,10 +26,10 @@ def export_markdown(conn: sqlite3.Connection, paths: Paths, project: str, projec
     kb = root / "knowledge_base"
     kb.mkdir(parents=True, exist_ok=True)
     rows = conn.execute(
-        """SELECT p.id, p.title, p.year, p.doi, p.doi_status, a.sha256, r.parser, r.status, r.output_dir
+        """SELECT p.id, p.title, p.year, p.doi, p.doi_status, p.abstract, a.sha256, r.parser, r.status, r.output_dir
            FROM project_papers pp
            JOIN papers p ON p.id = pp.paper_id
-           JOIN artifacts a ON a.paper_id = p.id AND a.status = 'ok'
+           LEFT JOIN artifacts a ON a.paper_id = p.id AND a.status = 'ok'
            LEFT JOIN parse_runs r ON r.artifact_id = a.id AND r.is_current = 1
            WHERE pp.project_id = ? ORDER BY p.year, p.title""",
         (project_id,),
@@ -37,11 +37,11 @@ def export_markdown(conn: sqlite3.Connection, paths: Paths, project: str, projec
     index_lines = [
         f"# {project}\n",
         "> Private export: contains full extracted text and figure crops.\n",
-        "| Paper | Year | Parse status | File |",
+        "| Paper | Year | Status | PDF |",
         "|---|---|---|---|",
     ]
     for row in rows:
-        title = row["title"] or f"Untitled ({row['sha256'][:8]})"
+        title = row["title"] or f"Untitled ({(row['sha256'] or row['id'])[:8]})"
         slug = f"{slugify(title)}-{row['id'][:8]}"
         front = {
             "paper_id": row["id"],
@@ -50,11 +50,13 @@ def export_markdown(conn: sqlite3.Connection, paths: Paths, project: str, projec
             "doi": row["doi"],
             "doi_status": row["doi_status"],
             "project": project,
-            "parse_status": row["status"] or "not_parsed",
+            "parse_status": row["status"] or ("not_parsed" if row["sha256"] else "no_pdf"),
             "parser": row["parser"],
             "pdf_sha256": row["sha256"],
         }
-        body = "_Not parsed yet._\n"
+        body = "_Not parsed yet._\n" if row["sha256"] else f"# {title}\n\n_No PDF in the library yet._\n"
+        if not row["sha256"] and row["abstract"]:
+            body += f"\n## Abstract\n\n{row['abstract']}\n"
         if row["output_dir"]:
             out_dir = paths.root / row["output_dir"]
             doc = read_canonical(out_dir)
@@ -68,7 +70,7 @@ def export_markdown(conn: sqlite3.Connection, paths: Paths, project: str, projec
         (kb / f"{slug}.md").write_text(header + body, encoding="utf-8")
         index_lines.append(
             f"| [{title.replace('|', '/')}](knowledge_base/{slug}.md) | {row['year'] or ''} "
-            f"| {row['status'] or 'not_parsed'} | {row['sha256'][:10]} |"
+            f"| {front['parse_status']} | {(row['sha256'] or '')[:10]} |"
         )
     (root / "README.md").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
     (root / "manifest.json").write_text(

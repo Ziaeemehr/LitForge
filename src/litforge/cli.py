@@ -12,7 +12,9 @@ from typing import Annotated, Any
 import typer
 from pydantic import BaseModel
 
-from litforge.config import Config, Paths, load_config, resolve_paths
+from litforge.config import Config, EnvSettings, Paths, load_config, resolve_paths
+from litforge.discovery.http import HttpClient
+from litforge.discovery.run import DiscoveryReport, Sources, enrich_project, run_citations, run_import, run_search
 from litforge.doctor import run_checks
 from litforge.export.markdown import export_markdown
 from litforge.indexing.fts import current_runs, index_run, search
@@ -298,7 +300,13 @@ def status(ctx: typer.Context, project: Annotated[str | None, typer.Option("--pr
             JOIN artifacts a ON a.id = r.artifact_id {scope}""", {"pid": pid},
     ).fetchone()[0]
     dupes = conn.execute("SELECT COUNT(*) FROM duplicate_candidates WHERE status='pending'").fetchone()[0]
+    paper_scope = "WHERE p.id IN (SELECT paper_id FROM project_papers WHERE project_id=:pid)" if pid else ""
+    n_papers, n_pdf = conn.execute(
+        f"""SELECT COUNT(*), SUM(EXISTS(SELECT 1 FROM artifacts a WHERE a.paper_id = p.id AND a.status='ok'))
+            FROM papers p {paper_scope}""", {"pid": pid},
+    ).fetchone()
     typer.echo(f"scope: {project or 'whole library'}")
+    typer.echo(f"papers: {n_papers} ({n_pdf or 0} with PDF)")
     typer.echo("artifacts: " + (", ".join(f"{r['status']} {r['n']}" for r in art) or "none"))
     typer.echo("current parses: " + (", ".join(f"{r['status']}/{r['parser']} {r['n']}" for r in runs) or "none"))
     typer.echo(f"indexed chunks: {chunks}")
@@ -321,6 +329,138 @@ def export(
         raise typer.Exit(2)
     out = export_markdown(conn, st.paths, name, pid)
     typer.echo(f"exported to {out}")
+
+
+# ---- discovery ------------------------------------------------------------
+
+
+def _sources(st: State, refresh: bool) -> Sources:
+    env = EnvSettings()
+    http = HttpClient(cache_dir=st.paths.http_cache, cache_ttl_s=st.config.discovery.cache_ttl_days * 86400,
+                      refresh=refresh)
+    return Sources(http, env.openalex_api_key, env.mailto or st.config.discovery.mailto)
+
+
+def _print_report(report: DiscoveryReport) -> None:
+    for name, n in sorted(report.per_source.items()):
+        typer.echo(f"  {name:<10} {n} results")
+    for err in report.errors:
+        typer.secho(f"  error: {err}", fg="yellow")
+    typer.echo(f"{report.papers} papers ({report.new_to_project} new to the project, {report.created} new to the "
+               f"library); {report.requests} requests, {report.cache_hits} from cache"
+               + (f", ${report.cost_usd:.4f} API cost" if report.cost_usd else ""))
+    for n, p in enumerate(report.top, 1):
+        flags = ("new " if p.new_to_project else "") + ("pdf" if p.has_pdf else "")
+        ident = p.doi or (f"arXiv:{p.arxiv_id}" if p.arxiv_id else "")
+        typer.echo(f"{n:>3}. [{p.score:.2f}] {p.title or '(no title)'} ({p.year or '?'})")
+        typer.echo(f"       {ident}  {'/'.join(p.sources)}  {flags}".rstrip())
+
+
+@app.command()
+def discover(
+    ctx: typer.Context,
+    queries: Annotated[list[str] | None, typer.Argument(help="Search queries (default: the project topic)")] = None,
+    project: ProjectOpt = None,
+    source: Annotated[list[str] | None, typer.Option("--source", "-s", help="openalex, crossref, arxiv")] = None,
+    limit: Annotated[int | None, typer.Option("--limit", "-n", help="Results per source and query")] = None,
+    seed: Annotated[list[str] | None, typer.Option(help="DOI, arXiv id or paper id to follow citations from")] = None,
+    citations: Annotated[str, typer.Option(help="With --seed: references, cited_by or both")] = "both",
+    top: Annotated[int, typer.Option(help="How many ranked results to show")] = 20,
+    refresh: Annotated[bool, typer.Option("--refresh", help="Ignore cached API responses")] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Find papers by search queries and/or by following citations of seed papers."""
+    st = _state(ctx)
+    conn = st.db()
+    name, pid = _project(st, conn, project, required=True)
+    assert pid is not None
+    srcs = _sources(st, refresh)
+    cfg = st.config.discovery
+    topic_row = conn.execute("SELECT topic, research_question FROM projects WHERE id=?", (pid,)).fetchone()
+    topic = topic_row["research_question"] or topic_row["topic"]
+    reports = []
+    if seed:
+        if citations not in ("references", "cited_by", "both"):
+            typer.secho("--citations must be references, cited_by or both", fg="red", err=True)
+            raise typer.Exit(2)
+        reports.append(run_citations(conn, srcs, pid, seed, citations,  # type: ignore[arg-type]
+                                     limit or cfg.limit, top, topic))
+    if queries or not seed:
+        terms = queries or ([topic] if topic else [])
+        if not terms:
+            typer.secho("give a query, or set a topic with `litforge new NAME --topic ...`", fg="red", err=True)
+            raise typer.Exit(2)
+        reports.append(run_search(conn, srcs, pid, terms, source or cfg.sources, limit or cfg.limit, top))
+    if as_json:
+        _emit_json(reports)
+        return
+    for report in reports:
+        typer.secho(f"{report.kind} in '{name}' ({report.status})", bold=True)
+        _print_report(report)
+
+
+@app.command("import")
+def import_refs(
+    ctx: typer.Context,
+    file: Annotated[Path, typer.Argument(help=".bib, .ris or .csv exported from Zotero, Elicit, etc.", exists=True)],
+    project: ProjectOpt = None,
+) -> None:
+    """Import a reference list into the project (papers without PDFs are kept as records)."""
+    st = _state(ctx)
+    conn = st.db()
+    _, pid = _project(st, conn, project, required=True)
+    assert pid is not None
+    _print_report(run_import(conn, pid, file, top_n=0))
+
+
+@app.command()
+def enrich(
+    ctx: typer.Context,
+    project: ProjectOpt = None,
+    refresh: Annotated[bool, typer.Option("--refresh")] = False,
+) -> None:
+    """Complete missing DOI, year, venue and abstract from OpenAlex/arXiv; verify DOIs."""
+    st = _state(ctx)
+    conn = st.db()
+    _, pid = _project(st, conn, project, required=True)
+    assert pid is not None
+    res = enrich_project(conn, _sources(st, refresh), pid)
+    filled = ", ".join(f"{k} {v}" for k, v in sorted(res.filled.items())) or "nothing"
+    typer.echo(f"checked {res.checked}, enriched {res.enriched}, not found {res.not_found}; filled: {filled}"
+               + (f"; ${res.cost_usd:.4f} API cost" if res.cost_usd else ""))
+    for err in res.errors:
+        typer.secho(f"  error: {err}", fg="yellow")
+
+
+@app.command()
+def papers(
+    ctx: typer.Context,
+    project: ProjectOpt = None,
+    no_pdf: Annotated[bool, typer.Option("--no-pdf", help="Only papers without a PDF")] = False,
+    limit: Annotated[int, typer.Option("--limit", "-n")] = 50,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """List the project's papers, best discovery score first."""
+    st = _state(ctx)
+    conn = st.db()
+    _, pid = _project(st, conn, project, required=True)
+    rows = conn.execute(
+        f"""SELECT p.id, p.title, p.year, p.doi, p.arxiv_id, p.oa_url, pp.source,
+                   EXISTS(SELECT 1 FROM artifacts a WHERE a.paper_id = p.id AND a.status='ok') AS has_pdf,
+                   (SELECT MAX(score) FROM discovery_results dr JOIN discovery_runs r ON r.id = dr.run_id
+                    WHERE dr.paper_id = p.id AND r.project_id = pp.project_id) AS score
+            FROM project_papers pp JOIN papers p ON p.id = pp.paper_id
+            WHERE pp.project_id = ? {"AND has_pdf = 0" if no_pdf else ""}
+            ORDER BY score IS NULL, score DESC, p.year DESC LIMIT ?""",
+        (pid, limit),
+    ).fetchall()
+    if as_json:
+        _emit_json([dict(r) for r in rows])
+        return
+    for r in rows:
+        pdf = "pdf" if r["has_pdf"] else ("oa " if r["oa_url"] else "   ")
+        score = f"{r['score']:.2f}" if r["score"] is not None else "  - "
+        typer.echo(f"{score} {pdf} {r['year'] or '????'}  {(r['title'] or '(no title)')[:90]}")
 
 
 if __name__ == "__main__":

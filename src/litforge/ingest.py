@@ -11,6 +11,8 @@ import pymupdf
 from pydantic import BaseModel
 
 from litforge.config import Paths
+from litforge.discovery.merge import apply_record, ensure_norm_titles, find_match
+from litforge.discovery.records import WorkRecord
 from litforge.metadata.extract import ExtractedMetadata, extract_metadata, normalize_title
 from litforge.observability import NULL_LOG, EventLog
 from litforge.projects import add_paper
@@ -72,8 +74,8 @@ def _near_duplicates(conn: sqlite3.Connection, meta: ExtractedMetadata) -> list[
         for row in conn.execute("SELECT id FROM papers WHERE doi=?", (meta.doi.value,)):
             hits.append((row["id"], "doi"))
     if meta.title.value and len(norm := normalize_title(meta.title.value)) >= 20:
-        for row in conn.execute("SELECT id, title FROM papers WHERE title IS NOT NULL"):
-            if normalize_title(row["title"]) == norm and (row["id"], "doi") not in hits:
+        for row in conn.execute("SELECT id FROM papers WHERE norm_title=?", (norm,)):
+            if (row["id"], "doi") not in hits:
                 hits.append((row["id"], "title"))
     return hits
 
@@ -129,21 +131,48 @@ def ingest_file(
         page_count = doc.page_count
     finally:
         doc.close()
+    pdf_rec = WorkRecord(
+        source="pdf", source_id=sha, title=meta.title.value, year=meta.year.value, doi=meta.doi.value,
+        arxiv_id=meta.arxiv_id.value, abstract=meta.abstract.value, authors=meta.authors.value or [],
+    ).normalized()
+    ensure_norm_titles(conn)
+    match, _ = find_match(conn, pdf_rec)
+    has_pdf = match is not None and conn.execute(
+        "SELECT 1 FROM artifacts WHERE paper_id=? AND status='ok'", (match,)
+    ).fetchone() is not None
+    if match is not None and not has_pdf:
+        # A paper found by discovery (or imported from a reference list) now gets its PDF.
+        with transaction(conn):
+            conn.execute(
+                "INSERT INTO artifacts(id, paper_id, sha256, pdf_path, size_bytes, page_count, status, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (artifact_id, match, sha, relative_to_root(paths, stored), path.stat().st_size, page_count, "ok", ts),
+            )
+            _add_alias(conn, artifact_id, path)
+            apply_record(conn, match, pdf_rec, ts)
+            if project_id:
+                add_paper(conn, project_id, match)
+        log.emit("ingest.attached", path=str(path), sha256=sha, paper_id=match, pages=page_count)
+        return IngestResult(path=str(path), status="new", sha256=sha, paper_id=match, artifact_id=artifact_id,
+                            message="attached to an existing library record")
+
     paper_id = new_id()
     dupes = _near_duplicates(conn, meta)
     with transaction(conn):
         conn.execute(
             "INSERT INTO papers(id, title, doi, doi_status, year, authors_json, abstract, metadata_json,"
-            " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            " arxiv_id, norm_title, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 paper_id,
-                meta.title.value,
-                meta.doi.value,
-                "unverified" if meta.doi.value else None,
-                meta.year.value,
-                dumps(meta.authors.value) if meta.authors.value else None,
-                meta.abstract.value,
+                pdf_rec.title,
+                pdf_rec.doi,
+                "unverified" if pdf_rec.doi else None,
+                pdf_rec.year,
+                dumps(pdf_rec.authors) if pdf_rec.authors else None,
+                pdf_rec.abstract,
                 meta.model_dump_json(),
+                pdf_rec.arxiv_id,
+                normalize_title(pdf_rec.title) if pdf_rec.title else None,
                 ts,
                 ts,
             ),

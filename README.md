@@ -28,6 +28,26 @@ uv run litforge export
 - `search` returns the paper, section, page and a quoted snippet for every hit.
 - `export` writes Markdown notes to `data/projects/my-review/exports/markdown/`.
 
+## Find papers
+
+```bash
+uv run litforge discover "self-attention"            # search OpenAlex, Crossref and arXiv
+uv run litforge discover --seed 10.48550/arXiv.1706.03762   # follow references and citing papers
+uv run litforge import refs.bib                      # add a .bib, .ris or .csv reference list
+uv run litforge enrich                               # fill in missing DOI, year, venue, abstract
+uv run litforge papers --no-pdf                      # ranked list of papers still missing a PDF
+```
+
+Results from all sources are merged (by DOI, arXiv id, OpenAlex id, then title and year),
+ranked by relevance, and added to the active project. Every run is recorded together with why
+each paper was found. When you later `add` the PDF of a discovered paper, it is attached to the
+existing record. `discover` without a query uses the project topic.
+
+API responses are cached for a week in `data/cache/http`. OpenAlex meters usage: without an API
+key there is a small free daily budget (about 100 searches; single-paper lookups are free). Set
+`LITFORGE_OPENALEX_API_KEY` to use your own key and `LITFORGE_MAILTO` to identify yourself to
+OpenAlex and Crossref (both optional).
+
 Other useful commands:
 
 ```bash
@@ -87,8 +107,9 @@ To keep the virtual environment outside the repository, set `UV_PROJECT_ENVIRONM
 
 ## Status and limitations
 
-Implemented: import, parsing, search and Markdown export. In progress: paper discovery
-(OpenAlex, Crossref, arXiv). Planned: screening with a local language model, deep analysis.
+Implemented: import, parsing, search, Markdown export and paper discovery (OpenAlex,
+Crossref, arXiv, citation chaining, reference-list import). Planned: screening with a local
+language model, deep analysis.
 
 Known limitations of the fast parser:
 

@@ -37,6 +37,13 @@ class IndexingConfig(BaseModel):
     index_captions: bool = True
 
 
+class DiscoveryConfig(BaseModel):
+    sources: list[str] = Field(default_factory=lambda: ["openalex", "crossref", "arxiv"])
+    limit: int = 25  # results per source and query
+    cache_ttl_days: float = 7
+    mailto: str | None = None  # optional contact for API "polite pools"; never filled in automatically
+
+
 class PrivacyConfig(BaseModel):
     allow_cloud: bool = False
 
@@ -44,6 +51,7 @@ class PrivacyConfig(BaseModel):
 class Config(BaseModel):
     parsing: ParsingConfig = Field(default_factory=ParsingConfig)
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
+    discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
 
 
@@ -52,6 +60,8 @@ class EnvSettings(BaseSettings):
 
     home: Path = Path("data")
     config: Path | None = None
+    openalex_api_key: str | None = None
+    mailto: str | None = None
 
 
 class Paths:
@@ -83,6 +93,10 @@ class Paths:
     @property
     def logs(self) -> Path:
         return self.root / "logs"
+
+    @property
+    def http_cache(self) -> Path:
+        return self.root / "cache" / "http"
 
     @property
     def benchmark(self) -> Path:
