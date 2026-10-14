@@ -11,6 +11,14 @@ import yaml
 from litforge.config import Paths
 from litforge.storage.db import new_id, now, transaction
 
+# Which of a project's papers an action covers, by the ✓/✗ marks set in the web UI. Each value is an SQL
+# condition on `m`, a LEFT JOIN of paper_marks for the project.
+MARK_SCOPES = {
+    "all": "",
+    "relevant": " AND m.mark = 'relevant'",
+    "not-irrelevant": " AND (m.mark IS NULL OR m.mark != 'irrelevant')",
+}
+
 
 class ProjectNotFound(LookupError):
     pass

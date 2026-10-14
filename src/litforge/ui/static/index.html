@@ -6,13 +6,24 @@
 <title>LitForge</title>
 <link rel="stylesheet" href="/static/vendor/katex.min.css">
 <link rel="stylesheet" href="/static/app.css">
+<script>try { var t = JSON.parse(localStorage.getItem('lf-theme')); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 </head>
 <body>
 <header>
   <div class="brand">Lit<span>Forge</span></div>
   <select id="project-select" title="Project"></select>
   <div class="spacer"></div>
-  <button class="btn" id="btn-export" title="Write Markdown notes to the project's output folder">Export Markdown</button>
+  <div class="export-group">
+    <select id="export-scope" title="Which papers Get PDFs and Export use">
+      <option value="all">All papers</option>
+      <option value="relevant">Marked ✓ only</option>
+      <option value="not-irrelevant">All except ✗</option>
+      <option value="visible">Visible list</option>
+    </select>
+    <button class="btn" id="btn-fetch" title="Download open-access PDFs (arXiv, publisher copies) and extract their full text">Get PDFs</button>
+    <button class="btn" id="btn-export" title="Write Markdown notes to the project's output folder">Export Markdown</button>
+  </div>
+  <button class="btn" id="btn-theme" title="Theme: follow the system, light or dark"></button>
 </header>
 
 <div class="layout">
@@ -78,7 +89,7 @@
         <b>relevance</b> score (meaning, shared references, citation links), an <b>importance</b> score
         (field-normalized citations, centrality in the set, recent attention, venue) and a combined
         <b>review priority</b>. Every result says why it was found.</p>
-      <p><kbd>j</kbd>/<kbd>k</kbd> move · <kbd>Enter</kbd> open · <kbd>r</kbd> relevant · <kbd>x</kbd> irrelevant · <kbd>Esc</kbd> close</p>
+      <p><kbd>j</kbd>/<kbd>k</kbd> move · <kbd>Enter</kbd> open · <kbd>r</kbd> relevant · <kbd>x</kbd> irrelevant · Shift-click ✓/✗ marks a range · <kbd>Esc</kbd> close</p>
     </div>
     <div id="results" hidden>
       <div class="runhead"><h2 id="run-title"></h2><span class="meta" id="run-meta"></span></div>
@@ -102,6 +113,17 @@
             <option value="cited">Sort: most cited</option>
           </select>
           <span class="count" id="count"></span>
+        </div>
+        <div class="bulk">
+          Mark top <input type="number" id="bulk-n" min="1" value="20"> of this list
+          <button class="btn small" id="bulk-top">✓</button>
+          <span class="sep"></span> Unmarked in this list
+          <button class="btn small" id="bulk-rest" title="Mark every visible paper without a mark as not relevant">✗</button>
+          <span class="sep"></span> All in this list
+          <button class="btn small" data-bulk="relevant">✓</button>
+          <button class="btn small" data-bulk="irrelevant">✗</button>
+          <button class="btn small" data-bulk="">Clear</button>
+          <span class="hint">Shift-click ✓ / ✗ to mark a range</span>
         </div>
         <div class="list" id="list"></div>
       </div>

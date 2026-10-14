@@ -11,7 +11,7 @@
   var state = {
     mode: 'similar', projects: [], project: store.get('project', null), runId: null, data: null,
     filter: '', oa: false, onlyNew: false, hide: false, channel: null, sort: store.get('sort', 'score'),
-    sel: -1, view: [], pdf: null, list: null, job: null
+    sel: -1, view: [], pdf: null, list: null, job: null, anchor: -1
   };
 
   var CHANNEL_LABEL = {
@@ -110,6 +110,7 @@
     return api('/api/runs/' + id).then(function (data) {
       state.data = data;
       state.channel = null;
+      state.anchor = -1;
       state.sel = -1;
       render();
       Array.prototype.forEach.call($('runs').children, function (a) { a.classList.remove('on'); });
@@ -180,6 +181,7 @@
       el.querySelectorAll('.hbar').forEach(function (b) {
         b.onclick = function () {
           state.channel = state.channel === b.dataset.key ? null : b.dataset.key;
+          state.anchor = -1;
           render();
         };
       });
@@ -247,7 +249,13 @@
     el.querySelectorAll('.item').forEach(function (row) {
       row.onclick = function (e) {
         var i = +row.dataset.i, btn = e.target.closest('button[data-mark]');
-        if (btn) { e.stopPropagation(); toggleMark(view[i], btn.dataset.mark); return; }
+        if (btn) {
+          e.stopPropagation();
+          if (e.shiftKey && state.anchor >= 0 && state.anchor !== i) markRange(state.anchor, i, btn.dataset.mark);
+          else toggleMark(view[i], btn.dataset.mark);
+          state.anchor = i;
+          return;
+        }
         select(i, true);
       };
     });
@@ -262,15 +270,38 @@
     if (open) openDrawer(state.view[state.sel]);
   }
 
-  function toggleMark(p, mark) {
-    var next = p.mark === mark ? null : mark;
-    post('/api/marks', { project: state.project, paper_id: p.id, mark: next }).then(function () {
-      p.mark = next;
+  function setMarks(papers, mark) {
+    if (!papers.length) { toast('No papers to mark'); return Promise.resolve(); }
+    var ids = papers.map(function (p) { return p.id; });
+    return post('/api/marks', { project: state.project, paper_ids: ids, mark: mark }).then(function () {
+      papers.forEach(function (p) { p.mark = mark; });
+      if (state.hide && mark === 'irrelevant') state.anchor = -1;  // those rows just left the list
       state.data.stats.relevant = state.data.papers.filter(function (x) { return x.mark === 'relevant'; }).length;
       state.data.stats.irrelevant = state.data.papers.filter(function (x) { return x.mark === 'irrelevant'; }).length;
       render();
-      if ($('drawer').classList.contains('open') && state.view[state.sel] === p) openDrawer(p);
+      var open = state.view[state.sel];
+      if ($('drawer').classList.contains('open') && open && papers.indexOf(open) >= 0) openDrawer(open);
     }).catch(function (e) { toast(e.message); });
+  }
+
+  function toggleMark(p, mark) {
+    return setMarks([p], p.mark === mark ? null : mark);
+  }
+
+  // Shift-click: give every paper between the last clicked row and this one the clicked mark.
+  function markRange(from, to, mark) {
+    var lo = Math.min(from, to), hi = Math.max(from, to);
+    return setMarks(state.view.slice(lo, hi + 1), mark).then(function () {
+      toast((hi - lo + 1) + ' papers marked ' + (mark === 'relevant' ? '✓' : '✗'));
+    });
+  }
+
+  function bulkMark(papers, mark, what) {
+    var verb = mark === 'relevant' ? 'Mark ✓' : mark === 'irrelevant' ? 'Mark ✗' : 'Clear marks of';
+    if (papers.length > 25 || !mark) {
+      if (!window.confirm(verb + ' ' + papers.length + ' ' + what + '?')) return;
+    }
+    setMarks(papers, mark);
   }
 
   /* ---------- quick view ---------- */
@@ -349,6 +380,7 @@
   function setBusy(busy) {
     $('btn-run').disabled = busy;
     $('btn-more').disabled = busy;
+    $('btn-fetch').disabled = busy;
   }
 
   function logLine(text, cls) {
@@ -376,7 +408,7 @@
         }
         running.remove();
         setBusy(false);
-        if (j.status === 'failed') { logLine(j.error, 'err'); toast('Search failed'); return; }
+        if (j.status === 'failed') { logLine(j.error, 'err'); toast(j.kind === 'fetch' ? 'Download failed' : 'Search failed'); return; }
         state.project = j.project;
         store.set('project', j.project);
         state.runId = null;
@@ -501,17 +533,68 @@
       syncProjectFields();
       loadRuns();
     };
+    $('export-scope').value = store.get('export-scope', 'all');
+    $('export-scope').onchange = function () { store.set('export-scope', this.value); };
+    // Get PDFs and Export both act on the papers chosen in the scope menu next to them.
+    function scopeBody(extra) {
+      if (!state.project) { toast('No project yet'); return null; }
+      var scope = $('export-scope').value, body = Object.assign({ project: state.project }, extra);
+      if (scope === 'visible') {
+        if (!state.data) { toast('Open a run first'); return null; }
+        body.paper_ids = state.view.map(function (p) { return p.id; });
+      } else {
+        body.only = scope;
+      }
+      return body;
+    }
+    $('btn-fetch').onclick = function () {
+      var body = scopeBody({ run_id: state.runId });
+      if (!body) return;
+      setBusy(true);
+      post('/api/fetch', body).then(poll).catch(function (e) { setBusy(false); toast(e.message); });
+    };
     $('btn-export').onclick = function () {
-      if (!state.project) { toast('No project yet'); return; }
-      post('/api/export', { project: state.project, export_dir: $('export-dir').value.trim() })
-        .then(function (r) { toast('Exported to ' + r.path); })
+      var body = scopeBody({ export_dir: $('export-dir').value.trim() });
+      if (!body) return;
+      var scope = $('export-scope').value;
+      post('/api/export', body)
+        .then(function (r) {
+          if (!r.papers) toast(scope === 'relevant' ? 'Nothing exported: no paper is marked ✓ yet' : 'Nothing to export');
+          else toast('Exported ' + r.papers + ' papers to ' + r.path);
+        })
         .catch(function (e) { toast(e.message); });
     };
-    $('filter').oninput = function () { state.filter = this.value.trim().toLowerCase(); renderList(); };
-    [['t-oa', 'oa'], ['t-new', 'onlyNew'], ['t-hide', 'hide']].forEach(function (t) {
-      $(t[0]).onclick = function () { state[t[1]] = !state[t[1]]; this.classList.toggle('on', state[t[1]]); renderList(); };
+
+    $('bulk-top').onclick = function () {
+      var n = Math.max(1, parseInt($('bulk-n').value, 10) || 0);
+      bulkMark(state.view.slice(0, n), 'relevant', 'papers at the top of this list');
+    };
+    $('bulk-rest').onclick = function () {
+      bulkMark(state.view.filter(function (p) { return !p.mark; }), 'irrelevant', 'unmarked papers');
+    };
+    document.querySelectorAll('[data-bulk]').forEach(function (b) {
+      b.onclick = function () { bulkMark(state.view.slice(), b.dataset.bulk || null, 'papers in this list'); };
     });
-    $('sort').onchange = function () { state.sort = this.value; store.set('sort', state.sort); renderList(); };
+
+    var THEMES = ['auto', 'light', 'dark'], THEME_LABEL = { auto: '◐ Auto', light: '☀ Light', dark: '☾ Dark' };
+    function applyTheme(t) {
+      if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+      $('btn-theme').textContent = THEME_LABEL[t];
+      store.set('theme', t);
+    }
+    applyTheme(store.get('theme', 'auto'));
+    $('btn-theme').onclick = function () {
+      var cur = store.get('theme', 'auto');
+      applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
+    };
+    // The shift-click anchor is a list position, so forget it whenever the list is reordered or refiltered.
+    $('filter').oninput = function () { state.filter = this.value.trim().toLowerCase(); state.anchor = -1; renderList(); };
+    [['t-oa', 'oa'], ['t-new', 'onlyNew'], ['t-hide', 'hide']].forEach(function (t) {
+      $(t[0]).onclick = function () {
+        state[t[1]] = !state[t[1]]; state.anchor = -1; this.classList.toggle('on', state[t[1]]); renderList();
+      };
+    });
+    $('sort').onchange = function () { state.sort = this.value; store.set('sort', state.sort); state.anchor = -1; renderList(); };
     $('drawer-close').onclick = closeDrawer;
 
     document.addEventListener('keydown', function (e) {
@@ -520,7 +603,10 @@
       else if (e.key === 'k' || e.key === 'ArrowUp') { select(state.sel - 1, $('drawer').classList.contains('open')); e.preventDefault(); }
       else if (e.key === 'Enter' && state.sel >= 0) openDrawer(state.view[state.sel]);
       else if (e.key === 'Escape') closeDrawer();
-      else if ((e.key === 'r' || e.key === 'x') && state.sel >= 0) toggleMark(state.view[state.sel], e.key === 'r' ? 'relevant' : 'irrelevant');
+      else if ((e.key === 'r' || e.key === 'x') && state.sel >= 0) {
+        toggleMark(state.view[state.sel], e.key === 'r' ? 'relevant' : 'irrelevant');
+        state.anchor = state.sel;
+      }
     });
 
     loadProjects().catch(function (e) { toast(e.message); });

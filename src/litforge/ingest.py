@@ -87,7 +87,10 @@ def ingest_file(
     project_id: str | None,
     dry_run: bool = False,
     log: EventLog = NULL_LOG,
+    paper_id: str | None = None,
 ) -> IngestResult:
+    """Add one PDF. With `paper_id` (a download for a known record) the file is attached to that paper
+    instead of being matched by the metadata extracted from the PDF."""
     sha = sha256_file(path)
     existing = conn.execute(
         "SELECT id, paper_id, status FROM artifacts WHERE sha256=?", (sha,)
@@ -135,8 +138,11 @@ def ingest_file(
         source="pdf", source_id=sha, title=meta.title.value, year=meta.year.value, doi=meta.doi.value,
         arxiv_id=meta.arxiv_id.value, abstract=meta.abstract.value, authors=meta.authors.value or [],
     ).normalized()
-    ensure_norm_titles(conn)
-    match, _ = find_match(conn, pdf_rec)
+    if paper_id is not None:
+        match: str | None = paper_id
+    else:
+        ensure_norm_titles(conn)
+        match, _ = find_match(conn, pdf_rec)
     has_pdf = match is not None and conn.execute(
         "SELECT 1 FROM artifacts WHERE paper_id=? AND status='ok'", (match,)
     ).fetchone() is not None
@@ -156,7 +162,7 @@ def ingest_file(
         return IngestResult(path=str(path), status="new", sha256=sha, paper_id=match, artifact_id=artifact_id,
                             message="attached to an existing library record")
 
-    paper_id = new_id()
+    paper_id = new_id()  # no record to attach to: the PDF becomes a new paper
     dupes = _near_duplicates(conn, meta)
     with transaction(conn):
         conn.execute(

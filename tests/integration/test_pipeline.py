@@ -178,7 +178,7 @@ def test_export_markdown_has_relative_working_links(
     conn: sqlite3.Connection, paths: Paths, config: Config, corpus: Path, project: str
 ) -> None:
     _ingest_parse_index(conn, paths, config, corpus, project)
-    root = export_markdown(conn, paths, "demo", project)
+    root, _ = export_markdown(conn, paths, "demo", project)
     readme = (root / "README.md").read_text()
     assert "Inferring Neural Mass Parameters" in readme
     for md in (root / "knowledge_base").glob("*.md"):

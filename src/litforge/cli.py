@@ -13,6 +13,7 @@ import typer
 from pydantic import BaseModel
 
 from litforge.config import Config, EnvSettings, Paths, load_config, resolve_paths
+from litforge.discovery.fetch import fetch_open_access
 from litforge.discovery.http import HttpClient
 from litforge.discovery.run import DiscoveryReport, Sources, enrich_project, run_citations, run_import, run_search
 from litforge.discovery.similar import run_similar
@@ -24,6 +25,7 @@ from litforge.ingest import ingest_paths
 from litforge.observability import EventLog
 from litforge.parsing.run import artifacts_for_project, parse_artifact
 from litforge.projects import (
+    MARK_SCOPES,
     ProjectNotFound,
     create_project,
     get_active,
@@ -320,6 +322,9 @@ def export(
     ctx: typer.Context,
     project: ProjectOpt = None,
     fmt: Annotated[str, typer.Option("--format", help="Export format (markdown)")] = "markdown",
+    only: Annotated[
+        str, typer.Option("--only", help="Which papers: all, relevant (marked ✓) or not-irrelevant (all but ✗)")
+    ] = "all",
 ) -> None:
     """Export a project's papers as Markdown with relative asset links."""
     st = _state(ctx)
@@ -329,8 +334,11 @@ def export(
     if fmt != "markdown":
         typer.secho(f"format '{fmt}' not supported yet; available: markdown", fg="red", err=True)
         raise typer.Exit(2)
-    out = export_markdown(conn, st.paths, name, pid)
-    typer.echo(f"exported to {out}")
+    if only not in MARK_SCOPES:
+        typer.secho(f"--only must be one of: {', '.join(MARK_SCOPES)}", fg="red", err=True)
+        raise typer.Exit(2)
+    out, count = export_markdown(conn, st.paths, name, pid, only=only)
+    typer.echo(f"exported {count} papers to {out}")
 
 
 # ---- discovery ------------------------------------------------------------
@@ -477,6 +485,30 @@ def enrich(
                + (f"; ${res.cost_usd:.4f} API cost" if res.cost_usd else ""))
     for err in res.errors:
         typer.secho(f"  error: {err}", fg="yellow")
+
+
+@app.command()
+def fetch(
+    ctx: typer.Context,
+    project: ProjectOpt = None,
+    only: Annotated[
+        str, typer.Option("--only", help="Which papers: relevant (marked ✓), not-irrelevant (all but ✗) or all")
+    ] = "relevant",
+) -> None:
+    """Download open-access PDFs (arXiv, publisher OA copies), then parse and index them."""
+    st = _state(ctx)
+    conn = st.db()
+    _, pid = _project(st, conn, project, required=True)
+    assert pid is not None
+    if only not in MARK_SCOPES:
+        typer.secho(f"--only must be one of: {', '.join(MARK_SCOPES)}", fg="red", err=True)
+        raise typer.Exit(2)
+    report = fetch_open_access(conn, st.paths, st.config, HttpClient(), pid, only, log=st.log,
+                               progress=typer.echo)
+    typer.echo(f"downloaded {report.downloaded} of {report.candidates} papers without a PDF, "
+               f"{report.parsed} with full text; {report.no_source} have no open-access copy")
+    for err in report.failed:
+        typer.secho(f"  failed: {err}", fg="yellow")
 
 
 @app.command()

@@ -104,6 +104,47 @@ def test_similar_job_results_detail_and_marks(server: str) -> None:
     assert wait_job(server, job2["id"])["status"] == "done"
 
 
+def test_bulk_marks_and_selective_export(server: str, tmp_path: Path) -> None:
+    _, job = call(server, "/api/similar", {"project": "sel", "seeds": ["10.1073/pnas.1912789117"],
+                                           "embeddings": False})
+    run_id = wait_job(server, job["id"])["run_id"]
+    _, data = call(server, f"/api/runs/{run_id}")
+    ids = [p["id"] for p in data["papers"]]
+    assert len(ids) >= 3
+    assert call(server, "/api/marks", {"project": "sel", "paper_ids": ids[:2], "mark": "relevant"})[0] == 200
+    assert call(server, "/api/marks", {"project": "sel", "paper_ids": [ids[2]], "mark": "irrelevant"})[0] == 200
+    _, data = call(server, f"/api/runs/{run_id}")
+    assert data["stats"]["relevant"] == 2 and data["stats"]["irrelevant"] == 1
+
+    out = tmp_path / "sel-exports"
+    notes = out / "markdown" / "knowledge_base"
+    _, exp = call(server, "/api/export", {"project": "sel", "export_dir": str(out)})
+    assert exp["papers"] == len(ids) and len(list(notes.glob("*.md"))) == len(ids)
+    (notes / "my-own-note.md").write_text("kept")
+    _, exp = call(server, "/api/export", {"project": "sel", "export_dir": str(out), "only": "not-irrelevant"})
+    assert exp["papers"] == len(ids) - 1
+    _, exp = call(server, "/api/export", {"project": "sel", "export_dir": str(out), "only": "relevant"})
+    written = {md.stem for md in notes.glob("*.md")}
+    assert exp["papers"] == 2 and len(written) == 3 and "my-own-note" in written  # stale notes removed, own kept
+    _, exp = call(server, "/api/export", {"project": "sel", "export_dir": str(out), "paper_ids": [ids[2]]})
+    assert exp["papers"] == 1
+    (notes / "meeting-20240115.md").write_text("mine")  # looks like a generated name, but is not one
+    _, exp = call(server, "/api/export", {"project": "sel", "export_dir": str(out), "paper_ids": []})
+    assert exp["papers"] == 0 and len(list(notes.glob("*.md"))) == 3  # empty selection leaves the folder alone
+    _, exp = call(server, "/api/export", {"project": "sel", "export_dir": str(out)})
+    assert (notes / "meeting-20240115.md").is_file() and (notes / "my-own-note.md").is_file()
+    assert call(server, "/api/export", {"project": "sel", "only": "bogus"})[0] == 400
+
+    _, job = call(server, "/api/fetch", {"project": "sel", "only": "relevant", "run_id": run_id})
+    job = wait_job(server, job["id"])
+    assert job["status"] == "done" and job["run_id"] == run_id and job["messages"][-1].startswith("done:")
+    assert call(server, "/api/fetch", {"project": "nope"})[0] == 400
+
+    assert call(server, "/api/marks", {"project": "sel", "paper_ids": ids, "mark": None})[0] == 200
+    _, data = call(server, f"/api/runs/{run_id}")
+    assert data["stats"]["relevant"] == 0 and data["stats"]["irrelevant"] == 0
+
+
 def test_import_elicit_then_expand(server: str, tmp_path: Path) -> None:
     status, res = call(server, "/api/import?name=elicit.csv&project=kids", raw=ELICIT_CSV.encode())
     assert status == 200 and res["papers"] == 1

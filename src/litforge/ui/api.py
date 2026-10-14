@@ -178,17 +178,20 @@ def paper_file(conn: sqlite3.Connection, paths: Paths, paper_id: str, rel: str) 
     return target
 
 
-def set_mark(conn: sqlite3.Connection, project: str, paper_id: str, mark: str | None) -> None:
+def set_marks(conn: sqlite3.Connection, project: str, paper_ids: list[str], mark: str | None) -> None:
+    """Set (or clear, with None) the same mark on several papers at once."""
     project_id = get_project_id(conn, project)
     if mark is None:
-        conn.execute("DELETE FROM paper_marks WHERE project_id=? AND paper_id=?", (project_id, paper_id))
+        conn.executemany("DELETE FROM paper_marks WHERE project_id=? AND paper_id=?",
+                         [(project_id, pid) for pid in paper_ids])
         return
     if mark not in MARKS:
         raise ValueError(f"mark must be one of {MARKS}")
-    conn.execute(
+    stamp = now()
+    conn.executemany(
         """INSERT INTO paper_marks(project_id, paper_id, mark, updated_at) VALUES (?,?,?,?)
            ON CONFLICT(project_id, paper_id) DO UPDATE SET mark=excluded.mark, updated_at=excluded.updated_at""",
-        (project_id, paper_id, mark, now()),
+        [(project_id, pid, mark, stamp) for pid in paper_ids],
     )
 
 

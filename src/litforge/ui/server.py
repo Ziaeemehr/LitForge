@@ -1,6 +1,6 @@
 """Local web UI: a small JSON API plus a single static page (Python standard library only).
 
-Binds to 127.0.0.1 by default. Long operations (similar-paper search, keyword search) run in a
+Binds to 127.0.0.1 by default. Long operations (similar-paper search, keyword search, PDF downloads) run in a
 background thread; the page polls /api/jobs/<id> for progress.
 """
 
@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from litforge.config import Config, EnvSettings, Paths
+from litforge.discovery.fetch import fetch_open_access
 from litforge.discovery.http import HttpClient
 from litforge.discovery.run import Sources, run_import, run_search
 from litforge.discovery.similar import run_similar
@@ -169,6 +170,30 @@ class App:
 
         return self.start_job("search", project, work)
 
+    def fetch_job(self, body: dict[str, Any]) -> Job:
+        """Download open-access PDFs for the chosen papers; the job reports back the run being viewed."""
+        conn = self.db()
+        project = str(body["project"])
+        pid = get_project_id(conn, project)
+        conn.close()
+        paper_ids = body.get("paper_ids")
+        only = str(body.get("only", "all" if paper_ids is not None else "relevant"))
+
+        def work(job: Job) -> str | None:
+            c = self.db()
+            try:
+                report = fetch_open_access(c, self.paths, self.config, self.make_http(), pid, only, paper_ids,
+                                           self.log, progress=job.messages.append)
+            finally:
+                c.close()
+            job.messages += [f"warning: {e}" for e in report.failed]
+            job.messages.append(
+                f"done: {report.downloaded} of {report.candidates} PDFs downloaded, {report.parsed} with full text"
+                + (f"; {report.no_source} have no open-access copy" if report.no_source else ""))
+            return body.get("run_id")
+
+        return self.start_job("fetch", project, work)
+
 
 def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
@@ -271,20 +296,24 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(app.similar_job(body).__dict__)
                 if url.path == "/api/search":
                     return self._json(app.search_job(body).__dict__)
+                if url.path == "/api/fetch":
+                    return self._json(app.fetch_job(body).__dict__)
                 if url.path == "/api/marks":
                     conn = app.db()
                     with transaction(conn):
-                        api.set_mark(conn, body["project"], body["paper_id"], body.get("mark"))
+                        ids = body["paper_ids"] if "paper_ids" in body else [body["paper_id"]]
+                        api.set_marks(conn, body["project"], ids, body.get("mark"))
                     conn.close()
                     return self._json({"ok": True})
                 if url.path == "/api/export":
                     conn = app.db()
                     try:
                         pid = app.ensure_project(conn, body["project"], body.get("export_dir"))
-                        out = export_markdown(conn, app.paths, body["project"], pid)
+                        out, count = export_markdown(conn, app.paths, body["project"], pid,
+                                                     only=body.get("only", "all"), paper_ids=body.get("paper_ids"))
                     finally:
                         conn.close()
-                    return self._json({"path": str(out)})
+                    return self._json({"path": str(out), "papers": count})
                 self._error(HTTPStatus.NOT_FOUND, "not found")
             except (ValueError, KeyError, ProjectNotFound, json.JSONDecodeError) as exc:
                 self._error(HTTPStatus.BAD_REQUEST, str(exc))

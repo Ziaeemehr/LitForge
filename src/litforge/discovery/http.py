@@ -24,11 +24,13 @@ Transport = Callable[[str, Mapping[str, str], float], Response]
 
 DEFAULT_MIN_INTERVAL = {
     "export.arxiv.org": 3.0,  # arXiv API terms: one request every 3 seconds
+    "arxiv.org": 3.0,  # PDF downloads are held to the same pace
     "api.semanticscholar.org": 1.1,
     "api.crossref.org": 0.2,
     "api.openalex.org": 0.12,
 }
 RETRY_STATUSES = {429, 500, 502, 503, 504}
+MAX_RESPONSE_BYTES = 200 * 1024 * 1024  # stop reading endless or huge bodies (PDF downloads)
 
 
 class HttpError(RuntimeError):
@@ -45,7 +47,10 @@ def urllib_transport(url: str, headers: Mapping[str, str], timeout: float) -> Re
     req = urllib.request.Request(url, headers=dict(headers))
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - https scholarly APIs
-            return resp.status, dict(resp.headers.items()), resp.read()
+            body = resp.read(MAX_RESPONSE_BYTES + 1)
+            if len(body) > MAX_RESPONSE_BYTES:
+                raise HttpError(url, -1, f"response larger than {MAX_RESPONSE_BYTES // 2**20} MB")
+            return resp.status, dict(resp.headers.items()), body
     except urllib.error.HTTPError as exc:
         return exc.code, dict(exc.headers.items()) if exc.headers else {}, exc.read() or b""
 

@@ -26,7 +26,7 @@ uv run litforge export
 - `new` creates a project and makes it active, so later commands don't need `--project`.
 - `add` imports, parses and indexes PDFs in one step. Run it again any time; nothing is processed twice.
 - `search` returns the paper, section, page and a quoted snippet for every hit.
-- `export` writes Markdown notes to `data/projects/my-review/exports/markdown/`.
+- `export` writes Markdown notes to `data/projects/my-review/exports/markdown/`; `--only relevant` keeps just the papers marked ✓ (`--only not-irrelevant` drops the ✗ ones).
 
 ## Web interface
 
@@ -38,7 +38,10 @@ One page to give a DOI, PDF or abstract (or search queries, or an Elicit/Zotero 
 project and an output folder, and browse the results: summary numbers, publication years, how
 papers were found, top venues, filters, and a quick view with the abstract, score breakdown and
 full text (formulas rendered with KaTeX). Mark papers ✓/✗ and run "More like my ✓ papers" to
-iterate. It runs locally with the Python standard library and works the same on macOS and Linux;
+iterate. To choose from a long list, mark the top N of the current filtered and sorted list,
+shift-click ✓/✗ to mark a range, or mark everything still unmarked ✗. The menu next to
+**Get PDFs** and **Export Markdown** picks which papers both act on: ✓ only, all but ✗, the
+visible list, or all. It runs locally with the Python standard library and works the same on macOS and Linux;
 on a remote GPU machine use `ssh -L 8765:127.0.0.1:8765 host` and open the same address.
 
 ### Relevance, importance and review priority
@@ -62,7 +65,14 @@ uv run litforge discover --seed 10.48550/arXiv.1706.03762   # follow references 
 uv run litforge import refs.bib                      # add a .bib, .ris or .csv reference list
 uv run litforge enrich                               # fill in missing DOI, year, venue, abstract
 uv run litforge papers --no-pdf                      # ranked list of papers still missing a PDF
+uv run litforge fetch                                # download open-access PDFs of the ✓ papers
 ```
+
+`fetch` downloads a legal open-access copy (arXiv, or the publisher's open-access URL; on a
+landing page it follows the `citation_pdf_url` link), attaches it to the existing record, then
+parses and indexes it like `add`, so exports contain the full text. `--only not-irrelevant` or
+`--only all` widens the selection. Paywalled papers are reported and skipped; add their PDFs with
+`add`.
 
 ### Papers similar to a paper you have
 

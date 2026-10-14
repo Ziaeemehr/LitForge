@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from discovery_fakes import ARXIV_FEED, FRONTIER_CROSSREF, FRONTIER_OA, FakeTransport, ok
 
+from litforge.discovery.fetch import candidate_urls, citation_pdf_url
 from litforge.discovery.http import BudgetExhausted, HttpClient
 from litforge.discovery.importers import parse_bibtex, parse_csv, parse_ris
 from litforge.discovery.rank import lexical_score, rank, terms
@@ -121,3 +122,12 @@ def test_non_paper_records_are_dropped() -> None:
     http = HttpClient(transport=FakeTransport([("crossref", ok({"message": {"items": [FRONTIER_CROSSREF, review]}}))]),
                       sleep=lambda s: None, min_interval={})
     assert [r.doi for r in Crossref(http).search("x", 5)] == ["10.1073/pnas.1912789117"]
+
+
+def test_fetch_candidate_urls_and_landing_page_link() -> None:
+    assert candidate_urls("2001.00001", "https://arxiv.org/pdf/2001.00001v2") == ["https://arxiv.org/pdf/2001.00001"]
+    assert candidate_urls(None, "https://pub.example/a") == ["https://pub.example/a"]
+    assert candidate_urls(None, "ftp://x") == [] and candidate_urls(None, None) == []
+    page = b'<meta name="citation_pdf_url" content="/content/1.full.pdf">'
+    assert citation_pdf_url(page, "https://pub.example/a/b") == "https://pub.example/content/1.full.pdf"
+    assert citation_pdf_url(b"<meta name='description' content='x'>", "https://pub.example") is None
