@@ -34,6 +34,9 @@ from litforge.export.markdown import default_export_dir, export_markdown
 from litforge.observability import EventLog
 from litforge.pipeline import add_pdfs
 from litforge.projects import ProjectNotFound, create_project, delete_project, get_project_id, set_active
+from litforge.screening.criteria import load_criteria
+from litforge.screening.llm import Llm, LlmError, ollama_from_config
+from litforge.screening.run import screen_run
 from litforge.storage.cache import sha256_file
 from litforge.storage.db import open_db, transaction
 from litforge.ui import api
@@ -56,7 +59,8 @@ class Job:
 class App:
     """Shared state for request handlers."""
 
-    def __init__(self, paths: Paths, config: Config, make_http: Callable[[], HttpClient] | None = None) -> None:
+    def __init__(self, paths: Paths, config: Config, make_http: Callable[[], HttpClient] | None = None,
+                 make_llm: Callable[[str | None], Llm] | None = None) -> None:
         self.paths = paths
         self.config = config
         self.log = EventLog(paths.logs)
@@ -66,6 +70,7 @@ class App:
         self._lock = threading.Lock()
         self.make_http = make_http or (lambda: HttpClient(
             cache_dir=paths.http_cache, cache_ttl_s=config.discovery.cache_ttl_days * 86400))
+        self.make_llm = make_llm or (lambda model: ollama_from_config(config.screening, model))
         paths.ensure()
         conn = open_db(paths.db)  # applies migrations once at startup
         # Jobs live in memory: runs left 'running' by a previous server process will never finish.
@@ -216,6 +221,36 @@ class App:
 
         return self.start_job("pdfs", project, work)
 
+    def screen_job(self, body: dict[str, Any]) -> Job:
+        """Screen the top papers of a run with the local model; reports back the run so the page reloads it."""
+        run_id = str(body["run_id"])
+        top = int(body.get("top") or self.config.screening.default_top)
+        if top < 1:
+            raise ValueError("top must be at least 1")
+        conn = self.db()
+        try:
+            run = conn.execute("SELECT r.project_id, p.name FROM discovery_runs r JOIN projects p"
+                               " ON p.id = r.project_id WHERE r.id=?", (run_id,)).fetchone()
+            if run is None:
+                raise ValueError("run not found")
+            if load_criteria(conn, run["project_id"]).is_empty():
+                raise ValueError("no screening criteria: fill in the research question first")
+        finally:
+            conn.close()
+        model = str(body.get("model") or "") or None
+
+        def work(job: Job) -> str | None:
+            c = self.db()
+            try:
+                screen_run(c, self.make_llm(model), run_id, top, progress=job.messages.append, log=self.log)
+            except LlmError as exc:
+                raise RuntimeError(str(exc)) from exc
+            finally:
+                c.close()
+            return run_id
+
+        return self.start_job("screen", str(run["name"]), work)
+
     def export_job(self, body: dict[str, Any]) -> Job:
         """Export with PDFs: download open-access PDFs of the chosen papers, then export the same papers.
         The job reports back the run being viewed so the page can refresh its PDF badges."""
@@ -277,6 +312,9 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 raise ValueError("expected a JSON object")
             return data
 
+        def _screen_info(self) -> dict[str, Any]:
+            return {"model": app.config.screening.model, "default_top": app.config.screening.default_top}
+
         def _same_origin(self) -> bool:
             """Reject cross-site requests that would otherwise reach a localhost API."""
             origin = self.headers.get("Origin")
@@ -310,6 +348,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(api.list_runs(conn, pid, int(query.get("limit", 50))))
                 if path == "/api/library":
                     return self._json(api.library(conn))
+                if path == "/api/criteria":
+                    return self._json({**api.get_criteria(conn, query["project"]), **self._screen_info()})
                 if m := re.fullmatch(r"/api/runs/([\w-]+)", path):
                     return self._json(api.run_results(conn, m.group(1)))
                 if m := re.fullmatch(r"/api/jobs/(\w+)", path):
@@ -358,6 +398,16 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(app.search_job(body).__dict__)
                 if url.path == "/api/add":
                     return self._json(app.add_job(body).__dict__)
+                if url.path == "/api/screen":
+                    return self._json(app.screen_job(body).__dict__)
+                if url.path == "/api/criteria":
+                    conn = app.db()
+                    try:
+                        with transaction(conn):
+                            saved = api.put_criteria(conn, str(body["project"]), body)
+                    finally:
+                        conn.close()
+                    return self._json({**saved, **self._screen_info()})
                 if url.path == "/api/export-dir":  # "" = back to data/projects/<name>/exports
                     conn = app.db()
                     try:

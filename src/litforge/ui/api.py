@@ -16,6 +16,7 @@ from litforge.config import Paths
 from litforge.export.markdown import default_export_dir
 from litforge.parsing.canonical import read_canonical, to_markdown
 from litforge.projects import get_project_id
+from litforge.screening.criteria import Criteria, criteria_hash, load_criteria, save_criteria
 from litforge.storage.db import now
 
 MARKS = ("relevant", "irrelevant")
@@ -111,12 +112,15 @@ def run_results(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
                   p.title, p.year, p.venue, p.doi, p.arxiv_id, p.openalex_id, p.oa_url, p.cited_by_count,
                   p.authors_json,
                   EXISTS(SELECT 1 FROM artifacts a WHERE a.paper_id = p.id AND a.status='ok') AS has_pdf,
-                  m.mark
+                  m.mark, s.decision AS s_decision, s.score AS s_score, s.result_json AS s_result,
+                  s.error AS s_error, s.criteria_hash AS s_hash
            FROM discovery_results d JOIN papers p ON p.id = d.paper_id
            LEFT JOIN paper_marks m ON m.paper_id = p.id AND m.project_id = ?
+           LEFT JOIN screening_results s ON s.paper_id = p.id AND s.project_id = ?
            WHERE d.run_id = ? ORDER BY priority DESC, d.score DESC, p.title""",
-        (run["project_id"], run_id),
+        (run["project_id"], run["project_id"], run_id),
     ).fetchall()
+    current = criteria_hash(load_criteria(conn, run["project_id"]))
     channels: dict[str, set[str]] = {}
     sources: dict[str, set[str]] = {}
     for h in conn.execute("SELECT paper_id, relation, source FROM discovery_hits WHERE run_id=?", (run_id,)):
@@ -137,6 +141,9 @@ def run_results(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
             "components": components, "channels": sorted(channels.get(r["paper_id"], [])),
             "sources": sorted(sources.get(r["paper_id"], [])),
             "authors": authors[:3] + (["et al."] if len(authors) > 3 else []),
+            "screening": None if r["s_decision"] is None else {
+                "decision": r["s_decision"], "score": r["s_score"], "error": r["s_error"],
+                "reason": json.loads(r["s_result"]).get("reason", ""), "stale": r["s_hash"] != current},
         })
     params = json.loads(run["params_json"])
     label = _run_label(conn, run["kind"], params)
@@ -149,7 +156,12 @@ def result_stats(papers: list[dict[str, Any]]) -> dict[str, Any]:
     years = [p["year"] for p in papers if p["year"]]
     channel_counts: Counter[str] = Counter(c for p in papers for c in p["channels"] if c != "seed")
     venues: Counter[str] = Counter(p["venue"] for p in papers if p["venue"])
+    screened = Counter(p["screening"]["decision"] for p in papers if p.get("screening"))
     return {
+        "screened": sum(screened.values()),
+        "screen_include": screened["include"],
+        "screen_uncertain": screened["uncertain"],
+        "screen_exclude": screened["exclude"],
         "papers": len(papers),
         "new": sum(p["new_to_project"] for p in papers),
         "with_pdf": sum(p["has_pdf"] for p in papers),
@@ -184,6 +196,13 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
         m = conn.execute("SELECT mark FROM paper_marks WHERE project_id=? AND paper_id=?",
                          (project_id, paper_id)).fetchone()
         mark = m["mark"] if m else None
+    screening = None
+    if project_id:
+        s = conn.execute("SELECT * FROM screening_results WHERE project_id=? AND paper_id=?",
+                         (project_id, paper_id)).fetchone()
+        if s:
+            screening = {**json.loads(s["result_json"]), "model": s["model"], "screened_at": s["screened_at"],
+                         "stale": s["criteria_hash"] != criteria_hash(load_criteria(conn, project_id))}
     cites = conn.execute("SELECT COUNT(*) FROM paper_relations WHERE citing_id=?", (paper_id,)).fetchone()[0]
     cited = conn.execute("SELECT COUNT(*) FROM paper_relations WHERE cited_id=?", (paper_id,)).fetchone()[0]
     return {
@@ -193,7 +212,7 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
         "authors": json.loads(row["authors_json"]) if row["authors_json"] else [],
         "has_pdf": run is not None, "markdown": markdown, "mark": mark,
         "pdf_url": f"/api/papers/{paper_id}/pdf" if _pdf_path(conn, paths, paper_id) else None,
-        "links_in_library": {"cites": cites, "cited_by": cited},
+        "links_in_library": {"cites": cites, "cited_by": cited}, "screening": screening,
     }
 
 
@@ -286,3 +305,17 @@ def delete_run(conn: sqlite3.Connection, run_id: str) -> dict[str, int]:
                      [(run["project_id"], pid) for pid in removed])
     conn.execute("DELETE FROM discovery_runs WHERE id=?", (run_id,))  # hits and results cascade
     return {"removed": len(removed), "kept": len(keep)}
+
+
+def get_criteria(conn: sqlite3.Connection, project: str) -> dict[str, Any]:
+    return load_criteria(conn, get_project_id(conn, project)).model_dump()
+
+
+def put_criteria(conn: sqlite3.Connection, project: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Save the screening form; include/exclude come as text (one criterion per line) or lists."""
+    def text(value: Any) -> str:
+        return "\n".join(map(str, value)) if isinstance(value, list) else str(value or "")
+
+    c = Criteria.from_text(str(body.get("question") or ""), text(body.get("include")), text(body.get("exclude")))
+    save_criteria(conn, get_project_id(conn, project), c)
+    return c.model_dump()

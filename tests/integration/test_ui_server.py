@@ -272,3 +272,54 @@ def test_upload_and_safety_checks(server: str) -> None:
     assert call(server, "/api/similar", {"project": "bad/name", "seeds": ["10.1/x"]})[0] == 400
     assert call(server, "/api/similar", {"project": "ok"})[0] == 400  # nothing to search from
     assert call(server, "/api/papers/nope")[0] == 404
+
+
+@pytest.fixture()
+def screen_server(tmp_path: Path) -> Iterator[str]:
+    from litforge.screening.llm import FakeLlm
+
+    transport = FakeTransport(default_routes())
+    config = load_config()
+    config.similar.embedding_model = None
+
+    def answer(messages: list[dict[str, str]]) -> dict[str, Any]:
+        return {"relevance": 4, "inclusion": [{"status": "met", "evidence": ""}], "exclusion": [], "reason": "fits"}
+
+    app = App(Paths(tmp_path / "data"), config,
+              make_http=lambda: HttpClient(transport=transport, sleep=lambda s: None, min_interval={}),
+              make_llm=lambda model: FakeLlm(answer))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def test_criteria_screen_job_and_screening_fields(screen_server: str) -> None:
+    s = screen_server
+    _, job = call(s, "/api/similar", {"project": "scr", "seeds": ["10.1073/pnas.1912789117"], "embeddings": False})
+    run_id = wait_job(s, job["id"])["run_id"]
+    status, err = call(s, "/api/screen", {"run_id": run_id, "top": 3})
+    assert status == 400 and "criteria" in err["error"]
+
+    status, crit = call(s, "/api/criteria", {"project": "scr", "question": "q", "include": "a\n\nb", "exclude": ""})
+    assert status == 200 and crit["include"] == ["a", "b"] and crit["model"]
+    assert call(s, "/api/criteria?project=scr")[1]["question"] == "q"
+
+    status, job = call(s, "/api/screen", {"run_id": run_id, "top": 3})
+    assert status == 200
+    job = wait_job(s, job["id"])
+    assert job["status"] == "done" and job["run_id"] == run_id, job
+
+    _, data = call(s, f"/api/runs/{run_id}")
+    screened = [p for p in data["papers"] if p["screening"]]
+    assert len(screened) == min(3, len(data["papers"]))
+    assert screened[0]["screening"]["decision"] == "include"  # "b" padded to unclear, nothing not_met, relevance 4
+    assert data["stats"]["screened"] == len(screened) == data["stats"]["screen_include"]
+
+    _, detail = call(s, f"/api/papers/{screened[0]['id']}?project=scr")
+    assert detail["screening"]["inclusion"][0]["criterion"] == "a" and detail["screening"]["model"] == "fake"
+
+    call(s, "/api/criteria", {"project": "scr", "question": "changed", "include": "", "exclude": ""})
+    _, data = call(s, f"/api/runs/{run_id}")
+    assert all(p["screening"]["stale"] for p in data["papers"] if p["screening"])
