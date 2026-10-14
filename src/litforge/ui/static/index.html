@@ -9,89 +9,129 @@
 <script>try { var t = JSON.parse(localStorage.getItem('lf-theme')); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 </head>
 <body>
-<header>
+<div class="app">
+<nav class="sidebar" id="sidebar">
   <div class="brand">Lit<span>Forge</span></div>
-  <select id="project-select" title="Project"></select>
+  <button class="nav-new" id="nav-new" data-view="new">+ New</button>
+  <button class="nav-item" data-view="recents">Recents</button>
+  <button class="nav-item" data-view="library">Library</button>
+  <h3>Projects</h3>
+  <div class="side-list" id="side-projects"></div>
+  <h3>Recent</h3>
+  <div class="side-list" id="side-recent"></div>
+  <div class="side-foot"><button class="btn small" id="btn-theme" title="Theme: follow the system, light or dark"></button></div>
+</nav>
+
+<div class="main-col">
+<header>
+  <div class="current" id="current-project"></div>
   <div class="spacer"></div>
   <div class="export-group">
-    <select id="export-scope" title="Which papers Get PDFs and Export use">
+    <select id="export-scope" title="Which papers to export">
       <option value="all">All papers</option>
       <option value="relevant">Marked ✓ only</option>
       <option value="not-irrelevant">All except ✗</option>
       <option value="visible">Visible list</option>
     </select>
-    <button class="btn" id="btn-fetch" title="Download open-access PDFs (arXiv, publisher copies) and extract their full text">Get PDFs</button>
+    <label class="check" id="fetch-wrap" title="Before exporting, download open-access PDFs (arXiv, publisher copies) of the chosen papers that have none, so their notes contain the full text"><input type="checkbox" id="export-fetch"> with PDFs</label>
     <button class="btn" id="btn-export" title="Write Markdown notes to the project's output folder">Export Markdown</button>
   </div>
-  <button class="btn" id="btn-theme" title="Theme: follow the system, light or dark"></button>
 </header>
 
-<div class="layout">
-  <aside class="card">
-    <div class="tabs">
-      <button data-mode="similar" class="on">Similar to a paper</button>
-      <button data-mode="search">Search</button>
-      <button data-mode="import">Import list</button>
-    </div>
-
-    <form id="form-similar">
-      <label class="f">DOI, arXiv id or OpenAlex id</label>
-      <input type="text" id="seed" placeholder="10.7554/eLife.56261  ·  2007.09114">
-      <label class="f">PDF</label>
-      <div class="drop" id="drop">Drop a PDF here or <a href="#" id="pick">choose a file</a></div>
-      <input type="file" id="file" accept="application/pdf" hidden>
-      <label class="f">Title <small>(optional)</small></label>
-      <input type="text" id="title">
-      <label class="f">Abstract <small>(or any description of the topic)</small></label>
-      <textarea id="abstract" placeholder="Paste an abstract…"></textarea>
-    </form>
-
-    <form id="form-search" hidden>
-      <label class="f">Queries <small>(one per line)</small></label>
-      <textarea id="queries" placeholder="simulation-based inference&#10;neural posterior estimation"></textarea>
-      <label class="f">Sources</label>
-      <div class="row2">
-        <label class="check"><input type="checkbox" name="src" value="openalex" checked> OpenAlex</label>
-        <label class="check"><input type="checkbox" name="src" value="crossref" checked> Crossref</label>
-        <label class="check"><input type="checkbox" name="src" value="arxiv" checked> arXiv</label>
+<main id="main">
+  <section id="view-new" class="view">
+    <div class="card composer">
+      <div class="tabs">
+        <button data-mode="similar" class="on">Similar</button>
+        <button data-mode="search">Search</button>
+        <button data-mode="import">Import list</button>
+        <button data-mode="pdfs">My PDFs</button>
       </div>
-    </form>
 
-    <form id="form-import" hidden>
-      <label class="f">Reference list <small>(.csv, .bib or .ris from Elicit, Zotero…)</small></label>
-      <div class="drop" id="drop-list">Drop a file here or <a href="#" id="pick-list">choose a file</a></div>
-      <input type="file" id="file-list" accept=".csv,.bib,.ris" hidden>
-      <p class="hint">Elicit CSV exports keep the abstract and Elicit's relevance note. After importing,
-        use <b>Find similar to these</b> to expand the list through citations and meaning.</p>
-    </form>
+      <form id="form-similar">
+        <label class="f">DOI, arXiv id or OpenAlex id</label>
+        <input type="text" id="seed" placeholder="10.7554/eLife.56261  ·  2007.09114">
+        <label class="f">PDF</label>
+        <div class="drop" id="drop">Drop a PDF here or <a href="#" id="pick">choose a file</a></div>
+        <input type="file" id="file" accept="application/pdf" hidden>
+        <label class="f">Title <small>(optional)</small></label>
+        <input type="text" id="title">
+        <label class="f">Abstract <small>(or any description of the topic)</small></label>
+        <textarea id="abstract" placeholder="Paste an abstract…"></textarea>
+      </form>
 
-    <label class="f">Project name</label>
-    <input type="text" id="project-name" list="project-list" placeholder="my-review">
-    <datalist id="project-list"></datalist>
-    <label class="f">Output folder <small>(for exports)</small></label>
-    <input type="text" id="export-dir" placeholder="data/projects/&lt;name&gt;/exports">
-    <label class="check" id="emb-wrap"><input type="checkbox" id="embeddings" checked> Meaning-based ranking (embeddings)</label>
+      <form id="form-search" hidden>
+        <label class="f">Queries <small>(one per line)</small></label>
+        <textarea id="queries" placeholder="simulation-based inference&#10;neural posterior estimation"></textarea>
+        <label class="f">Sources</label>
+        <div class="row2">
+          <label class="check"><input type="checkbox" name="src" value="openalex" checked> OpenAlex</label>
+          <label class="check"><input type="checkbox" name="src" value="crossref" checked> Crossref</label>
+          <label class="check"><input type="checkbox" name="src" value="arxiv" checked> arXiv</label>
+        </div>
+      </form>
 
-    <button class="btn primary" id="btn-run">Find similar papers</button>
-    <button class="btn small ghost" id="btn-more" title="Use every paper you marked ✓ as a seed" style="margin-top:6px">More like my ✓ papers</button>
-    <div class="progress" id="progress"></div>
+      <form id="form-pdfs" hidden>
+        <label class="f">Folder on this computer <small>(subfolders included)</small></label>
+        <input type="text" id="pdf-folder" placeholder="~/papers/my-review">
+        <label class="f">or PDF files</label>
+        <div class="drop" id="drop-pdfs">Drop PDFs or a folder here, or <a href="#" id="pick-pdfs">choose files</a>
+          · <a href="#" id="pick-dir">choose a folder</a></div>
+        <input type="file" id="files-pdfs" accept="application/pdf" multiple hidden>
+        <input type="file" id="dir-pdfs" webkitdirectory multiple hidden>
+        <p class="hint">Each PDF is added to the library once (identical files are recognized), its text is
+          extracted, and it is attached to a matching paper found earlier. The papers then appear as a run you
+          can mark ✓ and export; nothing else is needed.</p>
+      </form>
 
-    <div class="runs">
-      <h3>Previous runs</h3>
-      <div id="runs"></div>
+      <form id="form-import" hidden>
+        <label class="f">Reference list <small>(.csv, .bib or .ris from Elicit, Zotero…)</small></label>
+        <div class="drop" id="drop-list">Drop a file here or <a href="#" id="pick-list">choose a file</a></div>
+        <input type="file" id="file-list" accept=".csv,.bib,.ris" hidden>
+        <p class="hint">Elicit CSV exports keep the abstract and Elicit's relevance note. After importing,
+          use <b>Find similar to these</b> to expand the list through citations and meaning.</p>
+      </form>
+
+      <label class="f">Project name</label>
+      <input type="text" id="project-name" list="project-list" placeholder="my-review">
+      <datalist id="project-list"></datalist>
+      <label class="f">Export folder <small>(default: Downloads/LitForge/&lt;project&gt;)</small></label>
+      <input type="text" id="export-dir" spellcheck="false">
+      <div class="hint paths" id="project-paths"></div>
+      <label class="check" id="emb-wrap"><input type="checkbox" id="embeddings" checked> Meaning-based ranking (embeddings)</label>
+
+      <button class="btn primary" id="btn-run">Find similar papers</button>
+      <button class="btn small ghost" id="btn-more" title="Use every paper you marked ✓ as a seed" style="margin-top:6px">More like my ✓ papers</button>
+      <div class="progress" id="progress"></div>
     </div>
-  </aside>
-
-  <main id="main">
-    <div class="card empty" id="empty">
-      <h2>Find papers related to a paper you have</h2>
-      <p>Give a DOI, a PDF or an abstract on the left, or import a list from Elicit or Zotero. Each result gets a
+    <div class="intro" id="empty">
+      <p>Give a DOI, a PDF or an abstract, search by keywords, import a list from Elicit or Zotero, or add your own PDFs. Each result gets a
         <b>relevance</b> score (meaning, shared references, citation links), an <b>importance</b> score
         (field-normalized citations, centrality in the set, recent attention, venue) and a combined
         <b>review priority</b>. Every result says why it was found.</p>
+      <p>To continue earlier work, open a search under <b>Recent</b> in the sidebar; your ✓/✗ marks are kept.</p>
       <p><kbd>j</kbd>/<kbd>k</kbd> move · <kbd>Enter</kbd> open · <kbd>r</kbd> relevant · <kbd>x</kbd> irrelevant · Shift-click ✓/✗ marks a range · <kbd>Esc</kbd> close</p>
     </div>
-    <div id="results" hidden>
+  </section>
+
+  <section id="view-recents" class="view" hidden>
+    <div class="viewhead"><h2>Recents</h2>
+      <select id="recents-project"><option value="">All projects</option></select></div>
+    <div class="card"><div class="rows" id="recents-list"></div></div>
+  </section>
+
+  <section id="view-library" class="view" hidden>
+    <div class="viewhead"><h2>Library</h2><span class="meta" id="library-count"></span></div>
+    <div class="card">
+      <div class="toolbar">
+        <input type="text" id="library-filter" placeholder="Filter by title, author, venue, project…">
+        <button class="toggle" id="library-pdf">With PDF only</button>
+      </div>
+      <div class="rows" id="library-list"></div>
+    </div>
+  </section>
+
+  <section id="results" class="view" hidden>
       <div class="runhead"><h2 id="run-title"></h2><span class="meta" id="run-meta"></span></div>
       <div class="stats" id="stats"></div>
       <div class="charts">
@@ -127,8 +167,9 @@
         </div>
         <div class="list" id="list"></div>
       </div>
-    </div>
-  </main>
+  </section>
+</main>
+</div>
 </div>
 
 <section class="drawer" id="drawer" aria-hidden="true">

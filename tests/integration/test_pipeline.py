@@ -197,7 +197,7 @@ def test_cli_quick_start_uses_active_project(tmp_path: Path, corpus: Path) -> No
         assert result.exit_code == 0, (args, result.output)
     result = runner.invoke(app, base + ["search", "zebrafinch", "--json"])
     assert json.loads(result.output)[0]["page"] == 3
-    assert (tmp_path / "data/projects/my-review/exports/markdown/README.md").is_file()
+    assert (tmp_path / "exports/my-review/markdown/README.md").is_file()
     listing = runner.invoke(app, base + ["project", "list"]).output
     assert listing.startswith("* my-review")
 

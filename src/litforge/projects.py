@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -40,8 +41,7 @@ def create_project(
             (project_id, name, topic, question, now()),
         )
     pdir = paths.project_dir(name)
-    for sub in ("decisions", "exports"):
-        (pdir / sub).mkdir(parents=True, exist_ok=True)
+    (pdir / "decisions").mkdir(parents=True, exist_ok=True)
     project_file = pdir / "project.yaml"
     if not project_file.exists():
         config: dict[str, object] = {
@@ -54,6 +54,40 @@ def create_project(
         }
         project_file.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True))
     return project_id
+
+
+def delete_project(
+    conn: sqlite3.Connection, paths: Paths, name: str, delete_exports: bool = False
+) -> dict[str, object]:
+    """Delete a project: its paper list, runs, marks and settings. Papers, PDFs and extracted text stay
+    in the shared library (other projects may use them). Exports are the user's files and are kept
+    unless `delete_exports`; even then only the `markdown` folder LitForge wrote is removed from a
+    custom export folder (which may be, say, an Obsidian vault)."""
+    project_id = get_project_id(conn, name)
+    papers = conn.execute("SELECT COUNT(*) FROM project_papers WHERE project_id=?", (project_id,)).fetchone()[0]
+    row = conn.execute("SELECT export_dir FROM projects WHERE id=?", (project_id,)).fetchone()
+    folder = Path(row["export_dir"]).expanduser() if row["export_dir"] else paths.default_exports(name)
+    legacy = paths.project_dir(name) / "exports"  # where older versions wrote exports
+    if delete_exports:
+        for d in (folder, legacy):
+            shutil.rmtree(d / "markdown", ignore_errors=True)
+        if not row["export_dir"] and folder.is_dir() and not any(folder.iterdir()):
+            folder.rmdir()  # the default folder only held this export
+    with transaction(conn):
+        conn.execute("DELETE FROM projects WHERE id=?", (project_id,))  # members, runs, marks cascade
+    pdir = paths.project_dir(name)
+    keep_legacy = legacy.is_dir() and any(legacy.iterdir())
+    if pdir.is_dir():
+        for child in pdir.iterdir():
+            if child == legacy and keep_legacy:
+                continue
+            shutil.rmtree(child) if child.is_dir() else child.unlink()
+        if not keep_legacy:
+            pdir.rmdir()
+    if get_active(paths) == name:
+        _state_file(paths).write_text(json.dumps({"active_project": None}) + "\n")
+    kept = [str(d) for d in (folder, legacy) if (d / "markdown").is_dir()]
+    return {"papers": papers, "kept_exports": ", ".join(kept) or None}
 
 
 def get_project_id(conn: sqlite3.Connection, name: str) -> str:

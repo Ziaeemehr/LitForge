@@ -6,6 +6,7 @@ Kept free of HTTP concerns so it can be tested directly.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections import Counter
 from pathlib import Path
@@ -27,35 +28,66 @@ def list_projects(conn: sqlite3.Connection, paths: Paths) -> list[dict[str, Any]
            FROM projects p LEFT JOIN project_papers pp ON pp.project_id = p.id
            GROUP BY p.id ORDER BY p.created_at DESC"""
     ).fetchall()
-    return [{**dict(r), "export_dir": str(default_export_dir(conn, paths, r["name"], r["id"]))} for r in rows]
+    return [{**dict(r), "export_dir": str(default_export_dir(conn, paths, r["name"], r["id"]).expanduser().resolve())}
+            for r in rows]
 
 
 def set_export_dir(conn: sqlite3.Connection, project_id: str, export_dir: str | None) -> None:
     conn.execute("UPDATE projects SET export_dir=? WHERE id=?", (export_dir or None, project_id))
 
 
-def list_runs(conn: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:
+def list_runs(conn: sqlite3.Connection, project_id: str | None, limit: int = 50) -> list[dict[str, Any]]:
+    """Runs of one project, or of all projects (newest first) for the sidebar and Recents page."""
     rows = conn.execute(
-        """SELECT r.id, r.kind, r.status, r.params_json, r.stats_json, r.started_at,
+        f"""SELECT r.id, r.kind, r.status, r.params_json, r.stats_json, r.started_at, p.name AS project,
                   (SELECT COUNT(*) FROM discovery_results d WHERE d.run_id = r.id) AS papers
-           FROM discovery_runs r WHERE r.project_id=? ORDER BY r.rowid DESC LIMIT 50""",
-        (project_id,),
+           FROM discovery_runs r JOIN projects p ON p.id = r.project_id
+           {"WHERE r.project_id = ?" if project_id else ""} ORDER BY r.rowid DESC LIMIT ?""",
+        (project_id, limit) if project_id else (limit,),
     ).fetchall()
     out = []
     for r in rows:
         params = json.loads(r["params_json"])
         label = _run_label(conn, r["kind"], params)
         out.append({"id": r["id"], "kind": r["kind"], "status": r["status"], "started_at": r["started_at"],
-                    "papers": r["papers"], "label": str(label)[:80]})
+                    "papers": r["papers"], "label": str(label)[:80], "project": r["project"]})
     return out
 
 
+def library(conn: sqlite3.Connection, limit: int = 5000) -> list[dict[str, Any]]:
+    """Every paper in the library with its PDF status and the projects it belongs to."""
+    rows = conn.execute(
+        """SELECT p.id, p.title, p.year, p.venue, p.doi, p.arxiv_id, p.oa_url, p.authors_json, p.cited_by_count,
+                  EXISTS(SELECT 1 FROM artifacts a WHERE a.paper_id = p.id AND a.status = 'ok') AS has_pdf,
+                  (SELECT GROUP_CONCAT(pr.name, '|') FROM project_papers pp JOIN projects pr ON pr.id = pp.project_id
+                   WHERE pp.paper_id = p.id) AS projects
+           FROM papers p ORDER BY has_pdf DESC, p.year DESC, p.title LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    return [{
+        "id": r["id"], "title": r["title"], "year": r["year"], "venue": r["venue"], "doi": r["doi"],
+        "arxiv_id": r["arxiv_id"], "oa_url": r["oa_url"], "cited_by_count": r["cited_by_count"],
+        "authors": (json.loads(r["authors_json"]) if r["authors_json"] else [])[:4], "has_pdf": bool(r["has_pdf"]),
+        "projects": sorted(r["projects"].split("|")) if r["projects"] else [],
+    } for r in rows]
+
+
 def _seed_label(conn: sqlite3.Connection, seed: str) -> str:
-    """Show a paper id as its title and an uploaded file by its name."""
+    """Show a seed by the title of its paper when known: a paper id, a DOI or arXiv id, or an uploaded
+    PDF (named <sha256 prefix>-<file name> by the upload handler); otherwise by the file name or id."""
     row = conn.execute("SELECT title FROM papers WHERE id=?", (seed,)).fetchone()
-    if row and row["title"]:
-        return str(row["title"])
-    return Path(seed).name if seed.lower().endswith(".pdf") else seed
+    if seed.lower().endswith(".pdf"):
+        name = Path(seed).name
+        if m := re.match(r"([0-9a-f]{12})-(.+)$", name):
+            row = conn.execute("SELECT p.title FROM artifacts a JOIN papers p ON p.id = a.paper_id"
+                               " WHERE a.sha256 LIKE ? LIMIT 1", (m.group(1) + "%",)).fetchone()
+            name = m.group(2)
+        return str(row["title"]) if row and row["title"] else name
+    if row is None:
+        bare = re.sub(r"^(https?://(dx\.)?doi\.org/|doi:|arxiv:)", "", seed.strip(), flags=re.I)
+        row = conn.execute("SELECT title FROM papers WHERE lower(doi) = lower(?) OR arxiv_id = ? LIMIT 1",
+                           (bare, bare)).fetchone()
+    return str(row["title"]) if row and row["title"] else seed
 
 
 def _run_label(conn: sqlite3.Connection, kind: str, params: dict[str, Any]) -> str:
@@ -68,7 +100,8 @@ def _run_label(conn: sqlite3.Connection, kind: str, params: dict[str, Any]) -> s
 
 
 def run_results(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
-    run = conn.execute("SELECT * FROM discovery_runs WHERE id=?", (run_id,)).fetchone()
+    run = conn.execute("SELECT r.*, p.name AS project FROM discovery_runs r JOIN projects p ON p.id = r.project_id"
+                       " WHERE r.id=?", (run_id,)).fetchone()
     if run is None:
         raise LookupError("run not found")
     rows = conn.execute(
@@ -159,8 +192,26 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
         "oa_url": row["oa_url"], "cited_by_count": row["cited_by_count"], "abstract": row["abstract"],
         "authors": json.loads(row["authors_json"]) if row["authors_json"] else [],
         "has_pdf": run is not None, "markdown": markdown, "mark": mark,
+        "pdf_url": f"/api/papers/{paper_id}/pdf" if _pdf_path(conn, paths, paper_id) else None,
         "links_in_library": {"cites": cites, "cited_by": cited},
     }
+
+
+def _pdf_path(conn: sqlite3.Connection, paths: Paths, paper_id: str) -> Path | None:
+    row = conn.execute("SELECT pdf_path FROM artifacts WHERE paper_id=? AND status='ok' ORDER BY created_at LIMIT 1",
+                       (paper_id,)).fetchone()
+    path = paths.root / row["pdf_path"] if row else None
+    return path if path is not None and path.is_file() else None
+
+
+def paper_pdf(conn: sqlite3.Connection, paths: Paths, paper_id: str) -> tuple[Path, str]:
+    """The paper's PDF in the library, with a readable download name."""
+    path = _pdf_path(conn, paths, paper_id)
+    if path is None:
+        raise LookupError("no PDF for this paper")
+    title = conn.execute("SELECT title FROM papers WHERE id=?", (paper_id,)).fetchone()
+    name = re.sub(r"[^\w\- ]+", "", (title["title"] if title and title["title"] else paper_id))[:80].strip()
+    return path, f"{name or 'paper'}.pdf"
 
 
 def paper_file(conn: sqlite3.Connection, paths: Paths, paper_id: str, rel: str) -> Path:
@@ -206,3 +257,32 @@ def run_paper_ids(conn: sqlite3.Connection, run_id: str, limit: int = 15) -> lis
     """Best-ranked papers of a run (e.g. an imported Elicit list), to use as seeds."""
     return [r["paper_id"] for r in conn.execute(
         "SELECT paper_id FROM discovery_results WHERE run_id=? ORDER BY score DESC LIMIT ?", (run_id, limit))]
+
+
+def delete_run(conn: sqlite3.Connection, run_id: str) -> dict[str, int]:
+    """Undo a run: remove it from the history and take its papers out of the project, unless they matter
+    elsewhere: marked ✓/✗, have a PDF, found by another remaining run, or added outside discovery (e.g.
+    `ingest`). Deleting runs in any order thus leaves exactly what the remaining runs found. Library
+    records stay, so a later run that finds them again needs no new lookups."""
+    run = conn.execute("SELECT project_id, status FROM discovery_runs WHERE id=?", (run_id,)).fetchone()
+    if run is None:
+        raise ValueError("run not found")
+    if run["status"] == "running":
+        raise ValueError("this run is still running")
+    added = [r["paper_id"] for r in conn.execute(
+        """SELECT d.paper_id FROM discovery_results d
+           JOIN project_papers pp ON pp.paper_id = d.paper_id AND pp.project_id = ?
+           WHERE d.run_id = ? AND pp.source = 'discovery'""", (run["project_id"], run_id))]
+    keep = {r[0] for r in conn.execute(
+        f"""SELECT p.id FROM papers p WHERE p.id IN ({",".join("?" * len(added))}) AND (
+              EXISTS (SELECT 1 FROM paper_marks m WHERE m.paper_id = p.id AND m.project_id = ?)
+              OR EXISTS (SELECT 1 FROM artifacts a WHERE a.paper_id = p.id AND a.status = 'ok')
+              OR EXISTS (SELECT 1 FROM discovery_results o JOIN discovery_runs r ON r.id = o.run_id
+                         WHERE o.paper_id = p.id AND r.project_id = ? AND r.id != ?))""",
+        [*added, run["project_id"], run["project_id"], run_id],
+    )} if added else set()
+    removed = [pid for pid in added if pid not in keep]
+    conn.executemany("DELETE FROM project_papers WHERE project_id=? AND paper_id=?",
+                     [(run["project_id"], pid) for pid in removed])
+    conn.execute("DELETE FROM discovery_runs WHERE id=?", (run_id,))  # hits and results cascade
+    return {"removed": len(removed), "kept": len(keep)}

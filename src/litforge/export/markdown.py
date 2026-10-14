@@ -23,7 +23,7 @@ def slugify(text: str, max_len: int = 60) -> str:
 
 def default_export_dir(conn: sqlite3.Connection, paths: Paths, project: str, project_id: str) -> Path:
     row = conn.execute("SELECT export_dir FROM projects WHERE id=?", (project_id,)).fetchone()
-    return Path(row["export_dir"]).expanduser() if row and row["export_dir"] else paths.project_dir(project) / "exports"
+    return Path(row["export_dir"]).expanduser() if row and row["export_dir"] else paths.default_exports(project)
 
 
 def export_markdown(
@@ -35,7 +35,8 @@ def export_markdown(
     only: str = "all",
     paper_ids: Collection[str] | None = None,
 ) -> tuple[Path, int]:
-    """Write exports/markdown/{README.md, knowledge_base/*.md, assets/<slug>/...}; returns (root, papers).
+    """Write exports/markdown/{README.md, knowledge_base/*.md, assets/<slug>/..., pdfs/<slug>.pdf};
+    returns (root, papers). Each paper's PDF is copied under a readable name and linked from its note.
     `only` filters by the project's marks and `paper_ids` limits to an explicit selection. Notes and
     assets that the previous export wrote (listed in its manifest.json) but this one does not are
     removed, so the folder matches the selection; other files are never touched, and an empty
@@ -46,7 +47,8 @@ def export_markdown(
     root = (out_dir or default_export_dir(conn, paths, project, project_id)) / "markdown"
     kb = root / "knowledge_base"
     rows = conn.execute(
-        f"""SELECT p.id, p.title, p.year, p.doi, p.doi_status, p.abstract, a.sha256, r.parser, r.status, r.output_dir
+        f"""SELECT p.id, p.title, p.year, p.doi, p.doi_status, p.abstract, a.sha256, a.pdf_path,
+                  r.parser, r.status, r.output_dir
            FROM project_papers pp
            JOIN papers p ON p.id = pp.paper_id
            LEFT JOIN artifacts a ON a.paper_id = p.id AND a.status = 'ok'
@@ -84,6 +86,15 @@ def export_markdown(
             "parser": row["parser"],
             "pdf_sha256": row["sha256"],
         }
+        pdf = None
+        if row["pdf_path"] and (paths.root / row["pdf_path"]).is_file():
+            pdf = root / "pdfs" / f"{slug}.pdf"
+            pdf.parent.mkdir(exist_ok=True)
+            if not pdf.exists() or pdf.stat().st_size != (paths.root / row["pdf_path"]).stat().st_size:
+                shutil.copy2(paths.root / row["pdf_path"], pdf)
+            front["pdf"] = f"../pdfs/{slug}.pdf"
+        links = ([f"- [PDF](../pdfs/{slug}.pdf)"] if pdf else []) + (
+            [f"- DOI ({row['doi_status']}): https://doi.org/{row['doi']}"] if row["doi"] else [])
         body = "_Not parsed yet._\n" if row["sha256"] else f"# {title}\n\n_No PDF in the library yet._\n"
         if not row["sha256"] and row["abstract"]:
             body += f"\n## Abstract\n\n{row['abstract']}\n"
@@ -94,17 +105,18 @@ def export_markdown(
                 dest = root / "assets" / slug / "assets"
                 shutil.copytree(out_dir / "assets", dest, dirs_exist_ok=True)
             body = to_markdown(doc, title, asset_prefix=f"../assets/{slug}/")
-            if row["doi"]:
-                body += f"\n## Links\n\n- DOI ({row['doi_status']}): https://doi.org/{row['doi']}\n"
+        if links:
+            body += "\n## Links\n\n" + "\n".join(links) + "\n"
         header = "---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n\n"
         (kb / f"{slug}.md").write_text(header + body, encoding="utf-8")
         index_lines.append(
             f"| [{title.replace('|', '/')}](knowledge_base/{slug}.md) | {row['year'] or ''} "
-            f"| {front['parse_status']} | {(row['sha256'] or '')[:10]} |"
+            f"| {front['parse_status']} | {f'[PDF](pdfs/{slug}.pdf)' if pdf else ''} |"
         )
     for slug in previous - set(written.values()):
         (kb / f"{slug}.md").unlink(missing_ok=True)
         shutil.rmtree(root / "assets" / slug, ignore_errors=True)
+        (root / "pdfs" / f"{slug}.pdf").unlink(missing_ok=True)
     (root / "README.md").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
     (root / "manifest.json").write_text(
         json.dumps([{**dict(r), "slug": written[r["id"]]} for r in rows], indent=1, ensure_ascii=False),

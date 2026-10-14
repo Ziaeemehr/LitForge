@@ -10,6 +10,8 @@ import json
 import mimetypes
 import re
 import sqlite3
+import subprocess
+import sys
 import threading
 import traceback
 import uuid
@@ -20,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from litforge.config import Config, EnvSettings, Paths
 from litforge.discovery.fetch import fetch_open_access
@@ -28,9 +30,10 @@ from litforge.discovery.http import HttpClient
 from litforge.discovery.run import Sources, run_import, run_search
 from litforge.discovery.similar import run_similar
 from litforge.discovery.textsim import Embedder, load_embedder
-from litforge.export.markdown import export_markdown
+from litforge.export.markdown import default_export_dir, export_markdown
 from litforge.observability import EventLog
-from litforge.projects import ProjectNotFound, create_project, get_project_id, set_active
+from litforge.pipeline import add_pdfs
+from litforge.projects import ProjectNotFound, create_project, delete_project, get_project_id, set_active
 from litforge.storage.cache import sha256_file
 from litforge.storage.db import open_db, transaction
 from litforge.ui import api
@@ -95,8 +98,11 @@ class App:
         except ProjectNotFound:
             pid = create_project(conn, self.paths, name)
         if export_dir is not None:
+            chosen = export_dir.strip()
+            if chosen and Path(chosen).expanduser().resolve() == self.paths.default_exports(name):
+                chosen = ""  # the default: keep following the project folder
             with transaction(conn):
-                api.set_export_dir(conn, pid, export_dir.strip() or None)
+                api.set_export_dir(conn, pid, chosen or None)
         set_active(self.paths, name)
         return pid
 
@@ -170,29 +176,72 @@ class App:
 
         return self.start_job("search", project, work)
 
-    def fetch_job(self, body: dict[str, Any]) -> Job:
-        """Download open-access PDFs for the chosen papers; the job reports back the run being viewed."""
+    def add_job(self, body: dict[str, Any]) -> Job:
+        """Add PDFs from a folder on this computer and/or files uploaded from the page."""
+        uploads = (self.paths.root / "uploads").resolve()
+        files = [Path(f).resolve() for f in body.get("files") or []]
+        if any(not f.is_relative_to(uploads) for f in files):
+            raise ValueError("uploaded files must come from /api/upload")
+        folder = str(body.get("folder") or "").strip()
+        sources = list(files)
+        if folder:
+            path = Path(folder).expanduser()
+            if not path.exists():
+                raise ValueError(f"folder not found: {folder}")
+            sources.append(path)
+        if not sources:
+            raise ValueError("give a folder or drop PDF files")
+        conn = self.db()
+        project = str(body.get("project") or "default")
+        pid = self.ensure_project(conn, project, body.get("export_dir"))
+        conn.close()
+        label = Path(folder).expanduser().name if folder else f"{len(files)} uploaded PDF(s)"
+
+        def work(job: Job) -> str | None:
+            c = self.db()
+            try:
+                report, results, parsed = add_pdfs(c, self.paths, self.config, pid, sources, label, self.log,
+                                                   progress=job.messages.append)
+            finally:
+                c.close()
+                for f in files:  # the library keeps its own copy
+                    f.unlink(missing_ok=True)
+            job.messages += [f"warning: {e}" for e in report.errors]
+            new = sum(r.status == "new" for r in results)
+            known = sum(r.status == "duplicate" and r.paper_id is not None for r in results)
+            full = sum(p.status != "failed" for p in parsed)
+            job.messages.append(f"done: {len(results)} PDFs, {new} new, {known} already in the library; "
+                                f"{full} with full text")
+            return report.run_id
+
+        return self.start_job("pdfs", project, work)
+
+    def export_job(self, body: dict[str, Any]) -> Job:
+        """Export with PDFs: download open-access PDFs of the chosen papers, then export the same papers.
+        The job reports back the run being viewed so the page can refresh its PDF badges."""
         conn = self.db()
         project = str(body["project"])
-        pid = get_project_id(conn, project)
+        pid = self.ensure_project(conn, project, body.get("export_dir"))
         conn.close()
-        paper_ids = body.get("paper_ids")
-        only = str(body.get("only", "all" if paper_ids is not None else "relevant"))
+        paper_ids, only = body.get("paper_ids"), str(body.get("only", "all"))
 
         def work(job: Job) -> str | None:
             c = self.db()
             try:
                 report = fetch_open_access(c, self.paths, self.config, self.make_http(), pid, only, paper_ids,
                                            self.log, progress=job.messages.append)
+                job.messages += [f"warning: {e}" for e in report.failed]
+                job.messages.append(
+                    f"{report.downloaded} of {report.candidates} missing PDFs downloaded, "
+                    f"{report.parsed} with full text"
+                    + (f"; {report.no_source} have no open-access copy" if report.no_source else ""))
+                out, count = export_markdown(c, self.paths, project, pid, only=only, paper_ids=paper_ids)
             finally:
                 c.close()
-            job.messages += [f"warning: {e}" for e in report.failed]
-            job.messages.append(
-                f"done: {report.downloaded} of {report.candidates} PDFs downloaded, {report.parsed} with full text"
-                + (f"; {report.no_source} have no open-access copy" if report.no_source else ""))
+            job.messages.append(f"done: exported {count} papers to {out}")
             return body.get("run_id")
 
-        return self.start_job("fetch", project, work)
+        return self.start_job("export", project, work)
 
 
 def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
@@ -204,9 +253,11 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
 
         # ---- helpers ----
 
-        def _send(self, status: int, body: bytes, ctype: str) -> None:
+        def _send(self, status: int, body: bytes, ctype: str, headers: dict[str, str] | None = None) -> None:
             self.send_response(status)
             self.send_header("Content-Type", ctype)
+            for key, value in (headers or {}).items():
+                self.send_header(key, value)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
@@ -250,10 +301,15 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 return self._static(path.removeprefix("/static/"))
             conn = app.db()
             try:
+                if path == "/api/info":
+                    return self._json({"exports_root": str(app.paths.exports_root)})
                 if path == "/api/projects":
                     return self._json(api.list_projects(conn, app.paths))
                 if path == "/api/runs":
-                    return self._json(api.list_runs(conn, get_project_id(conn, query["project"])))
+                    pid = get_project_id(conn, query["project"]) if query.get("project") else None
+                    return self._json(api.list_runs(conn, pid, int(query.get("limit", 50))))
+                if path == "/api/library":
+                    return self._json(api.library(conn))
                 if m := re.fullmatch(r"/api/runs/([\w-]+)", path):
                     return self._json(api.run_results(conn, m.group(1)))
                 if m := re.fullmatch(r"/api/jobs/(\w+)", path):
@@ -264,6 +320,10 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 if m := re.fullmatch(r"/api/papers/([\w-]+)", path):
                     project_id = get_project_id(conn, query["project"]) if query.get("project") else None
                     return self._json(api.paper_detail(conn, app.paths, m.group(1), project_id))
+                if m := re.fullmatch(r"/api/papers/([\w-]+)/pdf", path):
+                    pdf, name = api.paper_pdf(conn, app.paths, m.group(1))
+                    return self._send(200, pdf.read_bytes(), "application/pdf",
+                                      {"Content-Disposition": f"inline; filename*=UTF-8''{quote(name)}"})
                 if m := re.fullmatch(r"/api/papers/([\w-]+)/files/(.+)", path):
                     target = api.paper_file(conn, app.paths, m.group(1), unquote(m.group(2)))
                     ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
@@ -296,8 +356,43 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(app.similar_job(body).__dict__)
                 if url.path == "/api/search":
                     return self._json(app.search_job(body).__dict__)
-                if url.path == "/api/fetch":
-                    return self._json(app.fetch_job(body).__dict__)
+                if url.path == "/api/add":
+                    return self._json(app.add_job(body).__dict__)
+                if url.path == "/api/export-dir":  # "" = back to data/projects/<name>/exports
+                    conn = app.db()
+                    try:
+                        app.ensure_project(conn, body["project"], str(body.get("export_dir") or ""))
+                    finally:
+                        conn.close()
+                    return self._json({"ok": True})
+                if url.path == "/api/open-exports":  # show the export folder in Finder / the file manager
+                    conn = app.db()
+                    try:
+                        name = str(body["project"])
+                        folder = default_export_dir(conn, app.paths, name, get_project_id(conn, name))
+                    finally:
+                        conn.close()
+                    folder.mkdir(parents=True, exist_ok=True)
+                    subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)])  # noqa: S603
+                    return self._json({"path": str(folder)})
+                if url.path == "/api/delete-project":
+                    name = str(body["project"])
+                    if any(j.project == name and j.status == "running" for j in app.jobs.values()):
+                        raise ValueError("a job is still running in this project")
+                    conn = app.db()
+                    try:
+                        deleted = delete_project(conn, app.paths, name, bool(body.get("delete_exports")))
+                    finally:
+                        conn.close()
+                    return self._json(deleted)
+                if url.path == "/api/delete-run":
+                    conn = app.db()
+                    try:
+                        with transaction(conn):
+                            res = api.delete_run(conn, str(body["run_id"]))
+                    finally:
+                        conn.close()
+                    return self._json(res)
                 if url.path == "/api/marks":
                     conn = app.db()
                     with transaction(conn):
@@ -305,6 +400,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         api.set_marks(conn, body["project"], ids, body.get("mark"))
                     conn.close()
                     return self._json({"ok": True})
+                if url.path == "/api/export" and body.get("fetch"):
+                    return self._json(app.export_job(body).__dict__)
                 if url.path == "/api/export":
                     conn = app.db()
                     try:

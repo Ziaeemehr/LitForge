@@ -11,13 +11,13 @@
   var state = {
     mode: 'similar', projects: [], project: store.get('project', null), runId: null, data: null,
     filter: '', oa: false, onlyNew: false, hide: false, channel: null, sort: store.get('sort', 'score'),
-    sel: -1, view: [], pdf: null, list: null, job: null, anchor: -1
+    sel: -1, view: [], page: 'new', pdf: null, list: null, pdfs: [], job: null, anchor: -1, exportsRoot: '', dirEdited: false
   };
 
   var CHANNEL_LABEL = {
     references: 'Cited by the seed', cited_by: 'Cites the seed', related: 'Related (OpenAlex)',
     keywords: 'Key-phrase search', neighbours: 'Citations of close matches', query: 'Search query',
-    'import': 'Imported list', seed: 'Seed'
+    'import': 'Imported list', seed: 'Seed', pdf: 'Your PDFs'
   };
 
   /* ---------- helpers ---------- */
@@ -66,43 +66,191 @@
   function loadProjects() {
     return api('/api/projects').then(function (projects) {
       state.projects = projects;
+      if (state.project && !projects.some(function (p) { return p.name === state.project; })) state.project = null;
       if (!state.project && projects.length) state.project = projects[0].name;
-      var sel = $('project-select');
-      sel.innerHTML = projects.length ? '' : '<option value="">(no projects yet)</option>';
-      projects.forEach(function (p) {
-        var o = document.createElement('option');
-        o.value = p.name;
-        o.textContent = p.name + '  ·  ' + p.papers + ' papers';
-        sel.appendChild(o);
-      });
-      sel.value = state.project || '';
+      renderSideProjects();
       $('project-list').innerHTML = projects.map(function (p) { return '<option value="' + esc(p.name) + '">'; }).join('');
+      $('recents-project').innerHTML = '<option value="">All projects</option>' +
+        projects.map(function (p) { return '<option value="' + esc(p.name) + '">' + esc(p.name) + '</option>'; }).join('');
+      $('recents-project').value = state.recentsProject || '';
       syncProjectFields();
       return loadRuns();
     });
   }
 
-  function syncProjectFields() {
-    var p = state.projects.find(function (x) { return x.name === state.project; });
-    $('project-name').value = state.project || '';
-    $('export-dir').value = p ? p.export_dir : '';
+  function renderSideProjects() {
+    var el = $('side-projects');
+    el.innerHTML = state.projects.length ? '' : '<div class="none">No projects yet</div>';
+    state.projects.forEach(function (p) {
+      var a = document.createElement('a');
+      a.href = '#';
+      a.className = p.name === state.project ? 'on' : '';
+      a.title = p.name + ' · ' + p.papers + ' papers · ' + p.runs + ' searches';
+      a.innerHTML = '<span class="count">' + p.papers + '</span>' + esc(p.name);
+      a.onclick = function (e) { e.preventDefault(); selectProject(p.name); state.recentsProject = p.name; showView('recents'); };
+      el.appendChild(a);
+    });
+    var cur = state.projects.find(function (p) { return p.name === state.project; });
+    $('current-project').innerHTML = cur ? esc(cur.name) + ' <small>· ' + cur.papers + ' papers</small>'
+      : '<small>No project yet: start with + New</small>';
   }
 
+  // Exports and new searches use the selected project.
+  function selectProject(name) {
+    if (name === state.project) return;
+    state.project = name;
+    store.set('project', name);
+    syncProjectFields();
+    renderSideProjects();
+  }
+
+  function syncProjectFields() {
+    $('project-name').value = state.project || '';
+    state.dirEdited = false;
+    showPaths();
+  }
+
+  // The export folder field starts at the project's folder (or the folder saved for the project) and
+  // follows the project name until edited; the value is saved with the next run or export.
+  function defaultDir(name) { return state.exportsRoot ? state.exportsRoot + '/' + name : ''; }
+
+  function showPaths() {
+    var name = $('project-name').value.trim(), el = $('project-paths'), dir = $('export-dir');
+    var p = state.projects.find(function (x) { return x.name === name; });
+    if (!state.dirEdited) dir.value = p ? p.export_dir : (name ? defaultDir(name) : '');
+    dir.placeholder = name ? defaultDir(name) : 'Give a project name first';
+    $('btn-export').title = 'Write Markdown notes to ' + (dir.value || 'the project folder');
+    var links = [];
+    if (name && dir.value.trim() !== defaultDir(name)) links.push('<a href="#" id="reset-exports">use default folder</a>');
+    if (p) links.push('<a href="#" id="open-exports">open folder</a>', '<a href="#" id="delete-project" class="danger">delete project</a>');
+    else if (name) links.unshift('New project');
+    el.innerHTML = links.join(' · ');
+    if ($('reset-exports')) {
+      $('reset-exports').onclick = function (e) { e.preventDefault(); state.dirEdited = true; dir.value = defaultDir(name); showPaths(); };
+    }
+    if (!p) return;
+    $('open-exports').onclick = function (e) {
+      e.preventDefault();
+      post('/api/open-exports', { project: p.name }).catch(function (err) { toast(err.message); });
+    };
+    $('delete-project').onclick = function (e) {
+      e.preventDefault();
+      var typed = window.prompt('Delete project "' + p.name + '" with its ' + p.papers + ' papers list, runs and marks?\n' +
+        'Papers and PDFs stay in the library.\nType the project name to confirm:');
+      if (typed === null) return;
+      if (typed.trim() !== p.name) { toast('Name did not match; nothing deleted'); return; }
+      var dropExports = window.confirm('Also delete its exports (the notes and PDFs in ' + p.export_dir + '/markdown)?\n\n' +
+        'OK = delete them too · Cancel = keep them');
+      post('/api/delete-project', { project: p.name, delete_exports: dropExports }).then(function (r) {
+        toast('Deleted ' + p.name + (r.kept_exports ? '; exports kept in ' + r.kept_exports : ''));
+        state.project = null;
+        store.set('project', null);
+        state.runId = null;
+        state.data = null;
+        state.dirEdited = false;
+        render();
+        return loadProjects();
+      }).catch(function (err) { toast(err.message); });
+    };
+  }
+
+  // Sidebar: the latest searches of all projects, like a chat app's history.
   function loadRuns() {
-    if (!state.project) { $('runs').innerHTML = '<small class="hint">No runs yet.</small>'; return Promise.resolve(); }
-    return api('/api/runs?project=' + encodeURIComponent(state.project)).then(function (runs) {
-      $('runs').innerHTML = runs.length ? '' : '<small class="hint">No runs yet.</small>';
-      runs.forEach(function (r) {
-        var a = document.createElement('a');
-        a.href = '#';
-        a.className = r.id === state.runId ? 'on' : '';
-        a.innerHTML = esc(r.label) + '<small>' + esc(r.kind) + ' · ' + r.papers + ' papers · ' +
-          esc((r.started_at || '').replace('T', ' ').slice(0, 16)) + (r.status !== 'done' ? ' · ' + esc(r.status) : '') + '</small>';
-        a.onclick = function (e) { e.preventDefault(); loadRun(r.id); };
-        $('runs').appendChild(a);
-      });
-      if (!state.runId && runs.length) loadRun(runs[0].id);
+    return api('/api/runs?limit=15').then(function (runs) {
+      var el = $('side-recent');
+      el.innerHTML = runs.length ? '' : '<div class="none">No searches yet</div>';
+      runs.forEach(function (r) { el.appendChild(runLink(r)); });
+      if (state.page === 'recents') loadRecents();
     });
+  }
+
+  function runLink(r) {
+    var a = document.createElement('a');
+    a.href = '#';
+    a.className = r.id === state.runId ? 'on' : '';
+    a.title = r.label;
+    a.innerHTML = esc(r.label) + '<small>' + esc(r.project) + ' · ' + r.papers + ' papers · ' +
+      esc((r.started_at || '').slice(5, 16).replace('T', ' ')) + (r.status !== 'done' ? ' · ' + esc(r.status) : '') + '</small>';
+    a.onclick = function (e) { e.preventDefault(); loadRun(r.id); };
+    return a;
+  }
+
+  function loadRecents() {
+    var q = state.recentsProject ? '&project=' + encodeURIComponent(state.recentsProject) : '';
+    return api('/api/runs?limit=500' + q).then(function (runs) {
+      var el = $('recents-list');
+      el.innerHTML = runs.length ? '' : '<div class="empty">No searches yet. Start one with <b>+ New</b>.</div>';
+      runs.forEach(function (r) {
+        var row = document.createElement('div');
+        row.className = 'row';
+        row.innerHTML = '<div><div class="title">' + esc(r.label) + '</div><div class="meta">' +
+          [r.project, r.kind, r.papers + ' papers', (r.started_at || '').slice(0, 16).replace('T', ' '),
+           r.status !== 'done' ? r.status : null].filter(Boolean).map(esc).join(' · ') + '</div></div>';
+        row.onclick = function () { loadRun(r.id); };
+        el.appendChild(row);
+      });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function loadLibrary() {
+    return api('/api/library').then(function (papers) { state.library = papers; renderLibrary(); })
+      .catch(function (e) { toast(e.message); });
+  }
+
+  function renderLibrary() {
+    var f = $('library-filter').value.trim().toLowerCase(), pdfOnly = state.libraryPdf;
+    var list = (state.library || []).filter(function (p) {
+      if (pdfOnly && !p.has_pdf) return false;
+      if (!f) return true;
+      return [p.title, p.venue, p.doi, p.authors.join(' '), p.projects.join(' ')].join(' ').toLowerCase().indexOf(f) >= 0;
+    });
+    var all = state.library || [];
+    $('library-count').textContent = all.length + ' papers · ' + all.filter(function (p) { return p.has_pdf; }).length + ' with PDF';
+    var el = $('library-list');
+    if (!list.length) { el.innerHTML = '<div class="empty">' + (all.length ? 'No papers match.' : 'The library is empty.') + '</div>'; return; }
+    el.innerHTML = list.slice(0, 1000).map(function (p, i) {
+      var meta = [p.year, p.venue, p.authors.join(', ')].filter(Boolean).map(esc).join(' · ');
+      var chips = p.projects.map(function (n) { return '<span class="chip">' + esc(n) + '</span>'; }).join('');
+      return '<div class="row" data-i="' + i + '"><div><div class="title">' + esc(p.title || '(no title)') + '</div>' +
+        '<div class="meta">' + meta + '</div>' + (chips ? '<div class="chips">' + chips + '</div>' : '') + '</div>' +
+        '<div class="badges">' + (p.has_pdf ? '<a class="btn small" target="_blank" rel="noopener" href="/api/papers/' +
+          esc(p.id) + '/pdf">PDF</a>' : (p.oa_url ? '<span class="badge oa">open</span>' : '')) + '</div></div>';
+    }).join('');
+    el.querySelectorAll('.row').forEach(function (row) {
+      row.onclick = function (e) { if (!e.target.closest('a')) openDrawer(list[+row.dataset.i]); };
+    });
+  }
+
+  // "+ New": an empty search form for the selected project; the open run stays in Recents.
+  function newSearch() {
+    state.runId = null;
+    state.data = null;
+    showView('new');
+    $('seed').focus();
+  }
+
+  function showView(view) {
+    state.page = view;
+    if (history.replaceState) history.replaceState(null, '', view === 'recents' || view === 'library' ? '#' + view : location.pathname);
+    ['new', 'recents', 'library'].forEach(function (v) { $('view-' + v).hidden = v !== view; });
+    $('results').hidden = view !== 'results';
+    document.querySelectorAll('.sidebar [data-view]').forEach(function (b) { b.classList.toggle('on', b.dataset.view === view); });
+    document.querySelectorAll('#side-recent a').forEach(function (a) { a.classList.remove('on'); });
+    if (view !== 'results') closeDrawer();
+    if (view === 'recents') { $('recents-project').value = state.recentsProject || ''; loadRecents(); }
+    if (view === 'library') loadLibrary();
+  }
+
+  function deleteRun() {
+    if (!window.confirm('Delete this run? It leaves History, and its ' + state.data.papers.length + ' papers leave ' +
+        'the project, except those you marked, have a PDF for, or that another run also found.')) return;
+    post('/api/delete-run', { run_id: state.runId }).then(function (r) {
+      toast('Run deleted: ' + r.removed + ' papers removed from the project' + (r.kept ? ', ' + r.kept + ' kept' : ''));
+      state.runId = null;
+      state.data = null;
+      render();
+      return loadProjects();
+    }).catch(function (e) { toast(e.message); });
   }
 
   function loadRun(id) {
@@ -112,8 +260,8 @@
       state.channel = null;
       state.anchor = -1;
       state.sel = -1;
+      selectProject(data.run.project);  // marks and exports belong to the run's project
       render();
-      Array.prototype.forEach.call($('runs').children, function (a) { a.classList.remove('on'); });
       loadRuns();
     }).catch(function (e) { toast(e.message); });
   }
@@ -122,16 +270,17 @@
 
   function render() {
     var d = state.data;
-    $('empty').hidden = !!d;
-    $('results').hidden = !d;
-    if (!d) return;
+    if (!d) { if (state.page === 'results') showView('new'); return; }
+    if (state.page !== 'results') showView('results');
     var run = d.run, s = d.stats, params = run.params || {};
     $('run-title').textContent = String(run.label || run.kind).slice(0, 120);
     var cost = run.stats && run.stats.cost_usd ? ' · API cost $' + run.stats.cost_usd.toFixed(4) : '';
     $('run-meta').innerHTML = esc(run.kind) + ' · ' + esc((run.started_at || '').replace('T', ' ').slice(0, 16)) +
       ' · ' + esc(run.status) + cost + (s.retracted ? ' · <b style="color:var(--bad)">' + s.retracted + ' retracted</b>' : '') +
-      ' <button class="btn small" id="btn-expand" title="Run a similar-paper search seeded with the top papers of this list">Find similar to these</button>';
+      ' <button class="btn small" id="btn-expand" title="Run a similar-paper search seeded with the top papers of this list">Find similar to these</button>' +
+      ' <button class="btn small" id="btn-delete-run" title="Undo this run: remove it from History and take its new papers out of the project">Delete run</button>';
     $('btn-expand').onclick = function () { startSimilar({ seed_run: state.runId }); };
+    $('btn-delete-run').onclick = deleteRun;
 
     var years = s.year_min ? (s.year_min === s.year_max ? s.year_min : s.year_min + '–' + s.year_max) : '–';
     var cards = [
@@ -165,8 +314,8 @@
       svg += '<rect x="' + (i * w + w * 0.1) + '" y="' + (50 - h) + '" width="' + (w * 0.8) + '" height="' + h + '">' +
         '<title>' + b[0] + (step > 1 ? '–' + (b[0] + step - 1) : '') + ': ' + b[1] + '</title></rect>';
     });
-    svg += '<text x="0" y="59">' + bins[0][0] + '</text><text x="100" y="59" text-anchor="end">' + bins[bins.length - 1][0] + '</text></svg>';
-    el.innerHTML = svg;
+    // Year labels sit outside the stretched SVG so they keep their shape.
+    el.innerHTML = svg + '</svg><div class="axis"><span>' + bins[0][0] + '</span><span>' + bins[bins.length - 1][0] + '</span></div>';
   }
 
   function renderBars(el, rows, filterable) {
@@ -319,11 +468,12 @@
       $('dhead').innerHTML = '<h2>' + esc(d.title || '(no title)') + '</h2>' +
         '<div class="meta">' + authors + '</div><div class="meta">' + meta + '</div>' +
         '<div class="links">' + paperLinks(d) + '</div>' +
-        '<div class="dactions"><span class="marks">' +
+        '<div class="dactions">' + (state.page === 'results' ? '<span class="marks">' +
         '<button class="rel' + (p.mark === 'relevant' ? ' on' : '') + '" data-mark="relevant" title="Relevant (r)">✓</button>' +
-        '<button class="irr' + (p.mark === 'irrelevant' ? ' on' : '') + '" data-mark="irrelevant" title="Not relevant (x)">✗</button></span>' +
+        '<button class="irr' + (p.mark === 'irrelevant' ? ' on' : '') + '" data-mark="irrelevant" title="Not relevant (x)">✗</button></span>' : '') +
         '<button class="btn small" id="btn-like">Find similar to this</button>' +
-        (d.markdown ? '<button class="btn small" id="btn-full">Full text</button>' : '') + '</div>';
+        (d.markdown ? '<button class="btn small" id="btn-full">Full text</button>' : '') +
+        (d.pdf_url ? '<a class="btn small" target="_blank" rel="noopener" href="' + esc(d.pdf_url) + '">Open PDF</a>' : '') + '</div>';
       $('dhead').querySelectorAll('button[data-mark]').forEach(function (b) {
         b.onclick = function () { toggleMark(p, b.dataset.mark); };
       });
@@ -380,7 +530,7 @@
   function setBusy(busy) {
     $('btn-run').disabled = busy;
     $('btn-more').disabled = busy;
-    $('btn-fetch').disabled = busy;
+    $('btn-export').disabled = busy;
   }
 
   function logLine(text, cls) {
@@ -393,6 +543,7 @@
 
   function poll(job) {
     state.job = job.id;
+    showView('new');  // the progress log lives with the search form
     var shown = 0;
     $('progress').innerHTML = '';
     var running = document.createElement('div');
@@ -408,7 +559,8 @@
         }
         running.remove();
         setBusy(false);
-        if (j.status === 'failed') { logLine(j.error, 'err'); toast(j.kind === 'fetch' ? 'Download failed' : 'Search failed'); return; }
+        if (j.status === 'failed') { logLine(j.error, 'err'); toast({ export: 'Export failed', pdfs: 'Adding PDFs failed' }[j.kind] || 'Search failed'); return; }
+        if (j.kind === 'export') toast(j.messages[j.messages.length - 1].replace(/^done: /, ''));
         state.project = j.project;
         store.set('project', j.project);
         state.runId = null;
@@ -417,6 +569,7 @@
     })();
   }
 
+  // The export folder in the field is saved with the project (created if new) when a run starts.
   function common() {
     return { project: projectName(), export_dir: $('export-dir').value.trim() };
   }
@@ -454,6 +607,8 @@
       setBusy(true);
       post('/api/search', Object.assign(common(), { queries: queries, sources: sources }))
         .then(poll).catch(function (e) { setBusy(false); toast(e.message); });
+    } else if (state.mode === 'pdfs') {
+      addPdfs();
     } else {
       if (!state.list) { toast('Choose a .csv, .bib or .ris file'); return; }
       setBusy(true);
@@ -471,6 +626,92 @@
     }
   }
 
+  /* ---------- my PDFs ---------- */
+
+  // Upload the chosen files one by one (the server keeps them only until they are in the library),
+  // then add them together with the typed folder as one background job.
+  function addPdfs() {
+    var folder = $('pdf-folder').value.trim(), files = state.pdfs.slice();
+    if (!folder && !files.length) { toast('Give a folder or drop PDF files'); return; }
+    setBusy(true);
+    $('progress').innerHTML = '';
+    var uploaded = [];
+    files.reduce(function (chain, f, i) {
+      return chain.then(function () {
+        logLine('uploading ' + (i + 1) + '/' + files.length + ' ' + f.name);
+        return api('/api/upload?name=' + encodeURIComponent(f.name), { method: 'POST', body: f })
+          .then(function (r) { uploaded.push(r.path); })
+          .catch(function (e) { logLine(f.name + ': ' + e.message, 'err'); });
+      });
+    }, Promise.resolve()).then(function () {
+      if (!folder && !uploaded.length) throw new Error('No PDF could be uploaded');
+      return post('/api/add', Object.assign(common(), { folder: folder, files: uploaded }));
+    }).then(function (job) { setPdfs([]); poll(job); })
+      .catch(function (e) { setBusy(false); toast(e.message); });
+  }
+
+  function setPdfs(files) {
+    state.pdfs = files;
+    var zone = $('drop-pdfs');
+    zone.querySelector('.file') && zone.querySelector('.file').remove();
+    if (!files.length) return;
+    var size = files.reduce(function (n, f) { return n + f.size; }, 0);
+    var span = document.createElement('div');
+    span.className = 'file';
+    span.innerHTML = files.length + ' PDF' + (files.length > 1 ? 's' : '') + ' (' + (size / 1048576).toFixed(1) +
+      ' MB) · <a href="#">clear</a>';
+    span.querySelector('a').onclick = function (e) { e.preventDefault(); setPdfs([]); };
+    zone.appendChild(span);
+  }
+
+  function isPdf(f) { return /\.pdf$/i.test(f.name); }
+
+  // A dropped folder arrives as a directory entry: walk it (readEntries returns batches).
+  function readEntry(entry) {
+    if (entry.isFile) return new Promise(function (ok) { entry.file(ok, function () { ok(null); }); });
+    if (!entry.isDirectory) return Promise.resolve(null);
+    var reader = entry.createReader(), all = [];
+    return new Promise(function (ok) {
+      (function next() {
+        reader.readEntries(function (batch) {
+          if (!batch.length) {
+            Promise.all(all.map(readEntry)).then(function (lists) { ok([].concat.apply([], lists)); });
+            return;
+          }
+          all = all.concat(Array.prototype.slice.call(batch));
+          next();
+        }, function () { ok([]); });
+      })();
+    });
+  }
+
+  function wirePdfs() {
+    var zone = $('drop-pdfs');
+    function add(list) {
+      var picked = list.filter(function (f) { return f && isPdf(f); });
+      if (!picked.length) { toast('No PDF files found'); return; }
+      setPdfs(state.pdfs.concat(picked));
+    }
+    $('pick-pdfs').onclick = function (e) { e.preventDefault(); $('files-pdfs').click(); };
+    $('pick-dir').onclick = function (e) { e.preventDefault(); $('dir-pdfs').click(); };
+    ['files-pdfs', 'dir-pdfs'].forEach(function (id) {
+      $(id).onchange = function () { add(Array.prototype.slice.call(this.files)); this.value = ''; };
+    });
+    zone.ondragover = function (e) { e.preventDefault(); zone.classList.add('over'); };
+    zone.ondragleave = function () { zone.classList.remove('over'); };
+    zone.ondrop = function (e) {
+      e.preventDefault();
+      zone.classList.remove('over');
+      var items = e.dataTransfer.items, entries = [];
+      for (var i = 0; items && i < items.length; i++) {
+        var entry = items[i].webkitGetAsEntry && items[i].webkitGetAsEntry();
+        if (entry) entries.push(entry);
+      }
+      if (!entries.length) { add(Array.prototype.slice.call(e.dataTransfer.files)); return; }
+      Promise.all(entries.map(readEntry)).then(function (lists) { add([].concat.apply([], lists)); });
+    };
+  }
+
   /* ---------- wiring ---------- */
 
   function setMode(mode) {
@@ -479,9 +720,10 @@
     $('form-similar').hidden = mode !== 'similar';
     $('form-search').hidden = mode !== 'search';
     $('form-import').hidden = mode !== 'import';
+    $('form-pdfs').hidden = mode !== 'pdfs';
     $('emb-wrap').hidden = mode !== 'similar';
     $('btn-more').hidden = mode !== 'similar';
-    $('btn-run').textContent = { similar: 'Find similar papers', search: 'Search', 'import': 'Import list' }[mode];
+    $('btn-run').textContent = { similar: 'Find similar papers', search: 'Search', 'import': 'Import list', pdfs: 'Add PDFs' }[mode];
     store.set('mode', mode);
   }
 
@@ -506,6 +748,9 @@
   function init() {
     document.querySelectorAll('.tabs button').forEach(function (b) { b.onclick = function () { setMode(b.dataset.mode); }; });
     setMode(store.get('mode', 'similar'));
+    var linked = /^#run=([\w-]+)$/.exec(location.hash);  // a bookmarked search; never set automatically
+    showView(/^#(recents|library)$/.test(location.hash) ? location.hash.slice(1) : 'new');
+    if (linked) loadRun(linked[1]);
     $('sort').value = state.sort;
 
     var drop = $('drop'), dropHtml = drop.innerHTML;
@@ -521,46 +766,55 @@
         function (f) { state.list = f; showFile(dropList, f, resetList); });
     }
     wireList();
+    wirePdfs();
+    $('project-name').oninput = function () {
+      // Switching to another existing project shows its folder; for a new name the default follows the name.
+      if (state.projects.some(function (x) { return x.name === this.value.trim(); }, this)) state.dirEdited = false;
+      showPaths();
+    };
+    $('export-dir').oninput = function () { state.dirEdited = true; showPaths(); };
 
     $('btn-run').onclick = run;
     $('btn-more').onclick = function () { startSimilar({ from_relevant: true }); };
-    $('project-select').onchange = function () {
-      state.project = this.value;
-      store.set('project', state.project);
-      state.runId = null;
-      state.data = null;
-      render();
-      syncProjectFields();
-      loadRuns();
+    document.querySelectorAll('.sidebar [data-view]').forEach(function (b) {
+      b.onclick = function () {
+        if (b.dataset.view === 'new') { newSearch(); return; }
+        if (b.dataset.view === 'recents') state.recentsProject = null;
+        showView(b.dataset.view);
+      };
+    });
+    $('recents-project').onchange = function () { state.recentsProject = this.value || null; loadRecents(); };
+    $('library-filter').oninput = renderLibrary;
+    $('library-pdf').onclick = function () {
+      state.libraryPdf = !state.libraryPdf;
+      this.classList.toggle('on', state.libraryPdf);
+      renderLibrary();
     };
     $('export-scope').value = store.get('export-scope', 'all');
     $('export-scope').onchange = function () { store.set('export-scope', this.value); };
-    // Get PDFs and Export both act on the papers chosen in the scope menu next to them.
-    function scopeBody(extra) {
-      if (!state.project) { toast('No project yet'); return null; }
-      var scope = $('export-scope').value, body = Object.assign({ project: state.project }, extra);
+    $('export-fetch').checked = store.get('export-fetch', false);
+    $('export-fetch').onchange = function () { store.set('export-fetch', this.checked); };
+    $('btn-export').onclick = function () {
+      if (!state.project) { toast('No project yet'); return; }
+      var scope = $('export-scope').value, body = { project: state.project };
+      if ($('project-name').value.trim() === state.project) body.export_dir = $('export-dir').value.trim();
       if (scope === 'visible') {
-        if (!state.data) { toast('Open a run first'); return null; }
+        if (!state.data) { toast('Open a run first'); return; }
         body.paper_ids = state.view.map(function (p) { return p.id; });
       } else {
         body.only = scope;
       }
-      return body;
-    }
-    $('btn-fetch').onclick = function () {
-      var body = scopeBody({ run_id: state.runId });
-      if (!body) return;
-      setBusy(true);
-      post('/api/fetch', body).then(poll).catch(function (e) { setBusy(false); toast(e.message); });
-    };
-    $('btn-export').onclick = function () {
-      var body = scopeBody({ export_dir: $('export-dir').value.trim() });
-      if (!body) return;
-      var scope = $('export-scope').value;
+      if ($('export-fetch').checked) {  // download missing PDFs first: a background job, like a search
+        setBusy(true);
+        post('/api/export', Object.assign(body, { fetch: true, run_id: state.runId }))
+          .then(poll).catch(function (e) { setBusy(false); toast(e.message); });
+        return;
+      }
       post('/api/export', body)
         .then(function (r) {
           if (!r.papers) toast(scope === 'relevant' ? 'Nothing exported: no paper is marked ✓ yet' : 'Nothing to export');
           else toast('Exported ' + r.papers + ' papers to ' + r.path);
+          return loadProjects();  // the folder just used is now the project's saved folder
         })
         .catch(function (e) { toast(e.message); });
     };
@@ -598,7 +852,8 @@
     $('drawer-close').onclick = closeDrawer;
 
     document.addEventListener('keydown', function (e) {
-      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.metaKey || e.ctrlKey || !state.data) return;
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.metaKey || e.ctrlKey || !state.data ||
+          state.page !== 'results') return;
       if (e.key === 'j' || e.key === 'ArrowDown') { select(state.sel + 1, $('drawer').classList.contains('open')); e.preventDefault(); }
       else if (e.key === 'k' || e.key === 'ArrowUp') { select(state.sel - 1, $('drawer').classList.contains('open')); e.preventDefault(); }
       else if (e.key === 'Enter' && state.sel >= 0) openDrawer(state.view[state.sel]);
@@ -609,7 +864,9 @@
       }
     });
 
-    loadProjects().catch(function (e) { toast(e.message); });
+    api('/api/info').then(function (info) { state.exportsRoot = info.exports_root; })
+      .catch(function () { /* older server: the field just starts empty */ })
+      .then(loadProjects).catch(function (e) { toast(e.message); });
   }
 
   init();

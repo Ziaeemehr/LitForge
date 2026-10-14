@@ -1,8 +1,11 @@
 """Download legal open-access PDFs for a project's papers, then parse and index them like `add`.
 
-Sources, in order: arXiv (from the paper's arXiv id), then the open-access URL found by discovery. When
-that URL is a landing page, the PDF link is taken from its `citation_pdf_url` meta tag (the standard
+Sources, in order: arXiv (from the paper's arXiv id), repository copies OpenAlex knows of (university
+repositories, Zenodo...), the open-access URL found by discovery, then other publisher copies. When a
+URL is a landing page, the PDF link is taken from its `citation_pdf_url` meta tag (the standard
 publishers expose for Google Scholar). Nothing is downloaded for papers that already have a PDF.
+Publishers behind bot protection (HTTP 403) and PMC's download challenge are not worked around: those
+papers are reported with a link to open in a browser.
 """
 
 from __future__ import annotations
@@ -12,11 +15,11 @@ import html
 import re
 import sqlite3
 import urllib.parse
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 
 from litforge.config import Config, Paths
-from litforge.discovery.http import HttpClient
+from litforge.discovery.http import HttpClient, HttpError
 from litforge.indexing.fts import current_runs, index_run
 from litforge.ingest import ingest_file
 from litforge.observability import NULL_LOG, EventLog
@@ -39,11 +42,44 @@ class FetchReport:
     failed: list[str] = field(default_factory=list)
 
 
-def candidate_urls(arxiv_id: str | None, oa_url: str | None) -> list[str]:
+def candidate_urls(arxiv_id: str | None, oa_url: str | None,
+                   repository: Sequence[str] = (), publisher: Sequence[str] = ()) -> list[str]:
     urls = [f"https://arxiv.org/pdf/{arxiv_id}"] if arxiv_id else []
-    if oa_url and oa_url.startswith(("http://", "https://")) and not (arxiv_id and "arxiv.org" in oa_url):
-        urls.append(oa_url)
+    for url in [*repository, oa_url, *publisher]:
+        if not url or not url.startswith(("http://", "https://")) or url in urls:
+            continue
+        if arxiv_id and "arxiv.org" in url:
+            continue
+        urls.append(url)
     return urls
+
+
+def openalex_locations(http: HttpClient, openalex_id: str | None) -> tuple[list[str], list[str]]:
+    """Open-access copies OpenAlex lists for a work: (repository URLs, publisher URLs), PDFs first.
+    Single-work lookups are free; any failure just means fewer candidates."""
+    if not openalex_id:
+        return [], []
+    try:
+        work = http.get_json(f"https://api.openalex.org/works/{openalex_id}?select=locations")
+    except Exception:  # noqa: BLE001 - optional extra sources
+        return [], []
+    repo_pdf: list[str] = []
+    repo_page: list[str] = []
+    pub_pdf: list[str] = []
+    pub_page: list[str] = []
+    for loc in work.get("locations") or []:
+        if not loc.get("is_oa"):
+            continue
+        is_repo = (loc.get("source") or {}).get("type") == "repository"
+        if loc.get("pdf_url"):
+            (repo_pdf if is_repo else pub_pdf).append(loc["pdf_url"])
+        elif loc.get("landing_page_url"):
+            (repo_page if is_repo else pub_page).append(loc["landing_page_url"])
+    return repo_pdf + repo_page, pub_pdf + pub_page
+
+
+def _short(exc: Exception) -> str:
+    return f"HTTP {exc.status}" if isinstance(exc, HttpError) else str(exc)[:120]
 
 
 def citation_pdf_url(page: bytes, base: str) -> str | None:
@@ -87,7 +123,7 @@ def fetch_open_access(
     if only not in MARK_SCOPES:
         raise ValueError(f"only must be one of {sorted(MARK_SCOPES)}")
     rows = conn.execute(
-        f"""SELECT p.id, p.title, p.arxiv_id, p.oa_url FROM project_papers pp
+        f"""SELECT p.id, p.title, p.arxiv_id, p.oa_url, p.openalex_id, p.doi FROM project_papers pp
             JOIN papers p ON p.id = pp.paper_id
             LEFT JOIN paper_marks m ON m.paper_id = p.id AND m.project_id = pp.project_id
             WHERE pp.project_id = ?{MARK_SCOPES[only]}
@@ -101,6 +137,7 @@ def fetch_open_access(
         wanted = set(paper_ids)
         rows = [r for r in rows if r["id"] in wanted]
     report = FetchReport(candidates=len(rows))
+    api_http = http
     # PDFs are binary and large: never through the JSON response cache.
     http = dataclasses.replace(http, cache_dir=None, timeout=max(http.timeout, 60.0))
     tmp_dir = paths.root / "cache" / "downloads"
@@ -108,20 +145,21 @@ def fetch_open_access(
     new_artifacts: set[str] = set()
     for i, row in enumerate(rows, 1):
         label = (row["title"] or row["id"])[:80]
-        urls = candidate_urls(row["arxiv_id"], row["oa_url"])
+        progress(f"[{i}/{len(rows)}] {label}")
+        urls = candidate_urls(row["arxiv_id"], row["oa_url"], *openalex_locations(api_http, row["openalex_id"]))
         if not urls:
             report.no_source += 1
             continue
-        progress(f"[{i}/{len(rows)}] {label}")
         body, errors = None, []
         for url in urls:
             try:
                 body = download_pdf(http, url)
                 break
             except Exception as exc:  # noqa: BLE001 - one bad host must not stop the batch
-                errors.append(f"{urllib.parse.urlsplit(url).netloc}: {exc}")
+                errors.append(f"{urllib.parse.urlsplit(url).netloc}: {_short(exc)}")
         if body is None:
-            report.failed.append(f"{label}: {'; '.join(errors)}")
+            link = f"https://doi.org/{row['doi']}" if row["doi"] else urls[0]
+            report.failed.append(f"{label}: {'; '.join(errors)} (open in a browser: {link})")
             log.emit("fetch.failed", paper_id=row["id"], errors=errors)
             continue
         tmp = tmp_dir / f"{row['id']}.pdf"

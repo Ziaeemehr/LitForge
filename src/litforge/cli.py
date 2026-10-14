@@ -24,10 +24,12 @@ from litforge.indexing.fts import current_runs, index_run, search
 from litforge.ingest import ingest_paths
 from litforge.observability import EventLog
 from litforge.parsing.run import artifacts_for_project, parse_artifact
+from litforge.pipeline import add_pdfs
 from litforge.projects import (
     MARK_SCOPES,
     ProjectNotFound,
     create_project,
+    delete_project,
     get_active,
     get_project_id,
     list_projects,
@@ -146,6 +148,26 @@ def project_use(ctx: typer.Context, name: str) -> None:
     typer.echo(f"active project: {name}")
 
 
+@project_app.command("delete")
+def project_delete(
+    ctx: typer.Context,
+    name: str,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask for confirmation")] = False,
+    delete_exports: Annotated[bool, typer.Option("--delete-exports", help="Also delete its exported notes and PDFs")]
+    = False,
+) -> None:
+    """Delete a project (papers and PDFs stay in the library; exports are kept unless --delete-exports)."""
+    st = _state(ctx)
+    conn = st.db()
+    _project(st, conn, name, required=True)
+    if not yes:
+        typer.confirm(f"Delete project '{name}' with its runs and marks?", abort=True)
+    res = delete_project(conn, st.paths, name, delete_exports)
+    typer.echo(f"deleted '{name}' ({res['papers']} papers stay in the library)")
+    if res["kept_exports"]:
+        typer.echo(f"kept your exports in {res['kept_exports']}")
+
+
 @project_app.command("list")
 def project_list(ctx: typer.Context) -> None:
     """List projects with paper counts (* = active)."""
@@ -192,7 +214,9 @@ def add(
     if project is None and get_active(st.paths) is None:
         _create(st, "default", None, None)
     name, pid = _project(st, conn, project, required=True)
-    results = ingest_paths(conn, st.paths, sources, pid, False, st.log)
+    assert pid is not None
+    label = ", ".join(src.name for src in sources)[:80]
+    _, results, parsed = add_pdfs(conn, st.paths, st.config, pid, sources, label, st.log)
     counts: dict[str, int] = {}
     for r in results:
         counts[r.status] = counts.get(r.status, 0) + 1
@@ -200,11 +224,9 @@ def add(
             typer.secho(f"  skipped {Path(r.path).name}: {r.message}", fg="yellow")
     typer.echo(f"imported into '{name}': " + (", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "no PDFs"))
     statuses: dict[str, int] = {}
-    with typer.progressbar(artifacts_for_project(conn, pid), label="parsing") as artifacts:
-        for art in artifacts:
-            res = parse_artifact(conn, st.paths, st.config, art, log=st.log)
-            statuses[res.status or "?"] = statuses.get(res.status or "?", 0) + 1
-    typer.echo("parsed: " + ", ".join(f"{k} {v}" for k, v in sorted(statuses.items())))
+    for res in parsed:
+        statuses[res.status or "?"] = statuses.get(res.status or "?", 0) + 1
+    typer.echo("parsed: " + (", ".join(f"{k} {v}" for k, v in sorted(statuses.items())) or "nothing"))
     chunks = sum(index_run(conn, st.paths, st.config, run).chunks for run in current_runs(conn, pid))
     typer.echo(f"indexed: {chunks} chunks. Try: litforge search \"your query\"")
 
@@ -325,6 +347,9 @@ def export(
     only: Annotated[
         str, typer.Option("--only", help="Which papers: all, relevant (marked ✓) or not-irrelevant (all but ✗)")
     ] = "all",
+    with_pdfs: Annotated[
+        bool, typer.Option("--fetch", help="First download open-access PDFs of these papers (full-text notes)")
+    ] = False,
 ) -> None:
     """Export a project's papers as Markdown with relative asset links."""
     st = _state(ctx)
@@ -337,6 +362,8 @@ def export(
     if only not in MARK_SCOPES:
         typer.secho(f"--only must be one of: {', '.join(MARK_SCOPES)}", fg="red", err=True)
         raise typer.Exit(2)
+    if with_pdfs:
+        _fetch(st, conn, pid, only)
     out, count = export_markdown(conn, st.paths, name, pid, only=only)
     typer.echo(f"exported {count} papers to {out}")
 
@@ -503,6 +530,10 @@ def fetch(
     if only not in MARK_SCOPES:
         typer.secho(f"--only must be one of: {', '.join(MARK_SCOPES)}", fg="red", err=True)
         raise typer.Exit(2)
+    _fetch(st, conn, pid, only)
+
+
+def _fetch(st: State, conn: sqlite3.Connection, pid: str, only: str) -> None:
     report = fetch_open_access(conn, st.paths, st.config, HttpClient(), pid, only, log=st.log,
                                progress=typer.echo)
     typer.echo(f"downloaded {report.downloaded} of {report.candidates} papers without a PDF, "

@@ -141,6 +141,12 @@ def corpus(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return root
 
 
+@pytest.fixture(autouse=True)
+def _exports_in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default exports go to ~/Downloads/LitForge; tests must never write there."""
+    monkeypatch.setenv("LITFORGE_EXPORT_ROOT", str(tmp_path / "exports"))
+
+
 @pytest.fixture()
 def paths(tmp_path: Path) -> Paths:
     p = Paths(tmp_path / "data")

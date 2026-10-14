@@ -128,6 +128,9 @@ def test_fetch_candidate_urls_and_landing_page_link() -> None:
     assert candidate_urls("2001.00001", "https://arxiv.org/pdf/2001.00001v2") == ["https://arxiv.org/pdf/2001.00001"]
     assert candidate_urls(None, "https://pub.example/a") == ["https://pub.example/a"]
     assert candidate_urls(None, "ftp://x") == [] and candidate_urls(None, None) == []
+    assert candidate_urls("1", "https://pub.example/a", ["https://repo.example/r", "https://pub.example/a"],
+                          ["https://pub.example/b"]) == [
+        "https://arxiv.org/pdf/1", "https://repo.example/r", "https://pub.example/a", "https://pub.example/b"]
     page = b'<meta name="citation_pdf_url" content="/content/1.full.pdf">'
     assert citation_pdf_url(page, "https://pub.example/a/b") == "https://pub.example/content/1.full.pdf"
     assert citation_pdf_url(b"<meta name='description' content='x'>", "https://pub.example") is None

@@ -26,7 +26,7 @@ uv run litforge export
 - `new` creates a project and makes it active, so later commands don't need `--project`.
 - `add` imports, parses and indexes PDFs in one step. Run it again any time; nothing is processed twice.
 - `search` returns the paper, section, page and a quoted snippet for every hit.
-- `export` writes Markdown notes to `data/projects/my-review/exports/markdown/`; `--only relevant` keeps just the papers marked ✓ (`--only not-irrelevant` drops the ✗ ones).
+- `export` writes Markdown notes (and each paper's PDF under a readable name in `pdfs/`) to `~/Downloads/LitForge/my-review/markdown/` (set `LITFORGE_EXPORT_ROOT` to change the base folder, or pick a folder per project in the web UI); `--only relevant` keeps just the papers marked ✓ (`--only not-irrelevant` drops the ✗ ones).
 
 ## Web interface
 
@@ -34,14 +34,18 @@ uv run litforge export
 uv run litforge ui        # opens http://127.0.0.1:8765 in your browser
 ```
 
-One page to give a DOI, PDF or abstract (or search queries, or an Elicit/Zotero export), choose a
-project and an output folder, and browse the results: summary numbers, publication years, how
+One page to give a DOI, PDF or abstract (or search queries, an Elicit/Zotero export, or your own
+PDFs: a folder path or dropped files/folders in the **My PDFs** tab), choose a project, and browse
+the results: summary numbers, publication years, how
 papers were found, top venues, filters, and a quick view with the abstract, score breakdown and
 full text (formulas rendered with KaTeX). Mark papers ✓/✗ and run "More like my ✓ papers" to
 iterate. To choose from a long list, mark the top N of the current filtered and sorted list,
 shift-click ✓/✗ to mark a range, or mark everything still unmarked ✗. The menu next to
-**Get PDFs** and **Export Markdown** picks which papers both act on: ✓ only, all but ✗, the
-visible list, or all. It runs locally with the Python standard library and works the same on macOS and Linux;
+**Export Markdown** picks which papers to export: ✓ only, all but ✗, the
+visible list, or all; ticking **with PDFs** first downloads open-access copies of papers that
+have none. Exports go to `~/Downloads/LitForge/<project>/` unless you set another folder in the **Export folder** field. A sidebar, as in chat apps, has
+**+ New** (a new search), **Recents** (every search, by project), **Library** (all papers with their
+PDFs and projects), your projects and the latest searches. The page starts on an empty search. It runs locally with the Python standard library and works the same on macOS and Linux;
 on a remote GPU machine use `ssh -L 8765:127.0.0.1:8765 host` and open the same address.
 
 ### Relevance, importance and review priority
@@ -122,7 +126,7 @@ data/
 │   ├── papers.sqlite     metadata, sections, search index
 │   ├── pdfs/             original PDFs, named by SHA256 (never deleted)
 │   └── parsed/           per-PDF output: canonical.json, paper.md, assets/
-└── projects/<name>/      project settings and exports
+└── projects/<name>/      project settings
 ```
 
 ## How a PDF is processed

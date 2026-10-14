@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -77,8 +78,15 @@ class EnvSettings(BaseSettings):
 class Paths:
     """Filesystem layout under the data root. Nothing here deletes files."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, exports_root: Path | None = None) -> None:
         self.root = root.expanduser().resolve()
+        # Exports are meant to be opened by the user, so by default they live outside the data root.
+        default = os.environ.get("LITFORGE_EXPORT_ROOT") or "~/Downloads/LitForge"
+        self.exports_root = (exports_root or Path(default)).expanduser().resolve()
+
+    def default_exports(self, project: str) -> Path:
+        """Where a project's exports go unless a folder was chosen for it."""
+        return self.exports_root / project
 
     @property
     def library(self) -> Path:

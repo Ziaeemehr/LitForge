@@ -117,6 +117,20 @@ class _Run:
         self.report.hits += len(records)
         return ids
 
+    def add_papers(self, paper_ids: Sequence[str], source: str, relation: str, new_ids: set[str]) -> None:
+        """Record papers already in the library and project (e.g. from PDFs the user added)."""
+        with transaction(self.conn):
+            for position, paper_id in enumerate(paper_ids, 1):
+                self.conn.execute(
+                    """INSERT INTO discovery_hits(run_id, paper_id, source, source_id, query, relation,
+                       seed_paper_id, rank) VALUES (?,?,?,?,?,?,?,?)""",
+                    (self.report.run_id, paper_id, source, None, None, relation, None, position),
+                )
+                self.hits.append((paper_id, source, None, position))
+        self.new_ids |= new_ids & set(paper_ids)
+        self.report.per_source[source] = self.report.per_source.get(source, 0) + len(paper_ids)
+        self.report.hits += len(paper_ids)
+
     def finish(
         self,
         http: HttpClient | None,
