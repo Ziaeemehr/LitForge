@@ -6,6 +6,7 @@ import pytest
 
 from litforge.screening.criteria import Criteria, criteria_hash
 from litforge.screening.decide import decide, failed_decision
+from litforge.screening.prompt import PROMPT_VERSION, build_messages, fingerprint, response_schema
 
 ABSTRACT = "We fit a Jansen-Rit neural mass model to EEG recordings with simulation-based inference."
 C = Criteria(question="Inference for neural mass models", include=["uses a neural mass model", "uses EEG or MEG"],
@@ -82,3 +83,26 @@ def test_criteria_from_text_and_hash() -> None:
     assert not c.is_empty() and Criteria(question=" ").is_empty()
     assert criteria_hash(c) == criteria_hash(Criteria.from_text("q", "a\nb", ""))
     assert criteria_hash(c) != criteria_hash(Criteria.from_text("q", "a", ""))
+
+
+def test_schema_has_one_entry_per_criterion() -> None:
+    s = response_schema(C)
+    assert s["properties"]["inclusion"]["minItems"] == 2 == s["properties"]["inclusion"]["maxItems"]
+    assert s["properties"]["exclusion"]["maxItems"] == 1
+    assert set(s["required"]) == {"relevance", "inclusion", "exclusion", "reason"}
+
+
+def test_messages_number_criteria_and_mark_missing_abstract() -> None:
+    msgs = build_messages(C, "A title", None, 2020, "J Neuro")
+    user = msgs[-1]["content"]
+    assert "I1. uses a neural mass model" in user and "E1. animal study only" in user
+    assert "(no abstract available)" in user and "A title" in user and "2020" in user
+
+
+def test_fingerprint_changes_with_model_criteria_and_text() -> None:
+    base = fingerprint(C, "qwen3:4b", "t", "a")
+    assert base == fingerprint(C, "qwen3:4b", "t", "a")
+    assert base != fingerprint(C, "qwen3:8b", "t", "a")
+    assert base != fingerprint(C, "qwen3:4b", "t", "a2")
+    assert base != fingerprint(Criteria(question="other"), "qwen3:4b", "t", "a")
+    assert PROMPT_VERSION

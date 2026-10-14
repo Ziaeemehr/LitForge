@@ -54,6 +54,13 @@ class SimilarConfig(BaseModel):
     keyword_queries: int = 3
 
 
+class ScreeningConfig(BaseModel):
+    model: str = "qwen3:4b"  # any Ollama model; qwen3:8b is slower but more careful
+    ollama_url: str = "http://localhost:11434"  # LITFORGE_OLLAMA_URL overrides
+    default_top: int = 100  # papers of a run screened when no count is given
+    timeout_s: float = 120
+
+
 class PrivacyConfig(BaseModel):
     allow_cloud: bool = False
 
@@ -63,6 +70,7 @@ class Config(BaseModel):
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
     discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
     similar: SimilarConfig = Field(default_factory=SimilarConfig)
+    screening: ScreeningConfig = Field(default_factory=ScreeningConfig)
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
 
 
