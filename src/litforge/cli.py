@@ -35,6 +35,8 @@ from litforge.projects import (
     list_projects,
     set_active,
 )
+from litforge.screening.llm import Llm, LlmError, ollama_from_config
+from litforge.screening.run import screen_run
 from litforge.storage.db import open_db
 
 app = typer.Typer(help="Local-first scientific literature library.", no_args_is_help=True)
@@ -439,6 +441,42 @@ def discover(
     for report in reports:
         typer.secho(f"{report.kind} in '{name}' ({report.status})", bold=True)
         _print_report(report)
+
+
+def _make_llm(config: Config, model: str | None) -> Llm:
+    return ollama_from_config(config.screening, model)
+
+
+@app.command()
+def screen(
+    ctx: typer.Context,
+    run: Annotated[str | None, typer.Option("--run", help="Run id (default: the project's latest run)")] = None,
+    top: Annotated[int | None, typer.Option(help="How many top papers of the run to screen")] = None,
+    model: Annotated[str | None, typer.Option(help="Ollama model (default: screening.model)")] = None,
+    project: ProjectOpt = None,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Screen a run's top papers against the project's criteria with a local model (set criteria in the web UI)."""
+    st = _state(ctx)
+    conn = st.db()
+    name, pid = _project(st, conn, project, required=True)
+    if run is None:
+        row = conn.execute("SELECT id FROM discovery_runs WHERE project_id=? ORDER BY rowid DESC LIMIT 1",
+                           (pid,)).fetchone()
+        if row is None:
+            typer.secho(f"no runs in '{name}' yet", fg="red", err=True)
+            raise typer.Exit(2)
+        run = str(row["id"])
+    try:
+        report = screen_run(conn, _make_llm(st.config, model), run, top or st.config.screening.default_top,
+                            progress=None if as_json else typer.echo, log=st.log)
+    except (ValueError, LookupError, LlmError) as exc:
+        typer.secho(str(exc), fg="red", err=True)
+        raise typer.Exit(2) from exc
+    if as_json:
+        _emit_json([report])
+        return
+    typer.echo(", ".join(f"{k} {v}" for k, v in sorted(report.counts.items())) or "nothing new to screen")
 
 
 @app.command()

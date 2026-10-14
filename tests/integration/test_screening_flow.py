@@ -179,3 +179,15 @@ def test_no_criteria_or_unreachable_model_touches_nothing(conn: sqlite3.Connecti
     assert conn.execute("SELECT COUNT(*) FROM screening_results").fetchone()[0] == 0
     with pytest.raises(LookupError):
         screen_run(conn, FakeLlm(answer), "nope", top=5)
+
+
+def test_cli_screen_latest_run(conn: sqlite3.Connection, paths: Paths, monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from litforge import cli
+
+    make_run(conn, paths, PAPERS)
+    monkeypatch.setattr(cli, "_make_llm", lambda config, model: FakeLlm(answer), raising=False)
+    result = CliRunner().invoke(cli.app, ["--data-dir", str(paths.root), "screen", "--project", "scr", "--top", "2"])
+    assert result.exit_code == 0, result.output
+    assert "include 1" in result.output and "2 screened" in result.output
