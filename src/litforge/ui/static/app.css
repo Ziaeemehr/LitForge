@@ -315,6 +315,11 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .modal .report .ok { color: var(--good); }
 .modal .report .no { color: var(--bad); }
 .modal .report .warn { color: var(--warn); }
+.modal .report .done { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 0 0 10px; padding: 8px 10px;
+  border-radius: 8px; background: var(--bg); font-weight: 600; }
+.modal .report .done code { font-weight: 400; }
+.modal .report .done .btn { margin-left: auto; }
+.modal .report .done .btn + .btn { margin-left: 0; }
 #added .report { margin-top: 12px; border: 0; }
 
 /* intro under the composer: the three steps of a review */

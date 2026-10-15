@@ -94,7 +94,7 @@
         <input type="file" id="dir-pdfs" webkitdirectory multiple hidden>
         <p class="hint">Each PDF is added to the library once (identical files are recognized), its text is
           extracted, and it is attached to a matching paper found earlier. The papers then appear as a run you
-          can mark ✓ and export; nothing else is needed.</p>
+          can mark ✓.</p>
       </form>
 
       <form id="form-import" hidden>
@@ -111,6 +111,7 @@
       <label class="f">Export folder <small>(default: Downloads/LitForge/&lt;project&gt;)</small></label>
       <input type="text" id="export-dir" spellcheck="false">
       <div class="hint paths" id="project-paths"></div>
+      <label class="check" id="pdfs-export-wrap" title="Uses the paper choice of Export in the top bar and the export folder above"><input type="checkbox" id="pdfs-export" checked> <span>Then export the notes of <b id="pdfs-export-scope">all papers of the project</b></span></label>
       <label class="check" id="emb-wrap" title="Rank by meaning with a local embedding model, not only by shared words. Slower on the first run while the model loads"><input type="checkbox" id="embeddings" checked> Meaning-based ranking (embeddings)</label>
 
       <button class="btn primary" id="btn-run">Find similar papers</button>
@@ -234,8 +235,8 @@
     <button class="btn small ghost" id="missing-close" title="Close">✕</button>
   </div>
   <p class="hint">Their notes hold only the abstract. Open a link, download the PDF in your browser, then add the
-    files with <a href="#" id="missing-add">+ New → My PDFs</a>: each one is matched to its paper, and the next export
-    has the full text.</p>
+    files with <a href="#" id="missing-add">+ New → My PDFs</a>: each one is matched to its paper, and the notes are
+    exported again with the full text.</p>
   <div class="mail" id="missing-mail"></div>
   <div class="mactions">
     <button class="btn small" id="missing-fetch">Search for these PDFs again</button>
@@ -259,7 +260,8 @@
           papers close in meaning.</li>
         <li><b>Search</b>: keyword queries, one per line.</li>
         <li><b>Import list</b>: a .csv, .bib or .ris export from Elicit, Zotero and similar tools.</li>
-        <li><b>My PDFs</b>: PDFs you already have; each is matched to its paper and its text is extracted.</li>
+        <li><b>My PDFs</b>: PDFs you already have; each is matched to its paper and its text is extracted. Unless
+          you untick <i>Then export</i>, the notes are exported right after, for the papers chosen under Export.</li>
       </ul>
       <p>Each search belongs to a <b>project</b> (one literature review). Searches are listed under <b>Recent</b>.</p>
     </section>

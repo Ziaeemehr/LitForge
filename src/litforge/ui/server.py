@@ -40,7 +40,7 @@ from litforge.parsing.formulas import FormulaEngine, Pix2TextEngine, formulas_av
 from litforge.parsing.run import ParseResult
 from litforge.parsing.vision import OllamaVision, Vision, enhance_project
 from litforge.pipeline import add_pdfs
-from litforge.projects import ProjectNotFound, create_project, delete_project, get_project_id, set_active
+from litforge.projects import MARK_SCOPES, ProjectNotFound, create_project, delete_project, get_project_id, set_active
 from litforge.screening.criteria import load_criteria
 from litforge.screening.llm import Llm, LlmError, ollama_from_config
 from litforge.screening.run import screen_run
@@ -207,7 +207,15 @@ class App:
         return self.start_job("search", project, work)
 
     def add_job(self, body: dict[str, Any]) -> Job:
-        """Add PDFs from a folder on this computer and/or files uploaded from the page."""
+        """Add PDFs from a folder on this computer and/or files uploaded from the page. With `export`
+        ({"only": ..., "paper_ids": ...}, as for /api/export) the project's notes are exported afterwards.
+        The export keeps the usual selection, not just the added papers: an export makes the folder match
+        its selection, so exporting the added papers alone would remove every other note."""
+        export = body.get("export")
+        if export is not None and not isinstance(export, dict):
+            raise ValueError("export must be an object like {\"only\": \"all\"}")
+        if export is not None and str(export.get("only") or "all") not in MARK_SCOPES:
+            raise ValueError(f"export.only must be one of {sorted(MARK_SCOPES)}")
         uploads = (self.paths.root / "uploads").resolve()
         files = [Path(f).resolve() for f in body.get("files") or []]
         if any(not f.is_relative_to(uploads) for f in files):
@@ -245,8 +253,26 @@ class App:
             new = sum(r.status == "new" for r in results)
             known = sum(r.status == "duplicate" and r.paper_id is not None for r in results)
             full = sum(p.status != "failed" for p in parsed)
-            job.messages.append(f"done: {len(results)} PDFs, {new} new, {known} already in the library; "
-                                f"{full} with full text")
+            summary = f"{len(results)} PDFs, {new} new, {known} already in the library; {full} with full text"
+            if export is None:
+                job.messages.append(f"done: {summary}")
+                return report.run_id
+            job.messages.append(summary)
+            paper_ids = export.get("paper_ids")
+            if paper_ids is not None:  # the chosen papers, and the ones the PDFs went to
+                paper_ids = list(dict.fromkeys([*paper_ids, *(r.paper_id for r in results if r.paper_id)]))
+            c = self.db()
+            try:
+                out, count = export_markdown(c, self.paths, project, pid, only=str(export.get("only") or "all"),
+                                             paper_ids=paper_ids)
+            except OSError as exc:  # the PDFs are in; say why the notes are not, and keep the job done
+                job.report["export_error"] = str(exc)
+                job.messages += [f"warning: export failed: {exc}", f"done: {summary}"]
+                return report.run_id
+            finally:
+                c.close()
+            job.report["exported"] = {"papers": count, "path": str(out)}
+            job.messages.append(f"done: {summary}; exported {count} papers to {out}")
             return report.run_id
 
         return self.start_job("pdfs", project, work)

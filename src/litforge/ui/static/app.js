@@ -231,9 +231,10 @@
       already: ['ok', '=', 'already in the library, for'], failed: ['no', '✗', 'not added:']
     };
     var count = function (o) { return r.items.filter(function (i) { return i.outcome === o; }).length; };
-    $('added-title').textContent = r.items.length + ' PDF' + (r.items.length === 1 ? '' : 's') + ' processed: ' +
-      count('attached') + ' attached, ' + count('new_paper') + ' new, ' + count('already') + ' already there, ' +
-      count('failed') + ' failed';
+    var parts = [['attached', 'attached'], ['new_paper', 'new'], ['already', 'already there'], ['failed', 'failed']]
+      .filter(function (o) { return count(o[0]); }).map(function (o) { return count(o[0]) + ' ' + o[1]; });
+    $('added-title').textContent = r.items.length + ' PDF' + (r.items.length === 1 ? '' : 's') +
+      (parts.length ? ': ' + parts.join(', ') : '');
     var html = '<ul>' + r.items.map(function (i) {
       var l = LABEL[i.outcome];
       var what = i.outcome === 'failed' ? esc(i.reason) : '<b>' + esc(i.title || '(no title)') + '</b>' +
@@ -245,13 +246,20 @@
       html += '<p class="hint">A PDF is matched by the DOI or title printed in it. One added as a new paper may be a ' +
         'paper you were missing whose PDF does not show these clearly; it is still in the project and gets its own note.</p>';
     }
-    html += '<p>The library keeps a copy of each file in <code>' + esc(r.library) + '</code> (your originals are not ' +
-      'moved). Export copies them to <code>' + esc(r.export_dir) + '/pdfs</code> and writes the notes, now with the full ' +
-      'text, to <code>' + esc(r.export_dir) + '/markdown</code>. <button class="btn small" id="added-export">Export now</button> ' +
-      '<button class="btn small" data-open-exports>Open export folder</button></p>';
-    $('added-report').innerHTML = html;
+    var head = r.exported
+      ? '<div class="done"><span class="ok">✓</span> Exported ' + r.exported.papers + ' note' +
+        (r.exported.papers === 1 ? '' : 's') + ' (' + esc(state.addScope || SCOPE_WORDS.all) + '), with full text where ' +
+        'there is a PDF, to <code>' + esc(r.export_dir) + '</code> <button class="btn small" data-open-exports>Open export ' +
+        'folder</button></div>'
+      : '<div class="done">' + (r.export_error ? '<span class="no">✗</span> Export failed: ' + esc(r.export_error)
+        : 'Not exported yet.') + ' <button class="btn small accent" id="added-export">Export now</button> ' +
+        '<button class="btn small" data-open-exports>Open export folder</button></div>';
+    html += '<p class="hint">The library keeps its own copy of each file in <code>' + esc(r.library) + '</code>; your ' +
+      'originals are not moved. An export writes the notes to <code>markdown</code> and the PDFs to <code>pdfs</code> ' +
+      'in the export folder.</p>';
+    $('added-report').innerHTML = head + html;
     $('added').showModal();
-    $('added-export').onclick = function () { $('added').close(); $('btn-export').click(); };
+    if ($('added-export')) $('added-export').onclick = function () { $('added').close(); $('btn-export').click(); };
     wireOpenExports($('added-report'));
   }
 
@@ -910,6 +918,18 @@
 
   /* ---------- my PDFs ---------- */
 
+  // What the Export menu in the header covers, said as the My PDFs form and its report say it.
+  var SCOPE_WORDS = { all: 'all papers of the project', relevant: 'the papers marked ✓',
+    'not-irrelevant': 'all papers except ✗', visible: 'the visible list and the added papers' };
+  function scopeWords() { return SCOPE_WORDS[$('export-scope').value] || SCOPE_WORDS.all; }
+
+  // Which papers an export covers, from the Export menu in the header.
+  function exportSelection() {
+    var scope = $('export-scope').value;
+    if (scope === 'visible' && state.data) return { paper_ids: state.view.map(function (p) { return p.id; }) };
+    return { only: scope === 'visible' ? 'all' : scope };
+  }
+
   // Upload the chosen files one by one (the server keeps them only until they are in the library),
   // then add them together with the typed folder as one background job.
   function addPdfs() {
@@ -927,7 +947,9 @@
       });
     }, Promise.resolve()).then(function () {
       if (!folder && !uploaded.length) throw new Error('No PDF could be uploaded');
-      return post('/api/add', Object.assign(common(), { folder: folder, files: uploaded }));
+      var body = Object.assign(common(), { folder: folder, files: uploaded });
+      if ($('pdfs-export').checked) { body.export = exportSelection(); state.addScope = scopeWords(); }
+      return post('/api/add', body);
     }).then(function (job) { setPdfs([]); poll(job); })
       .catch(function (e) { setBusy(false); toast(e.message); });
   }
@@ -1064,8 +1086,10 @@
     $('form-import').hidden = mode !== 'import';
     $('form-pdfs').hidden = mode !== 'pdfs';
     $('emb-wrap').hidden = mode !== 'similar';
+    $('pdfs-export-wrap').hidden = mode !== 'pdfs';
     $('btn-more').hidden = mode !== 'similar';
-    $('btn-run').textContent = { similar: 'Find similar papers', search: 'Search', 'import': 'Import list', pdfs: 'Add PDFs' }[mode];
+    $('btn-run').textContent = { similar: 'Find similar papers', search: 'Search', 'import': 'Import list',
+      pdfs: $('pdfs-export').checked ? 'Add PDFs & export' : 'Add PDFs' }[mode];
     store.set('mode', mode);
   }
 
@@ -1096,6 +1120,9 @@
       });
     }, 15000);
     document.querySelectorAll('.tabs button').forEach(function (b) { b.onclick = function () { setMode(b.dataset.mode); }; });
+    $('pdfs-export').checked = store.get('pdfs-export', true);
+    $('pdfs-export-scope').textContent = scopeWords();
+    $('pdfs-export').onchange = function () { store.set('pdfs-export', this.checked); setMode(state.mode); };
     setMode(store.get('mode', 'similar'));
     var linked = /^#run=([\w-]+)$/.exec(location.hash);  // a bookmarked search; never set automatically
     showView(/^#(recents|library)$/.test(location.hash) ? location.hash.slice(1) : 'new');
@@ -1160,7 +1187,8 @@
       setMode('pdfs');
     };
     $('export-scope').value = store.get('export-scope', 'all');
-    $('export-scope').onchange = function () { store.set('export-scope', this.value); };
+    $('pdfs-export-scope').textContent = scopeWords();
+    $('export-scope').onchange = function () { store.set('export-scope', this.value); $('pdfs-export-scope').textContent = scopeWords(); };
     $('export-fetch').checked = store.get('export-fetch', false);
     $('export-fetch').onchange = function () { store.set('export-fetch', this.checked); };
     $('export-math').value = store.get('export-math', store.get('export-vision', false) ? 'high' : 'off');
@@ -1169,12 +1197,8 @@
       if (!state.project) { toast('No project yet'); return; }
       var scope = $('export-scope').value, body = { project: state.project };
       if ($('project-name').value.trim() === state.project) body.export_dir = $('export-dir').value.trim();
-      if (scope === 'visible') {
-        if (!state.data) { toast('Open a run first'); return; }
-        body.paper_ids = state.view.map(function (p) { return p.id; });
-      } else {
-        body.only = scope;
-      }
+      if (scope === 'visible' && !state.data) { toast('Open a run first'); return; }
+      Object.assign(body, exportSelection());
       var math = $('export-math').value;
       if ($('export-fetch').checked || math !== 'off') {  // slow steps first: a background job
         setBusy(true);

@@ -215,6 +215,44 @@ def test_add_my_pdfs_from_folder_and_uploads(server: str, corpus: Path, tmp_path
     assert call(server, "/api/add", {"project": "own"})[0] == 400
 
 
+def test_add_my_pdfs_and_export(server: str, corpus: Path, tmp_path: Path) -> None:
+    out = tmp_path / "notes"
+    folder = tmp_path / "first"
+    folder.mkdir()
+    (folder / "a.pdf").write_bytes((corpus / "single_column.pdf").read_bytes())
+    _, job = call(server, "/api/add", {"project": "auto", "folder": str(folder), "export_dir": str(out),
+                                       "export": {"only": "all"}})
+    job = wait_job(server, job["id"])
+    assert job["status"] == "done", job
+    assert job["report"]["exported"] == {"papers": 1, "path": str(out / "markdown")}
+    assert "exported 1 papers to" in job["messages"][-1]
+
+    # A second batch exports the whole selection again, so the first paper's note stays.
+    second = tmp_path / "second"
+    second.mkdir()
+    (second / "b.pdf").write_bytes((corpus / "two_column.pdf").read_bytes())
+    _, job = call(server, "/api/add", {"project": "auto", "folder": str(second), "export": {"only": "all"}})
+    job = wait_job(server, job["id"])
+    assert job["report"]["exported"]["papers"] == 2
+    assert len(list((out / "markdown" / "knowledge_base").glob("*.md"))) == 2
+    assert len(list((out / "pdfs").glob("*.pdf"))) == 2
+
+    # An explicit selection still includes the papers the PDFs went to.
+    _, job = call(server, "/api/add", {"project": "auto", "folder": str(second), "export": {"paper_ids": []}})
+    assert wait_job(server, job["id"])["report"]["exported"]["papers"] == 1
+    assert call(server, "/api/add", {"project": "auto", "folder": str(second), "export": {"only": "x"}})[0] == 400
+    assert call(server, "/api/add", {"project": "auto", "folder": str(second), "export": True})[0] == 400
+
+    # When the notes cannot be written the PDFs are still added, and the report says why.
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file where the export folder should be")
+    _, job = call(server, "/api/add", {"project": "blocked", "folder": str(folder), "export_dir": str(blocked),
+                                       "export": {"only": "all"}})
+    job = wait_job(server, job["id"])
+    assert job["status"] == "done" and job["report"]["export_error"] and "exported" not in job["report"]
+    assert any(m.startswith("warning: export failed") for m in job["messages"])
+
+
 def test_delete_run_undoes_its_additions(server: str) -> None:
     _, job = call(server, "/api/similar", {"project": "undo", "seeds": ["10.1073/pnas.1912789117"],
                                            "embeddings": False})
