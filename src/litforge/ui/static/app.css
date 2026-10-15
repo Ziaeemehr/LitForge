@@ -356,5 +356,6 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 
 #btn-quit { margin-left: auto; color: var(--muted); }
 #btn-quit:hover { color: var(--bad); border-color: var(--bad); }
+.side-note { font-size: 11px; color: var(--muted); margin: 8px 10px 0; line-height: 1.4; }
 .stopped { max-width: 460px; margin: 18vh auto; text-align: center; color: var(--muted); }
 .stopped h2 { color: var(--ink); }
