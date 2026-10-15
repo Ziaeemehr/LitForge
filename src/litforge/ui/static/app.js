@@ -107,6 +107,10 @@
       : '<small>No project yet: start with + New</small>';
     $('btn-delete-project').hidden = !cur;
     $('btn-delete-project').onclick = cur ? function () { deleteProject(cur); } : null;
+    $('btn-open-folder').hidden = !cur;
+    $('btn-open-folder').onclick = cur ? function () {
+      post('/api/open-exports', { project: cur.name }).catch(function (err) { toast(err.message); });
+    } : null;
   }
 
   // Exports and new searches use the selected project.
