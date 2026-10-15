@@ -513,7 +513,10 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     finally:
                         conn.close()
                     folder.mkdir(parents=True, exist_ok=True)
-                    subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)])  # noqa: S603
+                    if sys.platform == "win32":
+                        os.startfile(folder)  # type: ignore[attr-defined]  # noqa: S606
+                    else:
+                        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)])  # noqa: S603
                     return self._json({"path": str(folder)})
                 if url.path == "/api/delete-project":
                     name = str(body["project"])
@@ -602,13 +605,20 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
 
 def serve(paths: Paths, config: Config, host: str = "127.0.0.1", port: int = 8765,
           open_browser: bool = True) -> None:
+    import webbrowser
+
+    # A second click on the shortcut: show the LitForge that is already running. Checked before binding,
+    # since on Windows a second server could bind the same port without an error.
+    if port and _is_litforge(f"http://{host}:{port}/"):
+        print(f"LitForge is already running on http://{host}:{port}/")
+        if open_browser:
+            webbrowser.open(f"http://{host}:{port}/")
+        return
     app = App(paths, config)
     httpd = ThreadingHTTPServer((host, port), make_handler(app))
     url = f"http://{host}:{httpd.server_address[1]}/"
-    print(f"LitForge UI on {url}  (Ctrl+C to stop)")
+    print(f"LitForge UI on {url}  (close this window or press Ctrl+C to stop)")
     if open_browser:
-        import webbrowser
-
         threading.Timer(0.5, webbrowser.open, args=(url,)).start()
     try:
         httpd.serve_forever()
@@ -616,3 +626,13 @@ def serve(paths: Paths, config: Config, host: str = "127.0.0.1", port: int = 876
         pass
     finally:
         httpd.server_close()
+
+
+def _is_litforge(url: str) -> bool:
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url + "api/info", timeout=2) as r:  # noqa: S310 (local address)
+            return "exports_root" in json.loads(r.read())
+    except (OSError, ValueError):
+        return False

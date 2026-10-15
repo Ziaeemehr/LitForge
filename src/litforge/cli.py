@@ -665,13 +665,30 @@ def ui(
     host: Annotated[str, typer.Option(help="Interface to bind (keep 127.0.0.1)")] = "127.0.0.1",
     no_browser: Annotated[bool, typer.Option("--no-browser", help="Don't open a browser window")] = False,
 ) -> None:
-    """Open the web interface (runs locally; works the same on macOS and Linux)."""
+    """Open the web interface in your browser (runs locally on Linux, macOS and Windows)."""
     from litforge.ui.server import serve
 
     st = _state(ctx)
     if host not in ("127.0.0.1", "localhost", "::1"):
         typer.secho(f"warning: serving on {host}; anyone who can reach this address can use the UI", fg="yellow")
     serve(st.paths, st.config, host, port, not no_browser)
+
+
+@app.command()
+def shortcut() -> None:
+    """Add a LitForge icon (app menu or desktop) that opens the web interface with one click."""
+    import shutil
+    import sys
+
+    from litforge.shortcut import create_shortcut
+
+    exe = shutil.which("litforge") or str(Path(sys.argv[0]).resolve())
+    icon = Path(__file__).parent / "ui" / "static" / "icon.svg"
+    written = create_shortcut(sys.platform, Path.home(), Path.cwd(), Path(exe), icon)
+    for path in written:
+        typer.echo(f"created {path}")
+    typer.echo("Double-click it to open LitForge; close the window that opens with it to stop LitForge.")
+    typer.echo(f"It uses the data in {Path.cwd()}, the folder you ran this command in.")
 
 
 if __name__ == "__main__":
