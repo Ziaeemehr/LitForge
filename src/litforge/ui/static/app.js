@@ -990,6 +990,21 @@
     };
   }
 
+  /* ---------- quit ---------- */
+
+  // LitForge usually runs without a terminal, so the page is where it is stopped.
+  function quit(force) {
+    post('/api/quit', { force: !!force }).then(function (r) {
+      if (!r.stopped) {
+        if (window.confirm(r.running + ' task' + (r.running === 1 ? ' is' : 's are') + ' still running and will be ' +
+            'cancelled. Quit anyway?')) quit(true);
+        return;
+      }
+      document.body.innerHTML = '<div class="stopped"><h2>LitForge has stopped</h2><p>You can close this tab. ' +
+        'To open LitForge again, use its icon in your apps.</p></div>';
+    }).catch(function (e) { toast(e.message); });
+  }
+
   /* ---------- help ---------- */
 
   function openGuide() {
@@ -1175,6 +1190,7 @@
     $('screen-panel').open = store.get('screen-open', false);
     $('screen-panel').ontoggle = function () { store.set('screen-open', this.open); };
     $('btn-help').onclick = openGuide;
+    $('btn-quit').onclick = function () { quit(false); };
     $('guide-close').onclick = function () { $('guide').close(); };
     $('guide').onclick = function (e) { if (e.target === this) this.close(); };  // click outside
     document.addEventListener('click', function (e) {

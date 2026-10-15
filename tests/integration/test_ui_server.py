@@ -19,7 +19,7 @@ from litforge.config import Paths, load_config
 from litforge.discovery.http import HttpClient
 from litforge.parsing.formulas import FakeFormulas, Formula
 from litforge.parsing.vision import FakeVision
-from litforge.ui.server import App, make_handler
+from litforge.ui.server import App, Job, make_handler
 
 ELICIT_CSV = (
     "Title,Authors,URL,DOI,Published Date,Summary,Relevance\n"
@@ -426,3 +426,21 @@ def test_startup_creates_the_library_and_marks_unfinished_runs_interrupted(tmp_p
     conn = open_db(paths.db)
     assert conn.execute("SELECT status FROM discovery_runs WHERE id='r1'").fetchone()[0] == "interrupted"
     conn.close()
+
+
+def test_quit_stops_the_server_and_asks_first_when_a_task_runs(tmp_path: Path) -> None:
+    app = App(Paths(tmp_path / "data"), load_config())
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        assert call(base, "/api/quit", {})[0] == 400  # not started by serve(): nothing to stop
+        app.stop = httpd.shutdown
+        app.jobs["j"] = Job(id="j", kind="search", project="p")
+        assert call(base, "/api/quit", {}) == (200, {"stopped": False, "running": 1})
+        assert call(base, "/api/quit", {"force": True}) == (200, {"stopped": True})
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+    finally:
+        httpd.server_close()

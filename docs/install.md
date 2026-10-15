@@ -1,66 +1,36 @@
 # Install and open LitForge
 
-Works on Linux, macOS and Windows. You need [git](https://git-scm.com/downloads) and
-[uv](https://docs.astral.sh/uv/); uv also installs the right Python for you.
+One command installs everything: uv and Python if missing, LitForge, and a LitForge icon in your apps.
+Run the same command again to update.
 
-## 1. Install uv
-
-| System | Command (in a terminal) |
+| System | Paste in a terminal |
 |---|---|
-| Linux, macOS | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| Windows | `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
+| Linux, macOS | `curl -LsSf https://raw.githubusercontent.com/Ziaeemehr/LitForge/main/install.sh \| sh` |
+| Windows (PowerShell) | `powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Ziaeemehr/LitForge/main/install.ps1 \| iex"` |
 
-Open a new terminal afterwards.
+LitForge goes to `~/LitForge` (Windows: `%USERPROFILE%\LitForge`); set `LITFORGE_DIR` to choose another
+folder. Already cloned it? Run `sh install.sh` (or `.\install.ps1`) inside the clone instead.
 
-## 2. Get LitForge
+## Open and stop
 
-```bash
-git clone https://github.com/Ziaeemehr/LitForge.git
-cd LitForge
-uv sync --extra embed
-```
-
-No git? Download the ZIP from the GitHub page (**Code → Download ZIP**), unpack it and `cd` into it.
-
-`--extra embed` adds meaning-based ranking (a small local model). Leave it out for a smaller install.
-
-## 3. Open it
-
-```bash
-uv run litforge shortcut
-```
-
-This adds a **LitForge** icon, once:
-
-| System | Where |
+| System | The icon |
 |---|---|
-| Linux | the app menu (and the desktop, if you have one); pin it to the dock |
-| macOS | `LitForge.command` on the desktop; drag it to the Dock |
-| Windows | `LitForge.bat` on the desktop |
+| Linux | **Show Apps** and the desktop; right-click → *Pin to Dash* |
+| macOS | **Launchpad** (`~/Applications/LitForge.app`); drag it to the Dock |
+| Windows | `LitForge` on the desktop |
 
-Double-click it: a small window starts LitForge and your browser opens it. Close that window to
-stop LitForge. Clicking the icon again while it runs just opens the browser tab.
+Click it and LitForge opens in your browser; no terminal stays open. Clicking it again just opens
+the page. To stop LitForge, press **⏻ Quit** at the bottom of the sidebar.
 
-The icon uses the data in the folder you ran `shortcut` from (the `data/` folder there). Without the
-icon, run `uv run litforge ui` from that folder.
-
-> On a Linux desktop, right-click the icon once and choose **Allow Launching**.
+The data lives in the `data/` folder of the install folder. Without the icon:
+`uv run litforge ui` in that folder.
 
 ## Optional extras
 
 | For | Install |
 |---|---|
 | AI screening | [Ollama](https://ollama.com/download), then `ollama pull qwen3:4b` |
-| Better math, fast | `uv sync --extra embed --extra formulas` (`formulas-gpu` on an NVIDIA GPU) |
+| Better math, fast | `uv sync --inexact --extra formulas` (`formulas-gpu` on an NVIDIA GPU), in the install folder |
 | Better math, best | Ollama, then `ollama pull qwen2.5vl:7b` (about 8 GB of GPU memory) |
 
-`uv run litforge doctor` checks what is installed.
-
-## Update
-
-```bash
-git pull
-uv sync --extra embed
-```
-
-List the same extras you installed with: `uv sync` removes the ones you leave out.
+`uv run litforge doctor` checks what is installed. Updating keeps these extras.

@@ -353,3 +353,8 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
   #screen-panel summary .meta { flex-basis: 100%; text-align: left; margin-left: 18px; }
   .bulk .hint { display: none; }
 }
+
+#btn-quit { margin-left: auto; color: var(--muted); }
+#btn-quit:hover { color: var(--bad); border-color: var(--bad); }
+.stopped { max-width: 460px; margin: 18vh auto; text-align: center; color: var(--muted); }
+.stopped h2 { color: var(--ink); }

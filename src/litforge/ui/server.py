@@ -74,6 +74,7 @@ class App:
         self.config = config
         self.log = EventLog(paths.logs)
         self.jobs: dict[str, Job] = {}
+        self.stop: Callable[[], None] | None = None  # set by serve(): shuts the server down
         self._embedder: Embedder | None = None
         self._embedder_loaded = False
         self._lock = threading.Lock()
@@ -518,6 +519,14 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     else:
                         subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)])  # noqa: S603
                     return self._json({"path": str(folder)})
+                if url.path == "/api/quit":  # the Quit button: LitForge may run without a terminal to close
+                    if app.stop is None:
+                        raise ValueError("this server cannot be stopped from the page")
+                    running = sum(j.status == "running" for j in app.jobs.values())
+                    if running and not body.get("force"):
+                        return self._json({"stopped": False, "running": running})
+                    threading.Thread(target=app.stop, daemon=True).start()
+                    return self._json({"stopped": True})
                 if url.path == "/api/delete-project":
                     name = str(body["project"])
                     if any(j.project == name and j.status == "running" for j in app.jobs.values()):
@@ -616,8 +625,9 @@ def serve(paths: Paths, config: Config, host: str = "127.0.0.1", port: int = 876
         return
     app = App(paths, config)
     httpd = ThreadingHTTPServer((host, port), make_handler(app))
+    app.stop = httpd.shutdown
     url = f"http://{host}:{httpd.server_address[1]}/"
-    print(f"LitForge UI on {url}  (close this window or press Ctrl+C to stop)")
+    print(f"LitForge UI on {url}  (stop it with Quit in the page or Ctrl+C)")
     if open_browser:
         threading.Timer(0.5, webbrowser.open, args=(url,)).start()
     try:

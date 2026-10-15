@@ -24,6 +24,10 @@ formulas-gpu = ["pix2text>=1.1.4", "rapidocr==3.9.0", "torch>=2.7", "torchvision
 [project.scripts]
 litforge = "litforge.cli:app"
 
+# Windows runs gui-scripts without a console window; the desktop shortcut starts this one.
+[project.gui-scripts]
+litforge-app = "litforge.cli:launch"
+
 [tool.uv.sources]
 # The CPU build of PyTorch is enough for Pix2Text and is a fraction of the size of the CUDA build.
 torch = [{ index = "pytorch-cpu", extra = "formulas" }, { index = "pytorch-cu128", extra = "formulas-gpu" }]

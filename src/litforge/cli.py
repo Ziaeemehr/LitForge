@@ -676,20 +676,27 @@ def ui(
 
 @app.command()
 def shortcut() -> None:
-    """Add a LitForge icon (app menu or desktop) that opens the web interface with one click."""
+    """Add a LitForge icon to your apps that opens the web interface with one click."""
     import shutil
     import sys
 
     from litforge.shortcut import create_shortcut
 
     exe = shutil.which("litforge") or str(Path(sys.argv[0]).resolve())
+    gui = shutil.which("litforge-app")
     icon = Path(__file__).parent / "ui" / "static" / "icon.svg"
-    written = create_shortcut(sys.platform, Path.home(), Path.cwd(), Path(exe), icon)
+    written = create_shortcut(sys.platform, Path.home(), Path.cwd(), Path(exe), icon, Path(gui) if gui else None)
     for path in written:
         typer.echo(f"created {path}")
-    typer.echo("Double-click it to open LitForge; close the window that opens with it to stop LitForge.")
+    where = {"darwin": "Launchpad (drag it to the Dock to keep it there)",
+             "win32": "the LitForge icon on your desktop"}.get(sys.platform, "Show Apps (pin it to the dock)")
+    typer.echo(f"Open LitForge from {where}. Stop it with Quit in the page.")
     typer.echo(f"It uses the data in {Path.cwd()}, the folder you ran this command in.")
 
+
+def launch() -> None:
+    """Entry point of the windowless `litforge-app` launcher: the web interface with default options."""
+    app(["ui"])
 
 if __name__ == "__main__":
     app()

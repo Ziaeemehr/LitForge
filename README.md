@@ -29,17 +29,21 @@ It runs in your browser, but everything stays on your machine.
 
 ## Start
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
+Paste one line in a terminal. It installs everything and adds a **LitForge** icon to your apps:
 
 ```bash
-git clone https://github.com/Ziaeemehr/LitForge.git
-cd LitForge
-uv sync --extra embed
-uv run litforge shortcut     # adds a LitForge icon; double-click it from now on
+curl -LsSf https://raw.githubusercontent.com/Ziaeemehr/LitForge/main/install.sh | sh
 ```
 
-Linux, macOS and Windows: see [docs/install.md](docs/install.md). Scores, screening, the command
-line and storage are explained in [docs/guide.md](docs/guide.md).
+On Windows (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Ziaeemehr/LitForge/main/install.ps1 | iex"
+```
+
+Then open LitForge from its icon; **⏻ Quit** in the page stops it. Run the same line again to update.
+Details: [docs/install.md](docs/install.md). Scores, screening, the command line and storage:
+[docs/guide.md](docs/guide.md).
 
 ---
 
@@ -63,21 +67,28 @@ line and storage are explained in [docs/guide.md](docs/guide.md).
 
 ### شروع
 
-ابتدا [uv](https://docs.astral.sh/uv/getting-started/installation/) را نصب کنید، سپس:
+این یک خط را در ترمینال اجرا کنید. همه‌چیز نصب می‌شود و آیکون LitForge به برنامه‌هایتان اضافه می‌شود:
 
 </div>
 
 ```bash
-git clone https://github.com/Ziaeemehr/LitForge.git
-cd LitForge
-uv sync --extra embed
-uv run litforge shortcut
+curl -LsSf https://raw.githubusercontent.com/Ziaeemehr/LitForge/main/install.sh | sh
 ```
 
 <div dir="rtl">
 
-فرمان آخر یک آیکون LitForge می‌سازد؛ از این به بعد فقط روی آن دوبار کلیک کنید. راهنمای نصب در
-لینوکس، مک و ویندوز در [docs/install.md](docs/install.md) است.
+در ویندوز، همین کار در PowerShell:
+
+</div>
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Ziaeemehr/LitForge/main/install.ps1 | iex"
+```
+
+<div dir="rtl">
+
+از این به بعد LitForge را با آیکونش باز کنید و با دکمه‌ی **⏻ Quit** در صفحه ببندید. برای به‌روزرسانی، همان خط را دوباره
+اجرا کنید. جزئیات نصب در [docs/install.md](docs/install.md) است.
 
 </div>
 
