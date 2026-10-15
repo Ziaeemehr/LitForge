@@ -6,20 +6,22 @@
 <title>LitForge</title>
 <link rel="stylesheet" href="/static/vendor/katex.min.css">
 <link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <script>try { var t = JSON.parse(localStorage.getItem('lf-theme')); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 </head>
 <body>
 <div class="app">
 <nav class="sidebar" id="sidebar">
   <div class="brand">Lit<span>Forge</span></div>
-  <button class="nav-new" id="nav-new" data-view="new">+ New</button>
-  <button class="nav-item" data-view="recents">Recents</button>
-  <button class="nav-item" data-view="library">Library</button>
-  <h3>Projects</h3>
+  <button class="nav-new" id="nav-new" data-view="new" title="Start a new search: from a paper, keywords, a reference list or your own PDFs">+ New</button>
+  <button class="nav-item" data-view="recents" title="Every search you ran, newest first">Recents</button>
+  <button class="nav-item" data-view="library" title="All papers LitForge knows, across projects">Library</button>
+  <h3 title="A project collects the papers, ✓/✗ marks and exports of one review">Projects</h3>
   <div class="side-list" id="side-projects"></div>
-  <h3>Recent</h3>
+  <h3 title="Your latest searches; click one to reopen it with its marks">Recent</h3>
   <div class="side-list" id="side-recent"></div>
-  <div class="side-foot"><button class="btn small" id="btn-theme" title="Theme: follow the system, light or dark"></button></div>
+  <div class="side-foot"><button class="btn small" id="btn-help" title="Quick guide: how LitForge works (?)">? Guide</button>
+    <button class="btn small" id="btn-theme" title="Theme: follow the system, light or dark"></button></div>
 </nav>
 
 <div class="main-col">
@@ -27,21 +29,22 @@
   <div class="current" id="current-project"></div>
   <button class="btn small ghost danger" id="btn-delete-project" title="Delete the current project (papers and PDFs stay in the library)" hidden>Delete project</button>
   <div class="spacer"></div>
-  <div class="export-group">
-    <select id="export-scope" title="Which papers to export">
+  <button class="btn" id="btn-missing" title="Papers of this project that have no PDF yet, with links to get them by hand">Missing PDFs</button>
+  <div class="export-group" role="group" aria-label="Export">
+    <span class="glabel">Export</span>
+    <select id="export-scope" title="Which papers to export and check for missing PDFs">
       <option value="all">All papers</option>
       <option value="relevant">Marked ✓ only</option>
       <option value="not-irrelevant">All except ✗</option>
       <option value="visible">Visible list</option>
     </select>
-    <label class="check" id="fetch-wrap" title="Before exporting, download open-access PDFs (arXiv, publisher copies) of the chosen papers that have none, so their notes contain the full text"><input type="checkbox" id="export-fetch"> with PDFs</label>
+    <label class="check" id="fetch-wrap" title="Slower: before exporting, download open-access PDFs (arXiv, publisher copies) of the chosen papers that have none, so their notes contain the full text"><input type="checkbox" id="export-fetch"> with PDFs</label>
     <select id="export-math" title="Better math: how the pages with equations, tables or broken text are rewritten before exporting. Results are kept, so raising the level later only processes what is new.">
       <option value="off" title="The text extracted from the PDF; equations often come out garbled">Math: as extracted</option>
       <option value="medium" title="Pix2Text reads every formula as LaTeX; the text stays as extracted from the PDF. About 1-5 s per page">Math: medium (fast)</option>
       <option value="high" title="A local vision model (Ollama) rewrites whole pages: formulas, tables and text, also in scanned papers. About 12 s per page on the GPU">Math: high (best)</option>
     </select>
-    <button class="btn" id="btn-missing" title="Papers of this project that have no PDF yet, with links to get them by hand">Missing PDFs</button>
-    <button class="btn" id="btn-export" title="Write Markdown notes to the project's output folder">Export Markdown</button>
+    <button class="btn accent" id="btn-export" title="Write Markdown notes to the project's output folder">Export Markdown</button>
   </div>
 </header>
 
@@ -49,10 +52,10 @@
   <section id="view-new" class="view">
     <div class="card composer">
       <div class="tabs">
-        <button data-mode="similar" class="on">Similar</button>
-        <button data-mode="search">Search</button>
-        <button data-mode="import">Import list</button>
-        <button data-mode="pdfs">My PDFs</button>
+        <button data-mode="similar" class="on" title="Start from one paper (DOI, arXiv id, PDF) or an abstract and collect papers like it">Similar</button>
+        <button data-mode="search" title="Keyword queries against OpenAlex, Crossref and arXiv">Search</button>
+        <button data-mode="import" title="Bring in a .csv, .bib or .ris list from Elicit, Zotero or another tool">Import list</button>
+        <button data-mode="pdfs" title="Add PDFs you already have; each is matched to its paper and its text extracted">My PDFs</button>
       </div>
 
       <form id="form-similar">
@@ -105,19 +108,19 @@
       <label class="f">Export folder <small>(default: Downloads/LitForge/&lt;project&gt;)</small></label>
       <input type="text" id="export-dir" spellcheck="false">
       <div class="hint paths" id="project-paths"></div>
-      <label class="check" id="emb-wrap"><input type="checkbox" id="embeddings" checked> Meaning-based ranking (embeddings)</label>
+      <label class="check" id="emb-wrap" title="Rank by meaning with a local embedding model, not only by shared words. Slower on the first run while the model loads"><input type="checkbox" id="embeddings" checked> Meaning-based ranking (embeddings)</label>
 
       <button class="btn primary" id="btn-run">Find similar papers</button>
-      <button class="btn small ghost" id="btn-more" title="Use every paper you marked ✓ as a seed" style="margin-top:6px">More like my ✓ papers</button>
+      <button class="btn secondary" id="btn-more" title="Run a similar-paper search seeded with every paper you marked ✓ in this project">More like my ✓ papers</button>
       <div class="progress" id="progress"></div>
     </div>
     <div class="intro" id="empty">
-      <p>Give a DOI, a PDF or an abstract, search by keywords, import a list from Elicit or Zotero, or add your own PDFs. Each result gets a
-        <b>relevance</b> score (meaning, shared references, citation links), an <b>importance</b> score
-        (field-normalized citations, centrality in the set, recent attention, venue) and a combined
-        <b>review priority</b>. Every result says why it was found.</p>
-      <p>To continue earlier work, open a search under <b>Recent</b> in the sidebar; your ✓/✗ marks are kept.</p>
-      <p><kbd>j</kbd>/<kbd>k</kbd> move · <kbd>Enter</kbd> open · <kbd>r</kbd> relevant · <kbd>x</kbd> irrelevant · Shift-click ✓/✗ marks a range · <kbd>Esc</kbd> close</p>
+      <ol class="steps">
+        <li><b>Find</b><span>Start from a paper, keywords, a reference list or your PDFs. Every result says why it was found.</span></li>
+        <li><b>Review</b><span>Papers are ranked by review priority. Mark each ✓ relevant or ✗ not relevant; marks are kept.</span></li>
+        <li><b>Export</b><span>Write Markdown notes, with PDFs and full text, for the papers you keep.</span></li>
+      </ol>
+      <p>New here? Open the <a href="#" data-help>quick guide</a>. To continue earlier work, pick a search under <b>Recent</b>.</p>
     </div>
   </section>
 
@@ -132,7 +135,7 @@
     <div class="card">
       <div class="toolbar">
         <input type="text" id="library-filter" placeholder="Filter by title, author, venue, project…">
-        <button class="toggle" id="library-pdf">With PDF only</button>
+        <button class="toggle" id="library-pdf" title="Show only papers whose PDF is in the library">With PDF only</button>
       </div>
       <div class="rows" id="library-list"></div>
     </div>
@@ -147,32 +150,39 @@
         <div class="card chart"><h4>Top venues</h4><div id="chart-venues"></div></div>
       </div>
       <details class="card" id="screen-panel">
-        <summary><b>Screening</b> <span class="meta" id="screen-summary"></span></summary>
-        <p class="hint">A local model reads each paper's title and abstract and checks it against these criteria. It only
-          suggests include / uncertain / exclude; your ✓/✗ marks decide. Nothing leaves this computer.</p>
-        <label class="f">Research question</label>
-        <textarea id="crit-question" rows="2"></textarea>
-        <label class="f">Inclusion criteria <small>(one per line)</small></label>
-        <textarea id="crit-include" rows="3"></textarea>
-        <label class="f">Exclusion criteria <small>(one per line)</small></label>
-        <textarea id="crit-exclude" rows="3"></textarea>
-        <div class="screen-actions">
-          <button class="btn small" id="btn-crit-save">Save criteria</button>
-          <span class="sep"></span>
-          Screen top <input type="number" id="screen-n" min="1" value="100"> papers
-          <button class="btn small primary" id="btn-screen">Screen</button>
-          <span class="hint" id="screen-model"></span>
+        <summary title="Optional: let a local model pre-sort papers by your inclusion and exclusion criteria">
+          <span class="chev">▸</span><b>AI screening</b> <span class="tag">optional</span>
+          <span class="meta" id="screen-summary"></span></summary>
+        <div class="screen-body">
+          <p class="hint">A local model reads each paper's title and abstract and checks it against these criteria. It only
+            suggests include / uncertain / exclude; your ✓/✗ marks decide. Nothing leaves this computer.</p>
+          <label class="f" for="crit-question">Research question</label>
+          <textarea id="crit-question" rows="2" placeholder="e.g. How does network directionality affect synchronization of excitatory neurons?"></textarea>
+          <div class="crit-grid">
+            <div><label class="f" for="crit-include">Include if <small>(one criterion per line)</small></label>
+              <textarea id="crit-include" rows="3" placeholder="studies spiking neuron networks&#10;reports a synchronization measure"></textarea></div>
+            <div><label class="f" for="crit-exclude">Exclude if <small>(one criterion per line)</small></label>
+              <textarea id="crit-exclude" rows="3" placeholder="purely experimental, no model&#10;review article"></textarea></div>
+          </div>
+          <div class="screen-actions">
+            <button class="btn small" id="btn-crit-save" title="Keep these criteria for the project without screening">Save criteria</button>
+            <span class="sep"></span>
+            <label for="screen-n">Screen the top</label> <input type="number" id="screen-n" min="1" value="100"
+              title="How many papers, in review-priority order, the model reads"> papers
+            <button class="btn small accent" id="btn-screen" title="Save the criteria and let the local model screen the papers (runs in the background)">Screen</button>
+            <span class="hint" id="screen-model"></span>
+          </div>
         </div>
       </details>
       <div class="card">
         <div class="toolbar">
           <input type="text" id="filter" placeholder="Filter by title, author, venue…">
-          <button class="toggle" id="t-oa">Open access</button>
-          <button class="toggle" id="t-new">New only</button>
-          <button class="toggle" id="t-hide">Hide ✗</button>
-          <select id="sort">
+          <button class="toggle" id="t-oa" title="Only papers with a PDF or a free open-access copy">Open access</button>
+          <button class="toggle" id="t-new" title="Only papers this project did not have before this search">New only</button>
+          <button class="toggle" id="t-hide" title="Hide papers you marked not relevant">Hide ✗</button>
+          <select id="sort" title="Order of the list. Review priority mixes relevance and importance">
             <option value="score">Sort: review priority</option>
-            <option value="screening">Sort: screening</option>
+            <option value="screening" data-screen>Sort: screening</option>
             <option value="relevance">Sort: relevance</option>
             <option value="importance">Sort: importance</option>
             <option value="year">Sort: newest</option>
@@ -188,14 +198,14 @@
           <span class="count" id="count"></span>
         </div>
         <div class="bulk">
-          Mark top <input type="number" id="bulk-n" min="1" value="20"> of this list
-          <button class="btn small" id="bulk-top">✓</button>
+          <label for="bulk-n">Mark top</label> <input type="number" id="bulk-n" min="1" value="20"> of this list
+          <button class="btn small" id="bulk-top" title="Mark the first N papers of the list as relevant">✓</button>
           <span class="sep"></span> Unmarked in this list
           <button class="btn small" id="bulk-rest" title="Mark every visible paper without a mark as not relevant">✗</button>
           <span class="sep"></span> All in this list
-          <button class="btn small" data-bulk="relevant">✓</button>
-          <button class="btn small" data-bulk="irrelevant">✗</button>
-          <button class="btn small" data-bulk="">Clear</button>
+          <button class="btn small" data-bulk="relevant" title="Mark every paper in this list as relevant">✓</button>
+          <button class="btn small" data-bulk="irrelevant" title="Mark every paper in this list as not relevant">✗</button>
+          <button class="btn small" data-bulk="" title="Remove the ✓/✗ marks of every paper in this list">Clear</button>
           <span class="hint">Shift-click ✓ / ✗ to mark a range</span>
         </div>
         <div class="list" id="list"></div>
@@ -206,7 +216,7 @@
 </div>
 
 <section class="drawer" id="drawer" aria-hidden="true">
-  <button class="btn small close" id="drawer-close">✕</button>
+  <button class="btn small close" id="drawer-close" title="Close (Esc)">✕</button>
   <div class="dhead" id="dhead"></div>
   <div class="dbody" id="dbody"></div>
 </section>
@@ -235,6 +245,59 @@
   <div class="mhead"><h2 id="added-title"></h2><button class="btn small ghost" id="added-close" title="Close">✕</button></div>
   <div class="report" id="added-report"></div>
 </dialog>
+<dialog class="modal" id="guide">
+  <div class="mhead"><h2>Quick guide</h2><button class="btn small ghost" id="guide-close" title="Close (Esc)">✕</button></div>
+  <div class="guide">
+    <section>
+      <h3>1 · Find papers</h3>
+      <p>Click <b>+ New</b> and choose how to start:</p>
+      <ul>
+        <li><b>Similar</b>: a DOI, arXiv id, PDF or abstract. LitForge follows its references, the papers citing it, and
+          papers close in meaning.</li>
+        <li><b>Search</b>: keyword queries, one per line.</li>
+        <li><b>Import list</b>: a .csv, .bib or .ris export from Elicit, Zotero and similar tools.</li>
+        <li><b>My PDFs</b>: PDFs you already have; each is matched to its paper and its text is extracted.</li>
+      </ul>
+      <p>Each search belongs to a <b>project</b> (one literature review). Searches are listed under <b>Recent</b>.</p>
+    </section>
+    <section>
+      <h3>2 · Read the scores</h3>
+      <dl>
+        <dt><span class="swatch rel"></span>Relevance</dt><dd>How close the paper is to your topic: text meaning, shared
+          references and citation links.</dd>
+        <dt><span class="swatch imp"></span>Importance</dt><dd>Field-normalized citations, centrality in this set, recent
+          attention and venue.</dd>
+        <dt>Review priority</dt><dd>The two combined; the list is sorted by it by default.</dd>
+      </dl>
+      <p>Badges: <span class="badge new">new</span> not in the project before · <span class="badge pdf">pdf</span> PDF in
+        the library · <span class="badge oa">open</span> free copy online · <span class="badge seed">seed</span> the paper
+        you started from. Click a paper to see the breakdown, abstract and full text.</p>
+    </section>
+    <section>
+      <h3>3 · Mark what you keep</h3>
+      <p>✓ relevant, ✗ not relevant. Shift-click marks a range; the bar above the list marks many at once. Marks belong to
+        the project and survive new searches. <b>More like my ✓ papers</b> searches again from everything you kept.</p>
+    </section>
+    <section>
+      <h3>4 · Export</h3>
+      <p>The header exports Markdown notes for <b>All papers</b>, <b>Marked ✓ only</b>, everything except ✗, or the
+        visible list. <b>with PDFs</b> first downloads open-access PDFs; <b>Math</b> rewrites equations as LaTeX (slower).
+        <b>Missing PDFs</b> lists papers still without one, with links to get them.</p>
+    </section>
+    <section>
+      <h3>Optional · AI screening</h3>
+      <p>Above a result list, <b>AI screening</b> lets a local model check each title and abstract against your inclusion and
+        exclusion criteria. It only suggests; your marks decide. Skip it if you screen by hand.</p>
+    </section>
+    <section>
+      <h3>Keyboard</h3>
+      <p class="keys"><kbd>j</kbd> <kbd>k</kbd> next / previous · <kbd>Enter</kbd> open · <kbd>r</kbd> mark ✓ ·
+        <kbd>x</kbd> mark ✗ · <kbd>Esc</kbd> close · <kbd>?</kbd> this guide</p>
+      <p class="hint">Hover any button to see what it does.</p>
+    </section>
+  </div>
+</dialog>
+<div class="tip" id="tip" role="tooltip"></div>
 <div class="toast" id="toast"></div>
 
 <script src="/static/vendor/marked.min.js"></script>

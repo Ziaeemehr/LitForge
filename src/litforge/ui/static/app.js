@@ -450,19 +450,28 @@
     $('run-meta').innerHTML = esc(run.kind) + ' · ' + esc((run.started_at || '').replace('T', ' ').slice(0, 16)) +
       ' · ' + esc(run.status) + cost + (s.retracted ? ' · <b style="color:var(--bad)">' + s.retracted + ' retracted</b>' : '') +
       ' <button class="btn small" id="btn-expand" title="Run a similar-paper search seeded with the top papers of this list">Find similar to these</button>' +
-      ' <button class="btn small" id="btn-delete-run" title="Undo this run: remove it from History and take its new papers out of the project">Delete run</button>';
+      ' <button class="btn small ghost danger" id="btn-delete-run" title="Undo this run: remove it from History and take its new papers out of the project">Delete run</button>';
     $('btn-expand').onclick = function () { startSimilar({ seed_run: state.runId }); };
     $('btn-delete-run').onclick = deleteRun;
 
     var years = s.year_min ? (s.year_min === s.year_max ? s.year_min : s.year_min + '–' + s.year_max) : '–';
     var cards = [
       [s.papers, 'papers'], [s.new, 'new to project'], [s.high_impact, 'top-10% cited in field'],
-      [s.open_access, 'open access'], [years, 'years'], [s.relevant + ' / ' + s.irrelevant, 'marked ✓ / ✗'],
-      [s.screened ? s.screen_include + ' / ' + s.screen_uncertain + ' / ' + s.screen_exclude : '–', 'screened in / ? / out']
+      [s.open_access, 'open access'], [years, 'years'], [s.relevant + ' / ' + s.irrelevant, 'marked ✓ / ✗']
     ];
+    if (s.screened) cards.push([s.screen_include + ' / ' + s.screen_uncertain + ' / ' + s.screen_exclude, 'screened in / ? / out']);
+    var STAT_TIP = {
+      'new to project': 'Papers this project did not have before this search',
+      'top-10% cited in field': 'Among the 10% most cited papers of their field and year (OpenAlex)',
+      'open access': 'Free copy online or PDF already in the library',
+      'marked ✓ / ✗': 'Papers you marked relevant / not relevant in this list',
+      'screened in / ? / out': 'AI screening suggestions: include / uncertain / exclude'
+    };
     $('stats').innerHTML = cards.map(function (c) {
-      return '<div class="card stat"><b>' + esc(c[0]) + '</b><span>' + esc(c[1]) + '</span></div>';
+      return '<div class="card stat"' + (STAT_TIP[c[1]] ? ' title="' + esc(STAT_TIP[c[1]]) + '"' : '') + '><b>' + esc(c[0]) +
+        '</b><span>' + esc(c[1]) + '</span></div>';
     }).join('');
+    showScreeningControls(!!s.screened);
     renderYears(s.years);
     renderBars($('chart-channels'), s.channels.map(function (c) { return [c[0], CHANNEL_LABEL[c[0]] || c[0], c[1]]; }), true);
     renderBars($('chart-venues'), s.venues.map(function (v) { return [v[0], v[0], v[1]]; }), false);
@@ -506,10 +515,17 @@
     if (!$('screen-n').dataset.touched) $('screen-n').value = c.default_top;
     $('screen-model').textContent = 'model: ' + c.model;
     var s = state.data && state.data.stats;
-    $('screen-summary').textContent = !c.question ? 'set a research question to screen with the local model' :
+    $('screen-summary').textContent = !c.question ? 'pre-sort papers with a local model · not set up' :
       (s && s.screened ? s.screened + ' screened: ' + s.screen_include + ' include, ' + s.screen_uncertain +
-        ' uncertain, ' + s.screen_exclude + ' exclude' : 'not screened yet');
-    if (!c.question && fresh) $('screen-panel').open = true;
+        ' uncertain, ' + s.screen_exclude + ' exclude' : 'criteria set · not screened yet');
+  }
+
+  // Screening sorts and filters only mean something once a paper of this list was screened.
+  function showScreeningControls(on) {
+    $('screen-filter').hidden = !on;
+    $('sort').querySelector('[data-screen]').hidden = !on;
+    if (!on && state.screenFilter) { state.screenFilter = ''; $('screen-filter').value = ''; }
+    if (!on && state.sort === 'screening') { state.sort = 'score'; $('sort').value = 'score'; }
   }
 
   function saveCriteria() {
@@ -602,7 +618,11 @@
     state.view = view;
     $('count').textContent = view.length + ' of ' + state.data.papers.length;
     var el = $('list');
-    if (!view.length) { el.innerHTML = '<div class="empty">No papers match the filters.</div>'; return; }
+    if (!view.length) {
+      el.innerHTML = '<div class="empty">No papers match the filters. <button class="btn small" id="clear-filters">Clear filters</button></div>';
+      $('clear-filters').onclick = clearFilters;
+      return;
+    }
     el.innerHTML = view.map(function (p, i) {
       var isSeed = (p.reasons || [])[0] === 'seed paper';
       var meta = [p.year, p.venue, p.cited_by_count != null ? p.cited_by_count + ' citations' : null,
@@ -611,10 +631,10 @@
         .map(function (r) { return '<span class="chip">' + esc(r) + '</span>'; }).join('') +
         (p.impact_notes || []).filter(function (n) { return /^top|in this set|RETRACTED/.test(n); })
           .map(function (n) { return '<span class="chip impact' + (n === 'RETRACTED' ? ' bad' : '') + '">' + esc(n) + '</span>'; }).join('');
-      var badges = screenBadge(p) + (isSeed ? '<span class="badge seed">seed</span>' : '') +
-        (p.new_to_project && !isSeed ? '<span class="badge new">new</span>' : '') +
-        (p.has_pdf ? '<span class="badge pdf">pdf</span>' : '') +
-        (p.oa_url && !p.has_pdf ? '<span class="badge oa">open</span>' : '');
+      var badges = screenBadge(p) + (isSeed ? '<span class="badge seed" title="The paper this search started from">seed</span>' : '') +
+        (p.new_to_project && !isSeed ? '<span class="badge new" title="Not in this project before this search">new</span>' : '') +
+        (p.has_pdf ? '<span class="badge pdf" title="Its PDF is in the library; notes get the full text">pdf</span>' : '') +
+        (p.oa_url && !p.has_pdf ? '<span class="badge oa" title="A free copy exists online; Export with PDFs downloads it">open</span>' : '');
       return '<div class="item' + (i === state.sel ? ' sel' : '') + (p.mark === 'irrelevant' ? ' irrelevant' : '') + '" data-i="' + i + '">' +
         '<div class="rank">' + (i + 1) + '</div>' +
         '<div class="score" title="Priority ' + p.priority.toFixed(2) + ' = relevance ' + p.score.toFixed(2) +
@@ -640,6 +660,15 @@
         select(i, true);
       };
     });
+  }
+
+  function clearFilters() {
+    state.filter = ''; state.oa = state.onlyNew = state.hide = false; state.channel = null; state.screenFilter = '';
+    state.anchor = -1;
+    $('filter').value = '';
+    $('screen-filter').value = '';
+    ['t-oa', 't-new', 't-hide'].forEach(function (id) { $(id).classList.remove('on'); });
+    render();
   }
 
   function select(i, open) {
@@ -703,9 +732,9 @@
         '<div class="dactions">' + (state.page === 'results' ? '<span class="marks">' +
         '<button class="rel' + (p.mark === 'relevant' ? ' on' : '') + '" data-mark="relevant" title="Relevant (r)">✓</button>' +
         '<button class="irr' + (p.mark === 'irrelevant' ? ' on' : '') + '" data-mark="irrelevant" title="Not relevant (x)">✗</button></span>' : '') +
-        '<button class="btn small" id="btn-like">Find similar to this</button>' +
-        (d.markdown ? '<button class="btn small" id="btn-full">Full text</button>' : '') +
-        (d.pdf_url ? '<a class="btn small" target="_blank" rel="noopener" href="' + esc(d.pdf_url) + '">Open PDF</a>' : '') + '</div>';
+        '<button class="btn small" id="btn-like" title="Start a new similar-paper search from this paper">Find similar to this</button>' +
+        (d.markdown ? '<button class="btn small" id="btn-full" title="Show or hide the text extracted from its PDF">Full text</button>' : '') +
+        (d.pdf_url ? '<a class="btn small" target="_blank" rel="noopener" href="' + esc(d.pdf_url) + '" title="Open the PDF in a new tab">Open PDF</a>' : '') + '</div>';
       $('dhead').querySelectorAll('button[data-mark]').forEach(function (b) {
         b.onclick = function () { toggleMark(p, b.dataset.mark); };
       });
@@ -961,6 +990,47 @@
     };
   }
 
+  /* ---------- help ---------- */
+
+  function openGuide() {
+    store.set('guide-seen', true);
+    if (!$('guide').open) $('guide').showModal();
+  }
+
+  // Native title tooltips appear late and small; show the same text at once in a readable bubble.
+  // The title moves to data-tip while hovered so the browser does not show its own copy too.
+  function wireTooltips() {
+    var tip = $('tip'), timer, cur = null;
+    function hide() {
+      clearTimeout(timer);
+      tip.classList.remove('show');
+      if (cur && cur.dataset.tip && !cur.getAttribute('title')) cur.setAttribute('title', cur.dataset.tip);
+      cur = null;
+    }
+    document.addEventListener('mouseover', function (e) {
+      var el = e.target.closest && e.target.closest('[title], [data-tip]');
+      if (el === cur) return;
+      hide();
+      if (!el || el.tagName === 'OPTION' || el.closest('svg')) return;
+      var text = el.getAttribute('title') || el.dataset.tip;
+      if (!text) return;
+      cur = el;
+      el.dataset.tip = text;
+      el.removeAttribute('title');
+      timer = setTimeout(function () {
+        tip.textContent = text;
+        var r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+        var x = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 8));
+        var y = r.bottom + 8 + h > innerHeight ? r.top - h - 8 : r.bottom + 8;
+        tip.style.left = x + 'px';
+        tip.style.top = y + 'px';
+        tip.classList.add('show');
+      }, 350);
+    });
+    ['mousedown', 'scroll', 'keydown'].forEach(function (ev) { document.addEventListener(ev, hide, true); });
+    document.addEventListener('mouseleave', hide);
+  }
+
   /* ---------- wiring ---------- */
 
   function setMode(mode) {
@@ -1102,6 +1172,16 @@
       b.onclick = function () { bulkMark(state.view.slice(), b.dataset.bulk || null, 'papers in this list'); };
     });
 
+    $('screen-panel').open = store.get('screen-open', false);
+    $('screen-panel').ontoggle = function () { store.set('screen-open', this.open); };
+    $('btn-help').onclick = openGuide;
+    $('guide-close').onclick = function () { $('guide').close(); };
+    $('guide').onclick = function (e) { if (e.target === this) this.close(); };  // click outside
+    document.addEventListener('click', function (e) {
+      if (e.target.closest('[data-help]')) { e.preventDefault(); openGuide(); }
+    });
+    wireTooltips();
+
     var THEMES = ['auto', 'light', 'dark'], THEME_LABEL = { auto: '◐ Auto', light: '☀ Light', dark: '☾ Dark' };
     function applyTheme(t) {
       if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
@@ -1144,8 +1224,9 @@
     };
 
     document.addEventListener('keydown', function (e) {
-      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.metaKey || e.ctrlKey || !state.data ||
-          state.page !== 'results') return;
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.metaKey || e.ctrlKey) return;
+      if (e.key === '?' && !document.querySelector('dialog[open]')) { openGuide(); e.preventDefault(); return; }
+      if (!state.data || state.page !== 'results') return;
       if (e.key === 'j' || e.key === 'ArrowDown') { select(state.sel + 1, $('drawer').classList.contains('open')); e.preventDefault(); }
       else if (e.key === 'k' || e.key === 'ArrowUp') { select(state.sel - 1, $('drawer').classList.contains('open')); e.preventDefault(); }
       else if (e.key === 'Enter' && state.sel >= 0) openDrawer(state.view[state.sel]);
@@ -1167,7 +1248,9 @@
       }
     })
       .catch(function () { /* older server: the field just starts empty */ })
-      .then(loadProjects).catch(function (e) { toast(e.message); });
+      .then(loadProjects).then(function () {
+        if (!state.projects.length && !store.get('guide-seen', false)) openGuide();
+      }).catch(function (e) { toast(e.message); });
   }
 
   init();
