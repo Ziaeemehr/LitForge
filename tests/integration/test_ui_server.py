@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import types
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -19,7 +20,7 @@ from litforge.config import Paths, load_config
 from litforge.discovery.http import HttpClient
 from litforge.parsing.formulas import FakeFormulas, Formula
 from litforge.parsing.vision import FakeVision
-from litforge.ui.server import App, Job, make_handler
+from litforge.ui.server import App, Job, make_handler, stop_when_idle
 
 ELICIT_CSV = (
     "Title,Authors,URL,DOI,Published Date,Summary,Relevance\n"
@@ -444,3 +445,27 @@ def test_quit_stops_the_server_and_asks_first_when_a_task_runs(tmp_path: Path) -
         assert not thread.is_alive()
     finally:
         httpd.server_close()
+
+
+def test_a_page_check_in_is_accepted_and_refreshes_the_idle_clock(server: str) -> None:
+    assert call(server, "/api/heartbeat", {}) == (200, {"ok": True})
+
+
+class _Httpd:  # stands in for the server: records that it was asked to stop
+    def __init__(self) -> None:
+        self.stopped = threading.Event()
+
+    def shutdown(self) -> None:
+        self.stopped.set()
+
+
+def test_an_idle_server_stops_itself_but_a_running_job_keeps_it_up() -> None:
+    app = types.SimpleNamespace(jobs={}, last_seen=time.monotonic() - 10)
+    httpd = _Httpd()
+    stop_when_idle(app, httpd, idle_s=0.2, check_s=0.01)  # type: ignore[arg-type]
+    assert httpd.stopped.wait(2)
+
+    app = types.SimpleNamespace(jobs={"j": Job(id="j", kind="search", project="p")}, last_seen=time.monotonic() - 10)
+    httpd = _Httpd()
+    stop_when_idle(app, httpd, idle_s=0.2, check_s=0.01)  # type: ignore[arg-type]
+    assert not httpd.stopped.wait(0.5)

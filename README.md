@@ -11,6 +11,22 @@ LitForge turns a paper, a few keywords or a reference list into a ranked reading
 decide what to keep, and writes Markdown notes with the full text for Obsidian or a language model.
 It runs in your browser, but everything stays on your machine.
 
+## Main purpose
+
+LitForge's main job is to build a local, structured library that a strong language model can use
+cheaply. Each paper is parsed once on your computer into sections, figures, tables and equations, and
+stored in a searchable database. The model then reads only what a question needs: a search returns the
+matching sections with their paper and page, not the whole PDF. A full paper costs many tokens, and for
+most questions most of them are not needed. Fewer tokens mean lower cost, faster answers, and more
+papers fitting into one request.
+
+```bash
+litforge search "graph neural networks" --json
+```
+
+Each hit names its paper, section, page and a short quote. For the Markdown notes themselves, run
+`litforge export`.
+
 ## Features
 
 - **Find papers** from a DOI, arXiv id, PDF or abstract (references, citing papers, similar meaning),
@@ -41,7 +57,7 @@ On Windows (PowerShell):
 powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Ziaeemehr/LitForge/main/install.ps1 | iex"
 ```
 
-Then open LitForge from its icon; **⏻ Quit** in the page stops it. Run the same line again to update.
+Then open LitForge from its icon. Closing its page stops it after about two minutes; **⏻ Quit** stops it at once. Run the same line again to update.
 Details: [docs/install.md](docs/install.md). Scores, screening, the command line and storage:
 [docs/guide.md](docs/guide.md).
 
@@ -54,6 +70,27 @@ Details: [docs/install.md](docs/install.md). Scores, screening, the command line
 لیت‌فورج از یک مقاله، چند کلیدواژه یا یک فهرست منابع، فهرستی مرتب از مقاله‌های مرتبط می‌سازد، در
 انتخاب مقاله‌ها کمکتان می‌کند و برای مقاله‌های انتخاب‌شده یادداشت‌های Markdown با متن کامل می‌نویسد.
 در مرورگر اجرا می‌شود ولی همه‌چیز روی رایانه‌ی خودتان می‌ماند.
+
+### هدف اصلی
+
+هدف اصلی LitForge ساختن یک کتابخانه‌ی محلی و ساختاریافته از مقاله‌هاست که یک مدل زبانی قوی بتواند
+ارزان و سریع با آن کار کند. هر مقاله یک بار روی رایانه‌ی شما خوانده می‌شود، به بخش‌ها، شکل‌ها، جدول‌ها
+و معادله‌ها تبدیل می‌شود و در پایگاه داده‌ای قابل جستجو ذخیره می‌شود.
+
+بعد از آن مدل زبانی فقط بخشی را می‌خواند که پرسش لازم دارد. جستجو بخش‌های مرتبط را همراه با نام مقاله
+و شماره‌ی صفحه برمی‌گرداند، نه کل فایل PDF. ارسال یک مقاله‌ی کامل توکن زیادی مصرف می‌کند که برای بیشتر
+پرسش‌ها لازم نیست. توکن کمتر یعنی هزینه‌ی کمتر، پاسخ سریع‌تر و جا شدن مقاله‌های بیشتر در یک درخواست.
+
+</div>
+
+```bash
+litforge search "graph neural networks" --json
+```
+
+<div dir="rtl">
+
+هر نتیجه نام مقاله، بخش، صفحه و یک نقل‌قول کوتاه را دارد. برای یادداشت‌های کامل Markdown دستور `litforge export`
+را اجرا کنید.
 
 ### قابلیت‌ها
 
@@ -87,7 +124,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Zia
 
 <div dir="rtl">
 
-از این به بعد LitForge را با آیکونش باز کنید و با دکمه‌ی **⏻ Quit** در صفحه ببندید. برای به‌روزرسانی، همان خط را دوباره
+از این به بعد LitForge را با آیکونش باز کنید و با دکمه‌ی **⏻ Quit** در صفحه ببندید، یا فقط صفحه را ببندید؛ حدود دو دقیقه بعد خودش بسته می‌شود. برای به‌روزرسانی، همان خط را دوباره
 اجرا کنید. جزئیات نصب در [docs/install.md](docs/install.md) است.
 
 </div>

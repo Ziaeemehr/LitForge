@@ -15,6 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 import traceback
 import uuid
 from collections.abc import Callable
@@ -48,6 +49,8 @@ from litforge.storage.db import open_db, transaction
 from litforge.ui import api
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+HEARTBEAT_S = 15  # how often an open page checks in (app.js)
+IDLE_STOP_S = 120  # no check-in for this long, and no job running: the server stops itself
 STATIC = resources.files("litforge.ui") / "static"
 
 
@@ -75,6 +78,7 @@ class App:
         self.log = EventLog(paths.logs)
         self.jobs: dict[str, Job] = {}
         self.stop: Callable[[], None] | None = None  # set by serve(): shuts the server down
+        self.last_seen = time.monotonic()  # when a page last checked in, see stop_when_idle()
         self._embedder: Embedder | None = None
         self._embedder_loaded = False
         self._lock = threading.Lock()
@@ -479,6 +483,9 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             try:
                 if url.path == "/api/upload":
                     return self._upload(parse_qs(url.query).get("name", ["paper.pdf"])[0])
+                if url.path == "/api/heartbeat":
+                    app.last_seen = time.monotonic()
+                    return self._json({"ok": True})
                 if url.path == "/api/import":
                     q = {k: v[0] for k, v in parse_qs(url.query).items()}
                     return self._import(q.get("name", "refs.csv"), q.get("project") or "default", q.get("export_dir"))
@@ -626,6 +633,7 @@ def serve(paths: Paths, config: Config, host: str = "127.0.0.1", port: int = 876
     app = App(paths, config)
     httpd = ThreadingHTTPServer((host, port), make_handler(app))
     app.stop = httpd.shutdown
+    stop_when_idle(app, httpd)
     url = f"http://{host}:{httpd.server_address[1]}/"
     print(f"LitForge UI on {url}  (stop it with Quit in the page or Ctrl+C)")
     if open_browser:
@@ -636,6 +644,22 @@ def serve(paths: Paths, config: Config, host: str = "127.0.0.1", port: int = 876
         pass
     finally:
         httpd.server_close()
+
+
+def stop_when_idle(app: App, httpd: ThreadingHTTPServer, idle_s: float = IDLE_STOP_S, check_s: float = 5.0) -> None:
+    """Stop the server once no page has checked in for `idle_s` seconds, so closing the tab stops LitForge.
+
+    A running job keeps it up. Background tabs run timers about once a minute, so the limit is longer than that.
+    """
+    def watch() -> None:
+        while True:
+            time.sleep(check_s)
+            busy = any(j.status == "running" for j in app.jobs.values())
+            if not busy and time.monotonic() - app.last_seen > idle_s:
+                httpd.shutdown()
+                return
+
+    threading.Thread(target=watch, daemon=True, name="idle-watchdog").start()
 
 
 def _is_litforge(url: str) -> bool:

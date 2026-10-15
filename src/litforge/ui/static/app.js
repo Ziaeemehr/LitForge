@@ -1000,9 +1000,13 @@
             'cancelled. Quit anyway?')) quit(true);
         return;
       }
-      document.body.innerHTML = '<div class="stopped"><h2>LitForge has stopped</h2><p>You can close this tab. ' +
-        'To open LitForge again, use its icon in your apps.</p></div>';
+      showStopped();
     }).catch(function (e) { toast(e.message); });
+  }
+
+  function showStopped() {
+    document.body.innerHTML = '<div class="stopped"><h2>LitForge has stopped</h2><p>You can close this tab. ' +
+      'To open LitForge again, use its icon in your apps.</p></div>';
   }
 
   /* ---------- help ---------- */
@@ -1080,6 +1084,13 @@
   }
 
   function init() {
+    // Each open page checks in; when none does for a while, the server stops itself (stop_when_idle).
+    // If the server is gone (it stopped while the computer slept, say), the page says so instead of failing quietly.
+    var beat = setInterval(function () {
+      post('/api/heartbeat', {}).catch(function (e) {
+        if (e instanceof TypeError) { clearInterval(beat); showStopped(); }  // fetch failed: no server answered
+      });
+    }, 15000);
     document.querySelectorAll('.tabs button').forEach(function (b) { b.onclick = function () { setMode(b.dataset.mode); }; });
     setMode(store.get('mode', 'similar'));
     var linked = /^#run=([\w-]+)$/.exec(location.hash);  // a bookmarked search; never set automatically
