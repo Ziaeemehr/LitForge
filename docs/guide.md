@@ -377,3 +377,67 @@ Implementation choices where the design leaves a formula or representation open:
   counted as `invalid_citations`. S1 verifies quotes against title and abstract; S2 requires an exact
   quote in the cited span (allowing whitespace differences). Editing a claim invalidates its model relations until
   reassessed. Project deletion preserves append-only screening history and human review records.
+
+## Living reviews and reproducibility radar
+
+```bash
+litforge snapshot -p my-review --label "Submitted draft"
+litforge snapshots -p my-review
+litforge delta OLD_SNAPSHOT NEW_SNAPSHOT --md changes.md
+litforge refresh -p my-review --notify
+# Optional: --no-screen --no-extract --no-claims
+litforge watch install -p my-review --every 7d
+litforge watch remove -p my-review
+litforge repro -p my-review --paper PAPER_ID --md reproduction.md
+# Repro also supports --profile, --preview and --approve, like matrix extraction.
+```
+
+**Claims → Snapshots** lists immutable snapshots, provides **Take snapshot** and **Refresh**, and shows
+latest delta signals and the report. Refresh runs in the background in the UI. It replays stored search
+queries (including keyword queries saved by similar-paper discovery), bypasses the HTTP cache, screens
+only papers added since the latest snapshot with the current project criteria, and runs S2 when text
+exists. Existing matrices use their cache keys to extract new or changed cells. Claims are extracted
+only for new papers, reclustered, and related only in pairs involving new claims. Refresh uses the
+configured local gateway route; unattended work never approves a cloud call. Delta Markdown is written
+as `delta-RUN_ID.md` in the project's export directory. Partial discovery or budget-limited extraction
+is recorded as `partial`; completed work is kept. Answers are compared as stored, not regenerated.
+
+Signals are limited to a new included paper at or above the priority 75th percentile, an existing
+result's strength changing by at least one, a new contradiction, a reported matrix value changing,
+or changed answer evidence. New-paper counts alone never trigger a signal. `--notify` calls the OS
+notifier only when signals exist; notification failures do not change the refresh command's exit code.
+
+Scheduling is opt-in: only `watch install` writes a launchd plist or systemd user service/timer.
+It prints the explicit activation command; LitForge does not call `launchctl` or `systemctl`.
+`watch remove` removes those files and prints the deactivation command if needed. On Windows, install
+and remove print Task Scheduler commands without executing them. The schedule preserves the absolute
+data directory, explicit config path and project; it runs `litforge refresh -p NAME`.
+
+The paper drawer's **Repro** tab shows a 12-item reproducibility checklist, recorded code/data links,
+and a reproduction brief. **Extract reproducibility** uses the built-in `reproducibility` matrix and
+the existing model preview, validation, cache and review machinery. The matrix is also available in
+**Matrix** for inspection and review. Link extraction examines every chunk of current full text,
+recognises repository hosts and known data DOI prefixes, and stores the source evidence ID. Zenodo,
+Figshare and OSF links are listed as "other", since those sites also hold papers and software. Links
+are shown as inert text and are never fetched or executed. Brief observations cite evidence; missing
+information is labelled unsupported, suggestions are labelled proposal, and estimates are labelled
+interpretation. Compute estimates use reported hardware and a reported duration only.
+
+Conservative choices where Phase 3 leaves details open:
+
+- Priority uses each paper's highest stored priority in this project; the percentile is nearest-rank
+  over known priorities in the after snapshot. Unknown priorities cannot trigger a signal. Human marks
+  take precedence over S2, then S1, when determining inclusion.
+- A duplicate query is replayed once with the union of its saved sources and the largest saved limit
+  (25 for similar-search keyword hits without a stored limit). Imports and citation-ranking topics
+  are not search queries and are not replayed as searches.
+- Cluster overlap through shared claim IDs matches growing, merging and splitting clusters, despite
+  changing cluster IDs. Newly isolated claims are listed as single-source, not as stronger existing
+  results. Gaining or losing a reported cell value counts as a value change; evidence-only cell changes
+  appear in the delta but do not create a matrix-value signal.
+- Snapshots and watch history survive project deletion. Repro links from older parses remain stored
+  as provenance, but cards show links and matrix observations from current parses only. A paper-only
+  card uses a unique project reproducibility matrix; multiple project matrices require `-p` to select
+  reviewed observations. With no extraction or ambiguous context, checklist items remain unclear.
+- Schedule installation writes files and prints activation instructions; activation/deactivation is
+  explicit. Compute estimates require both hardware and a duration; otherwise they say “not reported”.

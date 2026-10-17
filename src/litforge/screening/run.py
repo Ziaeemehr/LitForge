@@ -43,28 +43,44 @@ def screen_run(conn: sqlite3.Connection, llm: Llm, run_id: str, top: int,
     if run is None:
         raise LookupError("run not found")
     project_id = run["project_id"]
-    criteria = load_criteria(conn, project_id)
-    if criteria.is_empty():
+    if load_criteria(conn, project_id).is_empty():
         raise ValueError("no screening criteria: fill in the research question first")
     llm.check()
-    papers = conn.execute(
-        """SELECT p.id, p.title, p.abstract, p.year, p.venue, s.fingerprint, s.error
-           FROM discovery_results d JOIN papers p ON p.id = d.paper_id
-           LEFT JOIN screening_results s ON s.project_id = ? AND s.paper_id = p.id
-           WHERE d.run_id = ? ORDER BY COALESCE(d.priority, d.score) DESC, p.title LIMIT ?""",
-        (project_id, run_id, top)).fetchall()
-    say = progress or (lambda _m: None)
-    report = ScreenReport(run_id=run_id, project_id=project_id, model=llm.name, candidates=len(papers))
-    chash, schema, counts = criteria_hash(criteria), response_schema(criteria), Counter[str]()
-    say(f"screening {len(papers)} papers with {llm.name}")
     config = Config()
     config.models.local.model = llm.name
     gateway = ModelGateway(conn, config, providers={"local": llm})
-    analysis_id = start_run(conn, "screen", project_id, {"discovery_run": run_id, "top": top},
-                            {"model": llm.name}, PROMPT_VERSION)
+    papers = [r[0] for r in conn.execute(
+        "SELECT d.paper_id FROM discovery_results d JOIN papers p ON p.id=d.paper_id WHERE d.run_id=? "
+        "ORDER BY COALESCE(d.priority,d.score) DESC,p.title LIMIT ?", (run_id, top))]
+    return screen_papers(conn, gateway, project_id, papers, progress=progress, log=log, discovery_run=run_id)
+
+
+def screen_papers(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, paper_ids: list[str],
+                  *, progress: Callable[[str], None] | None = None, log: EventLog | None = None,
+                  discovery_run: str = "") -> ScreenReport:
+    """Screen selected project papers through the supplied gateway, including newly imported papers."""
+    criteria = load_criteria(conn, project_id)
+    if criteria.is_empty():
+        raise ValueError("no screening criteria: fill in the research question first")
+    members = {r[0] for r in conn.execute("SELECT paper_id FROM project_papers WHERE project_id=?", (project_id,))}
+    if set(paper_ids) - members:
+        raise ValueError("selected paper is outside project")
+    selected = set(paper_ids)
+    rows = {r["id"]: r for r in conn.execute(
+        "SELECT p.id,p.title,p.abstract,p.year,p.venue,s.fingerprint,s.error FROM papers p "
+        "LEFT JOIN screening_results s ON s.project_id=? AND s.paper_id=p.id ORDER BY p.id", (project_id,))
+        if r["id"] in selected}
+    papers = [rows[pid] for pid in dict.fromkeys(paper_ids)]
+    model = gateway.config.models.local.model
+    say = progress or (lambda _m: None)
+    report = ScreenReport(run_id=discovery_run, project_id=project_id, model=model, candidates=len(papers))
+    chash, schema, counts = criteria_hash(criteria), response_schema(criteria), Counter[str]()
+    say(f"screening {len(papers)} papers with {model}")
+    analysis_id = start_run(conn, "screen", project_id, {"discovery_run": discovery_run, "paper_ids": paper_ids},
+                            {"model": model}, PROMPT_VERSION)
     try:
         for i, p in enumerate(papers, 1):
-            fp = fingerprint(criteria, llm.name, p["title"], p["abstract"])
+            fp = fingerprint(criteria, model, p["title"], p["abstract"])
             if p["fingerprint"] == fp and not p["error"]:
                 report.cached += 1
                 continue
@@ -101,9 +117,9 @@ def screen_run(conn: sqlite3.Connection, llm: Llm, run_id: str, top: int,
                            criteria_hash=excluded.criteria_hash, fingerprint=excluded.fingerprint,
                            screened_at=excluded.screened_at""",
                     (project_id, p["id"], decision.decision, decision.score, decision.model_dump_json(),
-                     decision.error, llm.name, PROMPT_VERSION, chash, fp, now()))
+                     decision.error, model, PROMPT_VERSION, chash, fp, now()))
                 append_history(conn, project_id, p["id"], "S1", decision.decision, "model", chash,
-                               decision.reason or decision.error or "", llm.name, PROMPT_VERSION)
+                               decision.reason or decision.error or "", model, PROMPT_VERSION)
             say(f"[{i}/{len(papers)}] {decision.decision:<9} {(p['title'] or '(no title)')[:70]}")
         report.counts = dict(counts)
         if log:

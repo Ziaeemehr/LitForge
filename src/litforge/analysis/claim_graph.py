@@ -136,7 +136,8 @@ def list_relations(conn: sqlite3.Connection, project_id: str) -> list[Relation]:
         "SELECT * FROM claim_relations WHERE project_id=? ORDER BY source_claim_id,target_claim_id", (project_id,))]
 
 
-def _pairs(conn: sqlite3.Connection, project_id: str, max_pairs: int, force: bool
+def _pairs(conn: sqlite3.Connection, project_id: str, max_pairs: int, force: bool,
+           claim_ids: set[str] | None = None
            ) -> list[tuple[Claim, Claim]]:
     if max_pairs < 1:
         raise ValueError("max_pairs must be positive")
@@ -144,6 +145,7 @@ def _pairs(conn: sqlite3.Connection, project_id: str, max_pairs: int, force: boo
     scores = _similarities(claims)
     existing = {(r.source_claim_id, r.target_claim_id): r for r in list_relations(conn, project_id)}
     pairs = [(a, b) for a, b in combinations(claims, 2) if a.paper_id != b.paper_id and a.cluster_id == b.cluster_id
+             and (claim_ids is None or a.id in claim_ids or b.id in claim_ids)
              and ((a.id, b.id) not in existing or ((force or existing[a.id, b.id].status == "stale")
                                                   and existing[a.id, b.id].origin == "model"))]
     return sorted(pairs, key=lambda pair: (
@@ -171,13 +173,14 @@ def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str,
 
 
 def classify_relations(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, max_pairs: int = 200,
-                       profile: str | None = None, approved: bool = False, force: bool = False) -> RelationsResult:
+                       profile: str | None = None, approved: bool = False, force: bool = False,
+                       claim_ids: set[str] | None = None) -> RelationsResult:
     load_criteria(conn, project_id)
     run_id = start_run(conn, "claim_relation", project_id, {"max_pairs": max_pairs},
                        {"profile": profile, "force": force}, PROMPT_VERSION)
     budget = False
     try:
-        for a, b in _pairs(conn, project_id, max_pairs, force):
+        for a, b in _pairs(conn, project_id, max_pairs, force, claim_ids):
             spans, messages = _context(conn, a, b)
             packet = to_packet(spans)
             link_evidence(conn, run_id, spans, [None] * len(spans))

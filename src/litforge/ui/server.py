@@ -31,7 +31,7 @@ from pydantic import ValidationError
 
 from litforge.analysis import ask as answers
 from litforge.analysis import audit as audits
-from litforge.analysis import claim_graph, claims
+from litforge.analysis import claim_graph, claims, living, repro, snapshots
 from litforge.analysis import matrix as matrices
 from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.review import record_review
@@ -233,6 +233,32 @@ class App:
                 conn.close()
 
         return self.start_job(request.task, project, work)
+
+    def refresh_job(self, request: api.RefreshRequest) -> Job:
+        conn = self.db()
+        try:
+            pid = get_project_id(conn, request.project)
+            if conn.execute("SELECT 1 FROM watch_runs WHERE project_id=? AND status='running'", (pid,)).fetchone():
+                raise ValueError("a refresh is already running in this project")
+        finally:
+            conn.close()
+
+        def work(job: Job) -> str:
+            conn = self.db()
+            try:
+                sources = self.sources()
+                sources.http.refresh = True
+                result = living.refresh_project(conn, self.make_gateway(conn), sources, pid,
+                    screen=request.screen, extract=request.extract, claims=request.claims,
+                    progress=job.messages.append)
+                job.report = result.model_dump()
+                return result.id
+            except Exception:
+                raise RuntimeError("Refresh failed; check criteria, model settings and discovery sources.") from None
+            finally:
+                conn.close()
+
+        return self.start_job("refresh", request.project, work)
 
     def similar_job(self, body: dict[str, Any]) -> Job:
         conn = self.db()
@@ -711,14 +737,21 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._error(HTTPStatus.BAD_REQUEST, str(exc))
 
         def _is_lens(self, path: str) -> bool:
-            return path in ('/api/ask', '/api/audit', '/api/preview', '/api/review', '/api/matrices') or \
-                path.startswith(('/api/answers/', '/api/matrices/', '/api/claims')) or \
-                path in ('/api/queue', '/api/screen-fulltext')
+            return (path in ("/api/ask", "/api/audit", "/api/preview", "/api/review", "/api/matrices",
+                             "/api/queue", "/api/screen-fulltext", "/api/snapshots",
+                             "/api/refresh", "/api/repro/matrix")
+                    or path.startswith(("/api/answers/", "/api/matrices/", "/api/claims"))
+                    or bool(re.fullmatch(r"/api/papers/[\w-]+/repro", path)))
 
         def _lens(self, path: str, query: dict[str, str], body: dict[str, Any] | None) -> None:
             conn = app.db()
             try:
                 if body is None:
+                    if path == "/api/snapshots":
+                        return self._json(api.living_panel(conn, get_project_id(conn, query.get("project", ""))))
+                    if match := re.fullmatch(r"/api/papers/([\w-]+)/repro", path):
+                        pid = get_project_id(conn, query["project"]) if query.get("project") else None
+                        return self._json(repro.repro_card(conn, match[1], pid).model_dump(exclude={"brief"}))
                     if path.startswith("/api/claims") or path == "/api/queue":
                         phase2_pid = get_project_id(conn, query.get("project", ""))
                         if path == "/api/queue":
@@ -749,6 +782,17 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                             return self._send(200, content.encode(), types[fmt] + '; charset=utf-8', headers)
                         return self._json(api.lens_matrix(conn, match[1]))
                 else:
+                    if path == "/api/snapshots":
+                        snapshot_request = api.SnapshotRequest.model_validate(body)
+                        pid = get_project_id(conn, snapshot_request.project)
+                        sid = snapshots.take_snapshot(conn, pid, snapshot_request.label)
+                        return self._json(snapshots.get_snapshot(conn, sid).model_dump(exclude={"data"}))
+                    if path == "/api/refresh":
+                        return self._json(app.refresh_job(api.RefreshRequest.model_validate(body)).__dict__)
+                    if path == "/api/repro/matrix":
+                        snapshot_request = api.SnapshotRequest.model_validate(body)
+                        pid = get_project_id(conn, snapshot_request.project)
+                        return self._json(repro.ensure_repro_matrix(conn, pid).model_dump())
                     if path == "/api/claims/cluster":
                         phase2_pid = get_project_id(conn, str(body.get("project") or ""))
                         return self._json([c.model_dump() for c in claim_graph.cluster_claims(

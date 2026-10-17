@@ -175,8 +175,7 @@
   </section>
 
   <section id="view-claims" class="view" hidden>
-    <div class="viewhead"><h2>Claims</h2><span class="meta">Explore findings, replications and disagreements</span></div>
-    <p class="hint">Possible causes are hypotheses.</p>
+    <div class="viewhead"><h2>Claims</h2><span class="meta">Explore findings, replications and disagreements. Possible causes are hypotheses.</span></div>
     <div class="card lens-panel">
       <div class="lens-actions">
         <label class="f" for="lens-claims-profile">Model profile</label>
@@ -190,6 +189,19 @@
       <p class="hint" id="lens-claims-status" role="status" aria-live="polite"></p>
       <div id="lens-claims-clusters" class="lens-rows"></div>
       <div id="lens-claims-detail" class="lens-rows"></div>
+    </div>
+    <div class="card lens-panel" aria-labelledby="living-title">
+      <h3 id="living-title">Snapshots</h3>
+      <p class="hint">Save project evidence and refresh stored searches to see what changed.</p>
+      <div class="lens-actions">
+        <label for="living-label">Snapshot label</label><input id="living-label" type="text" placeholder="Optional label">
+        <button class="btn" id="living-take" data-lens-work>Take snapshot</button>
+        <button class="btn accent" id="living-refresh" data-lens-work>Refresh</button>
+      </div>
+      <p class="hint" id="living-status" role="status" aria-live="polite"></p>
+      <div id="living-snapshots" class="lens-rows"></div>
+      <h4>Latest delta signals</h4><div id="living-signals" class="lens-rows"></div>
+      <details><summary>Latest delta report</summary><pre id="living-report" class="repro-brief"></pre></details>
     </div>
   </section>
 

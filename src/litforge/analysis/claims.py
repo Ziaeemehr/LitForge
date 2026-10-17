@@ -69,7 +69,8 @@ class ClaimsResult(BaseModel):
 
 
 def list_claims(conn: sqlite3.Connection, project_id: str, cluster_id: str | None = None) -> list[Claim]:
-    rows = conn.execute("SELECT * FROM claims WHERE project_id=?" +
+    rows = conn.execute("SELECT * FROM claims WHERE project_id=? AND paper_id IN "
+                        "(SELECT paper_id FROM project_papers WHERE project_id=claims.project_id)" +
                         (" AND cluster_id=?" if cluster_id is not None else "") + " ORDER BY paper_id,id",
                         (project_id, cluster_id) if cluster_id is not None else (project_id,))
     return [Claim(**dict(r), evidence_ids=[e[0] for e in conn.execute(

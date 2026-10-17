@@ -518,3 +518,29 @@ class ClaimReviewRequest(BaseModel):
     action: Literal["accept", "reject", "edit"]
     text: str | None = None
     reason: str = ""
+
+
+class SnapshotRequest(BaseModel):
+    project: str = Field(min_length=1)
+    label: str = ""
+
+
+class RefreshRequest(BaseModel):
+    project: str = Field(min_length=1)
+    screen: bool = Field(default=True, strict=True)
+    extract: bool = Field(default=True, strict=True)
+    claims: bool = Field(default=True, strict=True)
+
+
+def living_panel(conn: sqlite3.Connection, project_id: str) -> dict[str, Any]:
+    from litforge.analysis.living import delta_markdown, get_watch_run
+    from litforge.analysis.snapshots import list_snapshots
+    items = list_snapshots(conn, project_id)
+    row = conn.execute("SELECT id FROM watch_runs WHERE project_id=? ORDER BY rowid DESC LIMIT 1",
+                       (project_id,)).fetchone()
+    latest = get_watch_run(conn, row[0]) if row else None
+    return {"snapshots": [{**s.model_dump(exclude={"data"}), "counts": {
+                "papers": len(s.data.papers), "matrix": len(s.data.matrix),
+                "claims": len(s.data.claims), "answers": len(s.data.answers)}} for s in items],
+            "latest": latest.model_dump() if latest else None,
+            "report": delta_markdown(latest.delta, latest.signals) if latest and latest.delta else ""}

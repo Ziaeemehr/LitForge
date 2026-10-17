@@ -11,7 +11,8 @@ function setup() {
     constructor(tag = 'div') {
       this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attrs = {};
       this.value = ''; this.checked = false; this.textContent = '';
-      this.classList = { toggle() {} };
+      this.classList = { toggle() {}, add() {} };
+      Object.defineProperty(this, 'innerHTML', { set() { throw Error('Unsafe innerHTML'); } });
     }
     appendChild(el) { this.children.push(el); return el; }
     replaceChildren(...els) { this.children = els; }
@@ -163,4 +164,60 @@ test('S2 badges and queue predictions keep untrusted tooltip text inert', () => 
 test('Claims uses the shared view header', () => {
   const html = fs.readFileSync('src/litforge/ui/static/index.html', 'utf8');
   assert.match(html, /id="view-claims"[^>]*>\s*<div class="viewhead"><h2>Claims<\/h2><span class="meta">/);
+});
+
+const descendants = el => [el, ...el.children.flatMap(descendants)];
+const visibleText = el => descendants(el).map(e => e.textContent).join(' ');
+
+test('snapshot rows show labels, local dates and saved counts with IDs only in titles', () => {
+  const { ctx, $ } = setup();
+  const payload = '<img src=x onerror=alert(1)>', stamp = '2026-10-17T12:34:56+00:00';
+  ctx.renderLivingPanel({ snapshots: [{ id: 'private-uuid', content_hash: 'private-hash', label: payload,
+    created_at: stamp, counts: { papers: 3, matrix: 12, claims: 4, answers: 2 } },
+    { id: 'second', label: '', created_at: stamp, counts: { papers: 0, matrix: 0, claims: 0, answers: 0 } }],
+    latest: { status: 'ok', signals: [{ message: payload }] }, report: payload });
+  const row = $('living-snapshots').children[0], text = visibleText(row);
+  assert.ok(text.includes(payload));
+  assert.ok(text.includes(new Date(stamp).toLocaleString()));
+  assert.match(text, /3 papers.*12 matrix cells.*4 claims.*2 answers/);
+  assert.doesNotMatch(text, /private-uuid|private-hash/);
+  assert.ok(row.title.includes('private-uuid'));
+  assert.ok(visibleText($('living-snapshots').children[1]).includes('Snapshot'));
+  assert.equal($('living-signals').children[0].textContent, payload);
+  assert.equal($('living-report').textContent, payload);
+});
+
+test('Repro structured brief uses safe nodes and evidence chips open the shared evidence card', () => {
+  const { ctx, $ } = setup();
+  ctx.drawerRequest = 0;
+  const payload = '<script>fetch("https://evil")</script>';
+  ctx.renderReproCard($('card'), { checklist: [{ key: 'hardware', label: 'Hardware', state: 'unclear', value: payload }],
+    links: [{ kind: 'code', url: payload, evidence_id: 'ev_1' }], brief: '# RAW MARKDOWN [^ev_1]',
+    sections: [{ title: 'Data needed', items: [
+      { label: 'Dataset', value: payload, status: 'reported_fact', evidence_ids: ['ev_1'] },
+      { label: 'Compute estimate', value: 'not reported', status: 'unsupported', evidence_ids: [] }
+    ] }],
+    evidence: [{ id: 'ev_1', paper_id: 'p', title: 'Study', text: payload, section: 'Results', page: 2,
+      parser: 'fake', parser_version: '1' }] });
+  const nodes = descendants($('card')), text = visibleText($('card'));
+  assert.ok(text.includes('Hardware: unclear'));
+  assert.ok(text.includes('have not been checked'));
+  assert.ok(nodes.some(e => e.tagName === 'H4' && e.textContent === 'Data needed'));
+  assert.ok(text.includes(payload));
+  assert.ok(text.includes('Unsupported'));
+  assert.ok(!nodes.some(e => e.tagName === 'PRE' || e.tagName === 'SCRIPT' || e.tagName === 'A'));
+  assert.doesNotMatch(text, /RAW MARKDOWN|ev_1/);
+  const chip = nodes.find(e => e.tagName === 'BUTTON' && e.textContent.includes('Study'));
+  assert.ok(chip);
+  chip.click();
+  const evidence = descendants($('dbody'));
+  assert.ok(evidence.some(e => e.tagName === 'BLOCKQUOTE' && e.textContent === payload));
+  assert.equal(evidence.find(e => e.tagName === 'A').href, '/api/papers/p/pdf#page=2');
+});
+
+test('Claims description stays in its header and Living review follows claims', () => {
+  const html = fs.readFileSync('src/litforge/ui/static/index.html', 'utf8');
+  const claims = html.split('id="view-claims"')[1].split('</section>')[0];
+  assert.match(claims, /class="viewhead">.*Possible causes are hypotheses\.<\/span><\/div>/);
+  assert.ok(claims.indexOf('lens-claims-detail') < claims.indexOf('living-title'));
 });

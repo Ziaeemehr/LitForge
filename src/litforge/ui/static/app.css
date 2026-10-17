@@ -400,3 +400,15 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
   .lens-actions input[type=text] { width: 100%; }
   .viewhead { flex-wrap: wrap; }
 }
+
+.repro-brief { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+.repro-link, .repro-item, .snapshot-row { overflow-wrap: anywhere; }
+#living-label { max-width: 22rem; }
+
+.snapshot-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem; padding: .6rem 0; border-bottom: 1px solid var(--line); }
+.snapshot-row strong { flex: 1 1 12rem; }
+.repro-section { margin-top: 1.2rem; }
+.repro-section .repro-item { padding: .5rem 0; }
+.repro-section .repro-item p { margin: 0 0 .3rem; }
+.repro-citations { display: inline-flex; flex-wrap: wrap; margin-left: .4rem; }
+.repro-evidence-chip { font-size: .75rem; }

@@ -862,6 +862,7 @@
           if (!full.hidden) full.scrollIntoView({ behavior: 'smooth' });
         };
       }
+      attachReproTabs(d, request);
     }).catch(function (e) { if (request === drawerRequest) $('dbody').textContent = e.message; });
   }
 
@@ -1175,6 +1176,8 @@
 
   var lens = { profiles: [], project: null, answer: null, matrix: null, tab: 'answer', audit: false, busy: false, answerRequest: 0, matrixRequest: 0, claimRequest: 0 };
 
+  function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
   function lensNode(tag, text, cls) {
     var el = document.createElement(tag);
     if (text != null) el.textContent = String(text);
@@ -1362,11 +1365,13 @@
       $('lens-question').value = ''; $('lens-ask-status').textContent = '';
       $('lens-claims-clusters').replaceChildren(); $('lens-claims-detail').replaceChildren();
       $('lens-claims-status').textContent = '';
+      $('living-snapshots').replaceChildren(); $('living-signals').replaceChildren();
+      $('living-report').textContent = ''; $('living-status').textContent = '';
       var saved = store.get('answer-' + state.project, null);
       if (saved) loadLensAnswer(saved);
     }
     if (!state.project) { toast('Choose a project first'); return; }
-    if (view === 'claims') loadLensClaims();
+    if (view === 'claims') { loadLensClaims(); loadLivingPanel(); }
     else if (view === 'ask') renderLensAnswer(); else loadLensMatrices();
   }
 
@@ -1397,9 +1402,9 @@
     $('lens-run-audit').disabled = busy || !lens.answer;
   }
 
-  function startLensTask(task, path, extra, statusId, autoAudit) {
+  function startLensTask(task, path, extra, statusId, autoAudit, onDone) {
     if (lens.busy || !state.project) return;
-    var project = state.project;
+    var project = state.project, statusNode = $(statusId);
     var body = Object.assign({ task: task, project: project }, extra);
     lensBusy(true);
     $('lens-ask-status').textContent = ''; $('lens-matrix-status').textContent = '';
@@ -1411,11 +1416,11 @@
     }).then(function (approved) {
       if (approved === false || project !== state.project) { lensBusy(false); return; }
       if (approved === true) body.approved = true;
-      $(statusId).textContent = 'Starting…';
+      statusNode.textContent = 'Starting…';
       return post(path, body).then(function (job) {
         (function tick() {
           api('/api/jobs/' + job.id).then(function (j) {
-            if (project === state.project) $(statusId).textContent = j.status === 'running' ?
+            if (project === state.project) statusNode.textContent = j.status === 'running' ?
               (j.messages[j.messages.length - 1] || 'Working…') : j.status === 'failed' ? j.error : task === 'matrix_extract' ?
                 j.report.stats.extracted + ' cells extracted, ' + j.report.stats.cached + ' cached, ' + j.report.stats.flagged + ' flagged' :
                 task === 'claim_extract' ? j.report.claims.length + ' claims · ' + j.report.cached + ' cached' :
@@ -1423,10 +1428,11 @@
                 task === 'screen_fulltext' ? j.report.screened + ' screened · ' + j.report.needs_pdf.length + ' need PDF' :
                 lensAnswerSummary(j.report);
             if (project === state.project && j.status === 'done' && j.report.budget_stopped)
-              $(statusId).textContent += ' · Stopped at budget';
+              statusNode.textContent += ' · Stopped at budget';
             if (j.status === 'running') { setTimeout(tick, 900); return; }
             lensBusy(false);
             if (project !== state.project || j.status !== 'done') return;
+            if (onDone) { onDone(j); return; }
             if (task === 'claim_extract' || task === 'claim_relation') { loadLensClaims(); return; }
             if (task === 'screen_fulltext') { if (state.runId) loadRun(state.runId); return; }
             if (task === 'matrix_extract') loadLensMatrix(body.matrix_id).catch(function (e) { toast(e.message); });
@@ -1438,7 +1444,7 @@
           }).catch(function (e) { lensBusy(false); toast(e.message); });
         })();
       });
-    }).catch(function (e) { lensBusy(false); $(statusId).textContent = e.message; toast(e.message); });
+    }).catch(function (e) { lensBusy(false); statusNode.textContent = e.message; toast(e.message); });
   }
 
   function lensColumnEditor(parent, removable) {
@@ -1634,7 +1640,167 @@
     }).catch(function (e) { if (project === state.project) toast(e.message); });
   }
 
+  function renderLivingPanel(data) {
+    $('living-snapshots').replaceChildren();
+    data.snapshots.forEach(function (s) {
+      var row = lensNode('article', null, 'snapshot-row');
+      row.title = s.id + (s.content_hash ? ' · ' + s.content_hash : '');
+      row.appendChild(lensNode('strong', s.label || 'Snapshot'));
+      var date = new Date(s.created_at), time = lensNode('time', date.toLocaleString(), 'meta');
+      time.dateTime = s.created_at; row.appendChild(time);
+      var counts = s.counts;
+      row.appendChild(lensNode('span', [plural(counts.papers, 'paper'), plural(counts.matrix, 'matrix cell'),
+        plural(counts.claims, 'claim'), plural(counts.answers, 'answer')].join(' · '), 'meta'));
+      $('living-snapshots').appendChild(row);
+    });
+    if (!data.snapshots.length) $('living-snapshots').appendChild(lensNode("p", "No snapshots yet.", "hint"));
+    $('living-signals').replaceChildren();
+    var signals = data.latest ? data.latest.signals : [];
+    signals.forEach(function (s) { $('living-signals').appendChild(lensNode("p", s.message)); });
+    if (!signals.length) $('living-signals').appendChild(lensNode("p", "No significant signals.", "hint"));
+    $('living-report').textContent = data.report || "Run Refresh to produce a delta report.";
+    if (data.latest) $('living-status').textContent = "Latest refresh: " + data.latest.status;
+  }
+
+  function loadLivingPanel() {
+    var project = state.project;
+    if (!project) return;
+    return api("/api/snapshots?project=" + encodeURIComponent(project)).then(function (data) {
+      if (project === state.project) renderLivingPanel(data);
+    }).catch(function (e) { if (project === state.project) $('living-status').textContent = e.message; });
+  }
+
+  function refreshLivingProject() {
+    if (!state.project || lens.busy) return;
+    var project = state.project;
+    lensBusy(true); $('living-status').textContent = "Starting refresh…";
+    post("/api/refresh", { project: project }).then(function (job) {
+      (function tick() {
+        api("/api/jobs/" + job.id).then(function (j) {
+          if (project === state.project) $('living-status').textContent = j.status === "running" ?
+            (j.messages[j.messages.length - 1] || "Refreshing…") : j.status === "failed" ? j.error : "Refresh complete";
+          if (j.status === "running") { setTimeout(tick, 900); return; }
+          lensBusy(false);
+          if (project === state.project) { loadLivingPanel(); loadLensClaims(); }
+        }).catch(function (e) { lensBusy(false); if (project === state.project) $('living-status').textContent = e.message; });
+      })();
+    }).catch(function (e) { lensBusy(false); if (project === state.project) $('living-status').textContent = e.message; });
+  }
+
+  function reproEvidenceChips(parent, ids, evidence) {
+    var chips = lensNode('span', null, 'lens-actions repro-citations');
+    ids.forEach(function (id) {
+      var span = evidence.find(function (s) { return s.id === id; });
+      if (!span) return;
+      var chip = lensButton((span.title || 'Evidence') + ' · p.' + span.page, function () {
+        lensDrawer('Evidence', [span]);
+      }, 'btn small repro-evidence-chip');
+      chip.title = id; chips.appendChild(chip);
+    });
+    parent.appendChild(chips);
+  }
+
+  function renderReproCard(parent, card) {
+    parent.replaceChildren();
+    parent.appendChild(lensNode('h3', 'Reproducibility checklist'));
+    card.checklist.forEach(function (item) {
+      var row = lensNode('p', item.label + ': ' + item.state +
+        (item.value == null ? '' : ' — ' + item.value), 'repro-item');
+      reproEvidenceChips(row, item.evidence_ids || [], card.evidence);
+      parent.appendChild(row);
+    });
+    parent.appendChild(lensNode('h3', 'Code and data links'));
+    parent.appendChild(lensNode('p', 'Links are recorded from the paper and have not been checked.', 'hint'));
+    card.links.forEach(function (link) {
+      var row = lensNode('p', link.kind + ': ' + link.url, 'repro-link');
+      reproEvidenceChips(row, [link.evidence_id], card.evidence); parent.appendChild(row);
+    });
+    if (!card.links.length) parent.appendChild(lensNode('p', 'No repository links found in the current text.', 'hint'));
+    parent.appendChild(lensNode('h3', 'Reproduction brief'));
+    card.sections.forEach(function (section) {
+      var block = lensNode('section', null, 'repro-section');
+      block.appendChild(lensNode('h4', section.title));
+      section.items.forEach(function (item) {
+        var row = lensNode('div', null, 'repro-item');
+        var line = lensNode('p');
+        line.appendChild(lensNode('strong', item.label + ': '));
+        line.appendChild(lensNode('span', item.value)); row.appendChild(line);
+        lensBadges(row, [item.status], []);
+        reproEvidenceChips(row, item.evidence_ids, card.evidence);
+        block.appendChild(row);
+      });
+      parent.appendChild(block);
+    });
+  }
+
+  function attachReproTabs(paper, request) {
+    var project = state.project, body = $('dbody');
+    var overview = lensNode("div"), repro = lensNode("div"), tabs = lensNode("div", null, "tabs");
+    overview.id = "paper-overview"; repro.id = "paper-repro"; repro.hidden = true;
+    overview.setAttribute("role", "tabpanel"); repro.setAttribute("role", "tabpanel");
+    while (body.firstChild) overview.appendChild(body.firstChild);
+    var overviewButton = lensButton("Overview", function () { select(false); });
+    var reproButton = lensButton("Repro", function () { select(true); });
+    overviewButton.id = "paper-overview-tab"; reproButton.id = "paper-repro-tab";
+    tabs.setAttribute("role", "tablist"); tabs.setAttribute("aria-label", "Paper details");
+    [overviewButton, reproButton].forEach(function (button, index) {
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-controls", index ? repro.id : overview.id);
+      button.onkeydown = function (e) {
+        if (["ArrowLeft", "ArrowRight", "Home", "End"].indexOf(e.key) < 0) return;
+        e.preventDefault(); var show = e.key === "End" || (e.key !== "Home" && button === overviewButton);
+        select(show); (show ? reproButton : overviewButton).focus();
+      };
+      tabs.appendChild(button);
+    });
+    overview.setAttribute("aria-labelledby", overviewButton.id); repro.setAttribute("aria-labelledby", reproButton.id);
+    var cardHost = lensNode("div"), status = lensNode("p", "", "hint");
+    status.id = "paper-repro-status"; status.setAttribute("role", "status");
+    if (project) {
+      var extract = lensButton("Extract reproducibility", function () {
+        if (request !== drawerRequest || project !== state.project || lens.busy) return;
+        extract.disabled = true;
+        post("/api/repro/matrix", { project: project }).then(function (matrix) {
+          extract.disabled = false;
+          if (request !== drawerRequest || project !== state.project) return;
+          startLensTask("matrix_extract", "/api/matrices/" + matrix.id + "/extract",
+            { matrix_id: matrix.id, paper_ids: [paper.id] }, status.id, false, function () {
+              if (request === drawerRequest) load();
+            });
+        }).catch(function (e) { extract.disabled = false; status.textContent = e.message; });
+      });
+      extract.setAttribute("data-lens-work", ""); repro.appendChild(extract);
+    }
+    repro.appendChild(status); repro.appendChild(cardHost);
+    function load() {
+      status.textContent = "Loading reproducibility…";
+      api("/api/papers/" + encodeURIComponent(paper.id) + "/repro?project=" + encodeURIComponent(project || ""))
+        .then(function (card) {
+          if (request !== drawerRequest || project !== state.project) return;
+          renderReproCard(cardHost, card); status.textContent = "";
+        }).catch(function (e) { if (request === drawerRequest) status.textContent = e.message; });
+    }
+    var loaded = false;
+    function select(showRepro) {
+      overview.hidden = showRepro; repro.hidden = !showRepro;
+      overviewButton.setAttribute("aria-selected", String(!showRepro)); reproButton.setAttribute("aria-selected", String(showRepro));
+      overviewButton.tabIndex = showRepro ? -1 : 0; reproButton.tabIndex = showRepro ? 0 : -1;
+      overviewButton.classList.toggle("on", !showRepro); reproButton.classList.toggle("on", showRepro);
+      if (showRepro && !loaded) { loaded = true; load(); }
+    }
+    body.replaceChildren(tabs, overview, repro); select(false);
+  }
+
   function initLens() {
+    $('living-take').onclick = function () {
+      if (!state.project || lens.busy) return;
+      var project = state.project;
+      lensBusy(true);
+      post("/api/snapshots", { project: project, label: $('living-label').value }).then(function () {
+        if (project === state.project) { $('living-label').value = ""; loadLivingPanel(); }
+      }).catch(function (e) { toast(e.message); }).finally(function () { lensBusy(false); });
+    };
+    $('living-refresh').onclick = refreshLivingProject;
     $('lens-claims-extract').onclick = function () {
       startLensTask('claim_extract', '/api/claims/extract', { profile: $('lens-claims-profile').value || null,
         force: $('lens-claims-force').checked }, 'lens-claims-status');

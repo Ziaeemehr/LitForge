@@ -289,7 +289,9 @@ def eval_matrix(ctx: typer.Context, benchmark: Path, matrix: Annotated[str, type
 
 def register(app: typer.Typer, eval_app: typer.Typer) -> None:
     from litforge.analysis.claim_commands import register as register_claims
+    from litforge.analysis.living_commands import register as register_living
     register_claims(app, eval_app)
+    register_living(app)
     app.add_typer(matrix_app, name="matrix")
     app.add_typer(review_app, name="review")
     app.command("audit")(audit)
