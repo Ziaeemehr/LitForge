@@ -263,6 +263,43 @@
     wireOpenExports($('added-report'));
   }
 
+  // Better math (high) without Ollama or its model: what is missing, what this computer has, and an offer to
+  // install. On success the export the user asked for runs (see poll).
+  function showMathSetup(st) {
+    var req = st.requirements, has = function (ok, text) {
+      return '<li class="' + (ok ? 'ok' : 'no') + '">' + (ok ? '✓ ' : '✗ ') + text + '</li>';
+    };
+    var html = '<h3>What is missing</h3><ul>' +
+      has(st.installed, 'Ollama, the free program that runs the model' + (st.local ? '' : ' (at ' + esc(st.url) + ')')) +
+      has(st.running, 'Ollama running') +
+      has(st.model_ready, 'The model <code>' + esc(st.model) + '</code> (about ' + req.model_gb + ' GB download)') + '</ul>';
+    if (st.local) {
+      html += '<h3>Needed at least</h3><ul><li>' + req.memory_gb + ' GB of memory and ' + req.disk_gb +
+        ' GB of free disk</li><li>A GPU is optional: NVIDIA or Apple Silicon makes it fast (about 12 s per page)</li></ul>' +
+        '<h3>This computer</h3><ul>' +
+        has(!!st.gpu, st.gpu ? 'GPU: ' + esc(st.gpu) : 'No GPU found') +
+        (st.memory_gb == null ? '' : has(st.memory_gb >= req.memory_gb, Math.round(st.memory_gb) + ' GB of memory')) +
+        (st.disk_free_gb == null ? '' : has(st.disk_free_gb >= req.disk_gb, Math.round(st.disk_free_gb) + ' GB of free disk')) +
+        '</ul>';
+    }
+    st.warnings.forEach(function (w) { html += '<p class="warn">' + esc(w) + '</p>'; });
+    st.blockers.forEach(function (b) { html += '<p class="no">' + esc(b) + '</p>'; });
+    var canInstall = !st.blockers.length && (st.installed || !!st.install);
+    if (canInstall) {
+      html += '<p>LitForge can do this for you' + (st.installed ? '' : ' (Ollama from ollama.com' +
+        (st.install === 'brew' ? ', with Homebrew' : '') + ')') + '. The download takes a while; progress shows in the log.</p>';
+    } else if (!st.blockers.length && st.manual.length) {
+      html += '<p>LitForge cannot install Ollama here. Run in a terminal, then export again:</p><ul>' +
+        st.manual.map(function (m) { return '<li><code>' + esc(m) + '</code></li>'; }).join('') + '</ul>';
+    }
+    $('mathsetup-report').innerHTML = html;
+    $('mathsetup-install').hidden = !canInstall;
+    $('mathsetup-install').textContent = st.installed ? 'Download the model and export' : 'Install and export';
+    var medium = $('export-math').querySelector('option[value="medium"]');
+    $('mathsetup-medium').hidden = medium.disabled;
+    $('mathsetup').showModal();
+  }
+
   // After "better math": how many pages of each paper the vision model rewrote, and where the notes are.
   function showVisionReport(r, done) {
     var v = r.vision;
@@ -847,7 +884,8 @@
         }
         running.remove();
         setBusy(false);
-        if (j.status === 'failed') { logLine(j.error, 'err'); toast({ export: 'Export failed', pdfs: 'Adding PDFs failed', screen: 'Screening failed' }[j.kind] || 'Search failed'); return; }
+        if (j.status === 'failed') { logLine(j.error, 'err'); toast({ export: 'Export failed', pdfs: 'Adding PDFs failed', screen: 'Screening failed', setup: 'Setting up the vision model failed' }[j.kind] || 'Search failed'); return; }
+        if (j.kind === 'setup') { toast('Better math (high) is ready; exporting'); $('btn-export').click(); return; }
         if (j.kind === 'export') toast(j.messages[j.messages.length - 1].replace(/^done: /, ''));
         if (j.kind === 'pdfs' && j.report) showAddReport(j.report);
         if (j.kind === 'export' && j.report && j.report.vision) showVisionReport(j.report, j.messages[j.messages.length - 1]);
@@ -1177,6 +1215,19 @@
     };
     $('missing-fetch').onclick = fetchMissing;
     $('added-close').onclick = function () { $('added').close(); };
+    $('mathsetup-close').onclick = $('mathsetup-cancel').onclick = function () { $('mathsetup').close(); };
+    $('mathsetup-medium').onclick = function () {
+      $('mathsetup').close();
+      $('export-math').value = 'medium';
+      store.set('export-math', 'medium');
+      $('btn-export').click();
+    };
+    $('mathsetup-install').onclick = function () {
+      $('mathsetup').close();
+      setBusy(true);
+      post('/api/math-setup', { project: state.project }).then(poll)
+        .catch(function (e) { setBusy(false); toast(e.message); });
+    };
     $('missing-scope').onchange = showMissing;
     $('missing-close').onclick = function () { $('missing').close(); };
     $('missing').onclick = function (e) { if (e.target === this) this.close(); };  // click outside
@@ -1201,9 +1252,15 @@
       Object.assign(body, exportSelection());
       var math = $('export-math').value;
       if ($('export-fetch').checked || math !== 'off') {  // slow steps first: a background job
-        setBusy(true);
-        post('/api/export', Object.assign(body, { fetch: $('export-fetch').checked, math: math, run_id: state.runId }))
-          .then(poll).catch(function (e) { setBusy(false); toast(e.message); });
+        var start = function () {
+          setBusy(true);
+          post('/api/export', Object.assign(body, { fetch: $('export-fetch').checked, math: math, run_id: state.runId }))
+            .then(poll).catch(function (e) { setBusy(false); toast(e.message); });
+        };
+        if (math !== 'high') { start(); return; }
+        api('/api/math-setup').then(function (st) {  // Ollama or the model missing: offer to set them up
+          if (st.ready) start(); else showMathSetup(st);
+        }).catch(function (e) { toast(e.message); });
         return;
       }
       post('/api/export', body)

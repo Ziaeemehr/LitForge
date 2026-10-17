@@ -507,3 +507,49 @@ def test_an_idle_server_stops_itself_but_a_running_job_keeps_it_up() -> None:
     httpd = _Httpd()
     stop_when_idle(app, httpd, idle_s=0.2, check_s=0.01)  # type: ignore[arg-type]
     assert not httpd.stopped.wait(0.5)
+
+
+class FakeSetup:
+    def __init__(self) -> None:
+        self.ran = 0
+
+    def status(self) -> types.SimpleNamespace:
+        return types.SimpleNamespace(as_dict=lambda: {"ready": self.ran > 0, "model": "m"})
+
+    def run(self, progress: Any) -> None:
+        self.ran += 1
+        progress("done: m is ready for better math (high)")
+
+
+def test_math_setup_status_and_job(tmp_path: Path) -> None:
+    setup = FakeSetup()
+    app = App(Paths(tmp_path / "data"), load_config(), vision_setup=setup)  # type: ignore[arg-type]
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        assert call(base, "/api/math-setup")[1]["ready"] is False
+        _, job = call(base, "/api/math-setup", {"project": "p"})
+        job = wait_job(base, job["id"])
+        assert job["status"] == "done" and job["kind"] == "setup" and job["messages"][-1].startswith("done:")
+        assert call(base, "/api/math-setup")[1]["ready"] is True
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_export_with_math_high_and_no_ollama_says_why(tmp_path: Path) -> None:
+    config = load_config()
+    probe = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(App(Paths(tmp_path / "x"), config)))
+    config.screening.ollama_url = f"http://127.0.0.1:{probe.server_address[1]}"
+    probe.server_close()  # a port nobody listens on
+    app = App(Paths(tmp_path / "data"), config)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        status, res = call(base, "/api/export", {"project": "p", "math": "high"})
+        assert status == 400 and "not reachable" in res["error"], res
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

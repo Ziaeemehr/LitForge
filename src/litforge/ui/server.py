@@ -39,6 +39,7 @@ from litforge.observability import EventLog
 from litforge.parsing.formulas import FormulaEngine, Pix2TextEngine, formulas_available
 from litforge.parsing.run import ParseResult
 from litforge.parsing.vision import OllamaVision, Vision, enhance_project
+from litforge.parsing.vision_setup import OllamaSetup
 from litforge.pipeline import add_pdfs
 from litforge.projects import MARK_SCOPES, ProjectNotFound, create_project, delete_project, get_project_id, set_active
 from litforge.screening.criteria import load_criteria
@@ -72,7 +73,8 @@ class App:
     def __init__(self, paths: Paths, config: Config, make_http: Callable[[], HttpClient] | None = None,
                  make_llm: Callable[[str | None], Llm] | None = None,
                  make_vision: Callable[[], Vision] | None = None,
-                 make_formulas: Callable[[], FormulaEngine] | None = None) -> None:
+                 make_formulas: Callable[[], FormulaEngine] | None = None,
+                 vision_setup: OllamaSetup | None = None) -> None:
         self.paths = paths
         self.config = config
         self.log = EventLog(paths.logs)
@@ -87,6 +89,8 @@ class App:
         self.make_llm = make_llm or (lambda model: ollama_from_config(config.screening, model))
         self.make_vision = make_vision or (lambda: OllamaVision(
             os.environ.get("LITFORGE_OLLAMA_URL") or config.screening.ollama_url, config.vision))
+        self.vision_setup = vision_setup or OllamaSetup(
+            os.environ.get("LITFORGE_OLLAMA_URL") or config.screening.ollama_url, config.vision.model)
         self._make_formulas = make_formulas or Pix2TextEngine
         self._formulas: FormulaEngine | None = None
         paths.ensure()
@@ -355,7 +359,10 @@ class App:
                              "(NVIDIA GPU) or `uv sync --extra formulas` (CPU), then restart `litforge ui`")
         engine: Vision | FormulaEngine | None = self.make_vision() if level == "high" else None
         if isinstance(engine, OllamaVision):
-            engine.check()  # fail now, on the page, if Ollama or the model is missing
+            try:
+                engine.check()  # fail now, on the page, if Ollama or the model is missing
+            except LlmError as exc:
+                raise ValueError(f"better math (high): {exc}") from exc
 
         def work(job: Job) -> str | None:
             c = self.db()
@@ -380,6 +387,17 @@ class App:
             return body.get("run_id")
 
         return self.start_job("export" if export else "fetch", project, work)
+
+    def setup_job(self, body: dict[str, Any]) -> Job:
+        """Get better math (high) ready: install and start Ollama, pull the vision model (the user agreed)."""
+        if any(j.kind == "setup" and j.status == "running" for j in self.jobs.values()):
+            raise ValueError("the vision model is already being set up")
+
+        def work(job: Job) -> str | None:
+            self.vision_setup.run(job.messages.append)
+            return None
+
+        return self.start_job("setup", str(body.get("project") or "default"), work)
 
     def _fetch(self, c: sqlite3.Connection, job: Job, pid: str, only: str, paper_ids: list[str] | None) -> None:
         """Download open-access PDFs of the chosen papers; adds one line per paper to the job's report."""
@@ -457,6 +475,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 if path == "/api/info":
                     return self._json({"exports_root": str(app.paths.exports_root),
                                        "math": {"medium": formulas_available(), "high": app.config.vision.model}})
+                if path == "/api/math-setup":
+                    return self._json(app.vision_setup.status().as_dict())
                 if path == "/api/projects":
                     return self._json(api.list_projects(conn, app.paths))
                 if path == "/api/runs":
@@ -588,6 +608,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 if url.path == "/api/settings":
                     save_mailto(app.paths, body.get("mailto"))
                     return self._json({"mailto": contact_email(app.paths, app.config)})
+                if url.path == "/api/math-setup":
+                    return self._json(app.setup_job(body).__dict__)
                 if url.path == "/api/fetch":
                     return self._json(app.export_job(body, export=False).__dict__)
                 if url.path == "/api/export" and (body.get("fetch") or body.get("vision") or body.get("math")):

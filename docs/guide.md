@@ -139,7 +139,7 @@ fragment lines) can be rewritten at two levels, before exporting (**Math** menu 
 | Level | How | Speed | Needs |
 |---|---|---|---|
 | medium | [Pix2Text](https://github.com/breezedeus/Pix2Text) finds every formula (inline and displayed) and reads it as LaTeX; the text stays as extracted | ~1.5 s/page on a GPU, ~5 s on a CPU | `uv sync --extra formulas-gpu` (NVIDIA) or `--extra formulas` (CPU) |
-| high | a local vision model (Ollama, `qwen2.5vl:7b`) rewrites whole pages: formulas, tables and text, also in scanned papers; a transcription that does not match the page's text is rejected | ~12 s/page | `ollama pull qwen2.5vl:7b` (about 8 GB of GPU memory) |
+| high | a local vision model (Ollama, `qwen2.5vl:7b`) rewrites whole pages: formulas, tables and text, also in scanned papers; a transcription that does not match the page's text is rejected | ~12 s/page on a GPU, about a minute without | `ollama pull qwen2.5vl:7b` (8 GB of memory); the page offers to install Ollama and the model |
 
 Results are kept per page, so a later export or a higher level only processes what is new. Each
 note's front matter says how its equations were produced (`math: raw | medium | high`), so a

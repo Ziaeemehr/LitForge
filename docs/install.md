@@ -31,6 +31,6 @@ The data lives in the `data/` folder of the install folder. Without the icon:
 |---|---|
 | AI screening | [Ollama](https://ollama.com/download), then `ollama pull qwen3:4b` |
 | Better math, fast | `uv sync --inexact --extra formulas` (`formulas-gpu` on an NVIDIA GPU), in the install folder |
-| Better math, best | Ollama, then `ollama pull qwen2.5vl:7b` (about 8 GB of GPU memory) |
+| Better math, best | Ollama, then `ollama pull qwen2.5vl:7b`; choosing Math: high offers to install both. Needs 8 GB of memory; a GPU is optional but without one it takes about a minute per page |
 
 `uv run litforge doctor` checks what is installed. Updating keeps these extras.

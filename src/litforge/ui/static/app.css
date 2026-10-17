@@ -321,6 +321,8 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .modal .report .done .btn { margin-left: auto; }
 .modal .report .done .btn + .btn { margin-left: 0; }
 #added .report { margin-top: 12px; border: 0; }
+#mathsetup .report { margin-top: 12px; border: 0; }
+#mathsetup .mactions { justify-content: flex-end; margin-bottom: 14px; }
 
 /* intro under the composer: the three steps of a review */
 .steps { list-style: none; counter-reset: step; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 0; margin: 6px 0 12px; }
