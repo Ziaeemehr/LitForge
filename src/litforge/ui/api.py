@@ -10,9 +10,17 @@ import re
 import sqlite3
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from litforge.config import Paths
+from pydantic import BaseModel, Field
+
+from litforge.analysis import ask as answers
+from litforge.analysis import audit as audits
+from litforge.analysis import matrix as matrices
+from litforge.analysis.gateway import ModelGateway
+from litforge.analysis.ledger import get_spans
+from litforge.analysis.review import review_queue
+from litforge.config import Config, Paths
 from litforge.export.markdown import default_export_dir
 from litforge.parsing.canonical import read_canonical, to_markdown
 from litforge.parsing.vision import read_page_markdown
@@ -339,3 +347,101 @@ def put_criteria(conn: sqlite3.Connection, project: str, body: dict[str, Any]) -
     c = Criteria.from_text(str(body.get("question") or ""), text(body.get("include")), text(body.get("exclude")))
     save_criteria(conn, get_project_id(conn, project), c)
     return c.model_dump()
+
+
+# Evidence Lens adapters: validation and presentation only; analysis owns all model work.
+class LensRequest(BaseModel):
+    task: Literal['ask', 'audit', 'matrix_extract']
+    project: str | None = None
+    question: str = ''
+    run_id: str = ''
+    matrix_id: str = ''
+    k: int = Field(default=8, ge=1, le=100)
+    profile: str | None = None
+    approved: bool = Field(default=False, strict=True)
+    sensitive: bool = False
+    force: bool = False
+    paper_ids: list[str] | None = None
+
+
+def lens_plan(conn: sqlite3.Connection, gateway: ModelGateway, request: LensRequest) -> dict[str, Any]:
+    if request.task == 'ask':
+        if not request.question.strip():
+            raise ValueError('give a question')
+        pid = get_project_id(conn, request.project) if request.project else None
+        calls = answers.plan_calls(conn, gateway, request.question, pid, request.k,
+                                   request.profile, request.sensitive)
+    elif request.task == 'audit':
+        calls = audits.plan_calls(conn, gateway, request.run_id, request.profile)
+    else:
+        calls = matrices.plan_calls(conn, gateway, request.matrix_id, request.paper_ids,
+                                    request.profile, request.force)
+    return {
+        'profiles': sorted({p.profile for p in calls}), 'providers': sorted({p.provider for p in calls}),
+        'models': sorted({p.model for p in calls}), 'remote': any(p.remote for p in calls),
+        'number_of_calls': len(calls), 'evidence_ids_count': len({e for p in calls for e in p.evidence_ids}),
+        'estimated_input_tokens': sum(p.estimated_input_tokens for p in calls),
+        'max_cost_usd': None if any(p.max_cost_usd is None for p in calls) else
+                        sum(p.max_cost_usd or 0 for p in calls),
+        'requires_approval': any(p.remote or p.requires_approval for p in calls),
+        'blocked_reasons': sorted({p.blocked_reason for p in calls if p.blocked_reason}),
+    }
+
+
+def lens_answer(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
+    answer = answers.get_answer(conn, run_id)
+    evidence = {s.id: s for s in answer.evidence}
+    data = answer.model_dump()
+    data['sentences'] = [{**s.model_dump(), 'needs_review': s.needs_review,
+                          'audit_focus': s.needs_review or len({evidence[e].paper_id for e in s.evidence_ids
+                                                               if e in evidence}) < 2}
+                         for s in answer.sentences]
+    return data
+
+
+def lens_matrix(conn: sqlite3.Connection, matrix_id: str) -> dict[str, Any]:
+    matrix = matrices.get_matrix(conn, matrix_id)
+    data = matrix.model_dump()
+    data['warnings'] = matrices.matrix_warnings(matrices.MatrixResult(run_id="", matrix=matrix, cells=matrix.cells))
+    data['evidence'] = [s.model_dump() for s in matrices.matrix_spans(conn, matrix)]
+    data['papers'] = [dict(r) for r in conn.execute(
+        'SELECT p.id,p.title FROM papers p WHERE (? IS NULL OR p.id IN '
+        '(SELECT paper_id FROM project_papers WHERE project_id=?)) ORDER BY p.title',
+        (matrix.project_id, matrix.project_id))]
+    return data
+
+
+def lens_reviews(conn: sqlite3.Connection, project_id: str | None) -> list[dict[str, Any]]:
+    items = []
+    for item in review_queue(conn, project_id):
+        table, context = (('answer_sentences', 'run_id') if item.target_kind == 'sentence'
+                          else ('matrix_cells', 'matrix_id'))
+        row = conn.execute(f'SELECT * FROM {table} WHERE id=?', (item.target_id,)).fetchone()
+        pages = {r['evidence_id']: r['page'] for r in conn.execute(
+            'SELECT evidence_id,page FROM run_evidence WHERE run_id=? AND page IS NOT NULL', (row['run_id'],))}
+        items.append({**item.model_dump(), context: row[context],
+                      'evidence': [{**s.model_dump(), 'page': pages.get(s.id, s.page)}
+                                   for s in get_spans(conn, json.loads(row['evidence_ids_json']))]})
+    return items
+
+
+class MatrixRequest(BaseModel):
+    project: str | None = None
+    name: str
+    question: str
+    columns: list[matrices.MatrixColumn]
+
+
+class ReviewRequest(BaseModel):
+    target_kind: Literal['sentence', 'cell']
+    target_id: str
+    action: Literal['accept', 'reject', 'edit']
+    new_value: Any = None
+    reason: str = ''
+
+
+def model_profiles(config: Config) -> list[dict[str, Any]]:
+    """Public profile choices, with local profiles before cloud profiles."""
+    profiles = {**config.models.profiles, "local": config.models.local}
+    return [{"name": name, "provider": p.provider, "model": p.model, "remote": p.remote}
+            for name, p in sorted(profiles.items(), key=lambda item: (item[1].remote, item[0] != "local", item[0]))]

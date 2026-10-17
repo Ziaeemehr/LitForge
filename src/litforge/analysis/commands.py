@@ -116,7 +116,10 @@ def run_ask(ctx: typer.Context, question: str, project: str | None, k: int, prof
             typer.echo(f"{sentence.text}{markers} [{sentence.kind}; audit={sentence.audit_verdict or "not audited"}"
                        + (f"; {flags}" if flags else "") + "]")
         for rank, span in enumerate(answer.evidence, 1):
-            typer.echo(f"{rank}. [{span.id}] {span.citation} — {span.section or span.kind}\n   “{span.text}”")
+            quote = " ".join(span.text.split())
+            if len(quote) > 300:
+                quote = quote[:299].rsplit(" ", 1)[0] + "…"
+            typer.echo(f"{rank}. [{span.id}] {span.citation} — {span.section or span.kind}\n   “{quote}”")
 
 
 def audit(ctx: typer.Context, run_id: str, profile: Profile = None, approve: Approve = False,
@@ -141,7 +144,9 @@ def review(ctx: typer.Context, project: Project = None, as_json: Json = False) -
             typer.echo(json.dumps([i.model_dump() for i in items], ensure_ascii=False, indent=1))
         else:
             for item in items:
-                typer.echo(f"{item.target_id} ({item.target_kind}): {item.text}")
+                context = item.question if item.target_kind == "sentence" else " / ".join(
+                    str(v) for v in (item.matrix_name, item.paper_title, item.column_label) if v)
+                typer.echo(f"{item.target_id} ({item.target_kind}): {context}: {item.text}")
 
 
 def _review(ctx: typer.Context, target_id: str, action: Literal["accept", "reject", "edit"],

@@ -23,12 +23,16 @@ class ReviewItem(BaseModel):
     flags: list[str]
     audit_verdict: str | None = None
     created_at: str
+    question: str | None = None
+    matrix_name: str | None = None
+    paper_title: str | None = None
+    column_label: str | None = None
 
 
 def review_queue(conn: sqlite3.Connection, project_id: str | None = None) -> list[ReviewItem]:
     items = []
     ordering: dict[str, tuple[int, int]] = {}
-    rows = conn.execute("SELECT id,project_id,rowid AS ordinal FROM analysis_runs WHERE task=\'ask\'" +
+    rows = conn.execute("SELECT id,project_id,config_json,rowid AS ordinal FROM analysis_runs WHERE task=\'ask\'" +
                         (" AND project_id=?" if project_id is not None else ""),
                         (project_id,) if project_id is not None else ())
     for row in rows:
@@ -37,7 +41,8 @@ def review_queue(conn: sqlite3.Connection, project_id: str | None = None) -> lis
                 created = conn.execute("SELECT created_at FROM answer_sentences WHERE id=?", (s.id,)).fetchone()[0]
                 ordering[s.id] = (row["ordinal"], s.idx)
                 items.append(ReviewItem(target_kind="sentence", target_id=s.id, project_id=row["project_id"],
-                                        text=s.text, flags=s.flags, audit_verdict=s.audit_verdict, created_at=created))
+                                        text=s.text, flags=s.flags, audit_verdict=s.audit_verdict, created_at=created,
+                                        question=json.loads(row["config_json"])["question"]))
     for matrix in list_matrices(conn, project_id):
         for c in matrix.cells:
             if c.review_status == "open" and c.needs_review:
@@ -45,7 +50,12 @@ def review_queue(conn: sqlite3.Connection, project_id: str | None = None) -> lis
                 cell_order = conn.execute("SELECT rowid FROM matrix_cells WHERE id=?", (c.id,)).fetchone()[0]
                 ordering[c.id] = (ordinal, cell_order)
                 items.append(ReviewItem(target_kind="cell", target_id=c.id, project_id=matrix.project_id,
-                                        text=f"{matrix.name}/{c.paper_id}/{c.column_key}: {c.value} ({c.status})",
+                                        text=str(c.value) if c.value is not None else "No reported value",
+                                        matrix_name=matrix.name,
+                                        paper_title=conn.execute("SELECT title FROM papers WHERE id=?",
+                                                                 (c.paper_id,)).fetchone()[0],
+                                        column_label=next(col.label for col in matrix.columns
+                                                          if col.key == c.column_key),
                                         flags=c.flags, created_at=c.updated_at))
     return sorted(items, key=lambda i: (i.created_at, ordering[i.target_id]), reverse=True)
 

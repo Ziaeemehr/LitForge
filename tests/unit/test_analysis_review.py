@@ -90,3 +90,20 @@ def test_queue_is_newest_first_even_with_equal_timestamps(conn: sqlite3.Connecti
     conn.execute("UPDATE answer_sentences SET id='z_old',created_at='same' WHERE run_id=?", (first.run_id,))
     conn.execute("UPDATE answer_sentences SET id='a_new',created_at='same' WHERE run_id=?", (second.run_id,))
     assert [i.target_id for i in review_queue(conn)] == ["a_new", "z_old"]
+
+
+def test_queue_includes_question_and_matrix_context(conn: sqlite3.Connection) -> None:
+    seed(conn)
+    gw, fake = gateway(conn, {'sentences': [{'text': 'Unknown.', 'kind': 'unsupported'}], 'insufficient': True})
+    first = ask(conn, gw, 'gain in adults?', project_id='proj')
+    second = ask(conn, gw, 'gain in children?', project_id='proj')
+    fake.answer = lambda _: {'status': 'reported', 'value': 99, 'evidence_ids': []}
+    matrix = create_matrix(conn, 'proj', 'Study comparison', 'gain',
+                           [MatrixColumn(key='gain', label='Measured gain', instruction='gain', type='number')])
+    extract_matrix(conn, gw, matrix.id)
+    items = {i.target_id: i.model_dump() for i in review_queue(conn, 'proj')}
+    assert items[first.sentences[0].id]['question'] == 'gain in adults?'
+    assert items[second.sentences[0].id]['question'] == 'gain in children?'
+    cell = next(i for i in items.values() if i['target_kind'] == 'cell')
+    assert (cell['matrix_name'], cell['paper_title'], cell['column_label']) == (
+        'Study comparison', 'Title p', 'Measured gain')

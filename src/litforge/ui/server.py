@@ -27,6 +27,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+from pydantic import ValidationError
+
+from litforge.analysis import ask as answers
+from litforge.analysis import audit as audits
+from litforge.analysis import matrix as matrices
+from litforge.analysis.gateway import ModelGateway
+from litforge.analysis.review import record_review
+from litforge.analysis.runs import get_run
 from litforge.config import Config, EnvSettings, Paths, contact_email, save_mailto
 from litforge.discovery.fetch import fetch_open_access
 from litforge.discovery.http import HttpClient
@@ -74,7 +82,8 @@ class App:
                  make_llm: Callable[[str | None], Llm] | None = None,
                  make_vision: Callable[[], Vision] | None = None,
                  make_formulas: Callable[[], FormulaEngine] | None = None,
-                 vision_setup: OllamaSetup | None = None) -> None:
+                 vision_setup: OllamaSetup | None = None,
+                 make_gateway: Callable[[sqlite3.Connection], ModelGateway] | None = None) -> None:
         self.paths = paths
         self.config = config
         self.log = EventLog(paths.logs)
@@ -87,6 +96,7 @@ class App:
         self.make_http = make_http or (lambda: HttpClient(
             cache_dir=paths.http_cache, cache_ttl_s=config.discovery.cache_ttl_days * 86400))
         self.make_llm = make_llm or (lambda model: ollama_from_config(config.screening, model))
+        self.make_gateway = make_gateway or (lambda conn: ModelGateway(conn, config))
         self.make_vision = make_vision or (lambda: OllamaVision(
             os.environ.get("LITFORGE_OLLAMA_URL") or config.screening.ollama_url, config.vision))
         self.vision_setup = vision_setup or OllamaSetup(
@@ -156,6 +166,55 @@ class App:
         return job
 
     # ---- jobs ----------------------------------------------------------------
+
+    def lens_job(self, request: api.LensRequest) -> Job:
+        conn = self.db()
+        try:
+            if request.task == 'ask':
+                project = request.project or ''
+            else:
+                pid = (get_run(conn, request.run_id).project_id if request.task == 'audit'
+                       else matrices.get_matrix(conn, request.matrix_id).project_id)
+                row = conn.execute('SELECT name FROM projects WHERE id=?', (pid,)).fetchone()
+                project = row['name'] if row else ''
+        finally:
+            conn.close()
+
+        def work(job: Job) -> str | None:
+            conn = self.db()
+            try:
+                gateway = self.make_gateway(conn)
+                # Recheck the plan in the worker in case the library or budget changed.
+                plan = api.lens_plan(conn, gateway, request)
+                if plan['blocked_reasons'] or (plan['requires_approval'] and not request.approved):
+                    raise ValueError('analysis plan needs approval or is blocked')
+                job.messages.append('Working with library evidence…')
+                if request.task == 'ask':
+                    pid = get_project_id(conn, request.project) if request.project else None
+                    answer = answers.ask(conn, gateway, request.question, pid, request.k, request.profile,
+                                         request.approved, request.sensitive)
+                    job.report = api.lens_answer(conn, answer.run_id)
+                    return answer.run_id
+                if request.task == 'audit':
+                    audits.audit_answer(conn, gateway, request.run_id, request.profile, request.approved)
+                    job.report = api.lens_answer(conn, request.run_id)
+                    return request.run_id
+                result = matrices.extract_matrix(conn, gateway, request.matrix_id, request.paper_ids,
+                                                  request.profile, request.approved, request.force)
+                job.report = api.lens_matrix(conn, request.matrix_id)
+                job.report['stats'] = {
+                    'extracted': sum(c.run_id == result.run_id for c in result.cells),
+                    'cached': sum(c.run_id != result.run_id for c in result.cells),
+                    'flagged': sum(c.needs_review for c in result.cells),
+                }
+                return result.run_id
+            except Exception:
+                # Never pass provider exceptions to start_job's public error or log.
+                raise RuntimeError('Analysis failed; check model settings and try again.') from None
+            finally:
+                conn.close()
+
+        return self.start_job(request.task, project, work)
 
     def similar_job(self, body: dict[str, Any]) -> Job:
         conn = self.db()
@@ -470,8 +529,12 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 return self._static("index.html")
             if path.startswith("/static/"):
                 return self._static(path.removeprefix("/static/"))
+            if self._is_lens(path):
+                return self._lens(path, query, None)
             conn = app.db()
             try:
+                if path == "/api/model-profiles":
+                    return self._json(api.model_profiles(app.config))
                 if path == "/api/info":
                     return self._json({"exports_root": str(app.paths.exports_root),
                                        "math": {"medium": formulas_available(), "high": app.config.vision.model}})
@@ -536,6 +599,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     q = {k: v[0] for k, v in parse_qs(url.query).items()}
                     return self._import(q.get("name", "refs.csv"), q.get("project") or "default", q.get("export_dir"))
                 body = self._body()
+                if self._is_lens(url.path):
+                    return self._lens(url.path, {}, body)
                 if url.path == "/api/similar":
                     return self._json(app.similar_job(body).__dict__)
                 if url.path == "/api/search":
@@ -626,6 +691,76 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._error(HTTPStatus.NOT_FOUND, "not found")
             except (ValueError, KeyError, ProjectNotFound, json.JSONDecodeError) as exc:
                 self._error(HTTPStatus.BAD_REQUEST, str(exc))
+
+        def _is_lens(self, path: str) -> bool:
+            return path in ('/api/ask', '/api/audit', '/api/preview', '/api/review', '/api/matrices') or \
+                path.startswith(('/api/answers/', '/api/matrices/'))
+
+        def _lens(self, path: str, query: dict[str, str], body: dict[str, Any] | None) -> None:
+            conn = app.db()
+            try:
+                if body is None:
+                    if path == '/api/review':
+                        pid = get_project_id(conn, query['project']) if query.get('project') else None
+                        return self._json(api.lens_reviews(conn, pid))
+                    if path == '/api/matrices':
+                        pid = get_project_id(conn, query['project']) if query.get('project') else None
+                        return self._json([m.model_dump(exclude={'cells'}) for m in matrices.list_matrices(conn, pid)])
+                    if match := re.fullmatch(r'/api/answers/([\w-]+)', path):
+                        return self._json(api.lens_answer(conn, match[1]))
+                    if match := re.fullmatch(r'/api/matrices/([\w-]+)(/export)?', path):
+                        if match[2]:
+                            fmt = query.get('format', 'md')
+                            types = {'md': 'text/markdown', 'csv': 'text/csv', 'json': 'application/json'}
+                            if fmt not in types:
+                                raise ValueError('invalid export format')
+                            content = matrices.export_matrix(conn, match[1], fmt)
+                            headers = {'Content-Disposition': f'attachment; filename="matrix-{match[1]}.{fmt}"'}
+                            return self._send(200, content.encode(), types[fmt] + '; charset=utf-8', headers)
+                        return self._json(api.lens_matrix(conn, match[1]))
+                else:
+                    if path in ('/api/preview', '/api/ask', '/api/audit') or path.endswith('/extract'):
+                        values = dict(body)
+                        if path != '/api/preview':
+                            values['task'] = {'/api/ask': 'ask', '/api/audit': 'audit'}.get(path, 'matrix_extract')
+                            if values['task'] == 'matrix_extract':
+                                match = re.fullmatch(r'/api/matrices/([\w-]+)/extract', path)
+                                if match is None:
+                                    raise LookupError('not found')
+                                values['matrix_id'] = match[1]
+                        request = api.LensRequest.model_validate(values)
+                        plan = api.lens_plan(conn, app.make_gateway(conn), request)
+                        if path == '/api/preview':
+                            return self._json(plan)
+                        if plan['blocked_reasons']:
+                            return self._json({'error': 'Analysis route is blocked. Check model and budget settings.',
+                                               'preview': plan}, 400)
+                        if plan['requires_approval'] and not request.approved:
+                            return self._json({'error': 'Approval required before sending evidence.',
+                                               'preview': plan}, 403)
+                        return self._json(app.lens_job(request).__dict__)
+                    if path == '/api/review':
+                        review = api.ReviewRequest.model_validate(body)
+                        rid = record_review(conn, review.target_kind, review.target_id, review.action,
+                                            review.new_value, review.reason)
+                        return self._json({'id': rid})
+                    if path == '/api/matrices':
+                        create = api.MatrixRequest.model_validate(body)
+                        pid = get_project_id(conn, create.project) if create.project else None
+                        matrix = matrices.create_matrix(conn, pid, create.name, create.question, create.columns)
+                        return self._json(matrix.model_dump())
+                    if match := re.fullmatch(r'/api/matrices/([\w-]+)/columns', path):
+                        column = matrices.MatrixColumn.model_validate(body)
+                        return self._json(matrices.add_column(conn, match[1], column).model_dump())
+                self._error(404, 'not found')
+            except (KeyError, LookupError):
+                self._error(404, 'Evidence Lens item not found.')
+            except (ValidationError, ValueError, ProjectNotFound, sqlite3.IntegrityError):
+                self._error(400, 'Invalid Evidence Lens request. Check fields and model settings.')
+            except Exception:
+                self._error(500, 'Evidence Lens failed. Check model settings and try again.')
+            finally:
+                conn.close()
 
         def _upload(self, name: str) -> None:
             length = int(self.headers.get("Content-Length") or 0)

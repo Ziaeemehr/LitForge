@@ -139,3 +139,21 @@ def test_ask_uses_current_hit_page(conn: sqlite3.Connection, library: tuple[CliR
         assert text.exit_code == 0 and f"p.{page}" in text.output
     assert ids[0] == ids[1]
     assert get_spans(conn, [ids[0]])[0].page == 1
+
+
+def test_generated_answer_quotes_are_short_and_single_line(conn: sqlite3.Connection, paths: Paths,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    from lens_fakes import gateway, seed
+
+    from litforge.analysis import commands
+
+    text = 'Results: gain\n' + 'completeword ' * 80
+    seed(conn, text=text)
+    gw, _ = gateway(conn)
+    monkeypatch.setattr(commands, 'ModelGateway', lambda *args: gw)
+    result = CliRunner().invoke(app, ['--data-dir', str(paths.root), 'ask', 'gain', '-p', 'demo', '--no-audit'])
+    assert result.exit_code == 0, result.output
+    quote = result.output.split('“', 1)[1].split('”', 1)[0]
+    assert '\n' not in quote and len(quote) <= 300
+    assert quote.rstrip('…').endswith('completeword')
+    assert text not in result.output

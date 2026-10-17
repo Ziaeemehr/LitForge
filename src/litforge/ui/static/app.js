@@ -452,14 +452,15 @@
 
   function showView(view) {
     state.page = view;
-    if (history.replaceState) history.replaceState(null, '', view === 'recents' || view === 'library' ? '#' + view : location.pathname);
-    ['new', 'recents', 'library'].forEach(function (v) { $('view-' + v).hidden = v !== view; });
+    if (history.replaceState) history.replaceState(null, '', /^(recents|library|ask|matrix)$/.test(view) ? '#' + view : location.pathname);
+    ['new', 'recents', 'library', 'ask', 'matrix'].forEach(function (v) { $('view-' + v).hidden = v !== view; });
     $('results').hidden = view !== 'results';
     document.querySelectorAll('.sidebar [data-view]').forEach(function (b) { b.classList.toggle('on', b.dataset.view === view); });
     document.querySelectorAll('#side-recent a').forEach(function (a) { a.classList.remove('on'); });
     if (view !== 'results') closeDrawer();
     if (view === 'recents') { $('recents-project').value = state.recentsProject || ''; loadRecents(); }
     if (view === 'library') loadLibrary();
+    if (view === 'ask' || view === 'matrix') enterLens(view);
   }
 
   function deleteRun() {
@@ -765,13 +766,17 @@
 
   /* ---------- quick view ---------- */
 
+  var drawerRequest = 0;
+
   function openDrawer(p) {
+    var request = ++drawerRequest;
     var drawer = $('drawer');
     drawer.classList.add('open');
     drawer.setAttribute('aria-hidden', 'false');
     $('dhead').innerHTML = '<h2>' + esc(p.title || '(no title)') + '</h2><div class="meta">loading…</div>';
     $('dbody').innerHTML = '';
     api('/api/papers/' + p.id + '?project=' + encodeURIComponent(state.project || '')).then(function (d) {
+      if (request !== drawerRequest) return;
       var meta = [d.year, d.venue, d.cited_by_count != null ? d.cited_by_count + ' citations' : null]
         .filter(Boolean).map(esc).join(' · ');
       var authors = d.authors.length ? esc(d.authors.slice(0, 12).join(', ') + (d.authors.length > 12 ? ', et al.' : '')) : '';
@@ -841,10 +846,11 @@
           if (!full.hidden) full.scrollIntoView({ behavior: 'smooth' });
         };
       }
-    }).catch(function (e) { $('dbody').textContent = e.message; });
+    }).catch(function (e) { if (request === drawerRequest) $('dbody').textContent = e.message; });
   }
 
   function closeDrawer() {
+    drawerRequest++;
     $('drawer').classList.remove('open');
     $('drawer').setAttribute('aria-hidden', 'true');
   }
@@ -1118,7 +1124,7 @@
 
   function setMode(mode) {
     state.mode = mode;
-    document.querySelectorAll('.tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.mode === mode); });
+    document.querySelectorAll('[data-mode]').forEach(function (b) { b.classList.toggle('on', b.dataset.mode === mode); });
     $('form-similar').hidden = mode !== 'similar';
     $('form-search').hidden = mode !== 'search';
     $('form-import').hidden = mode !== 'import';
@@ -1149,7 +1155,417 @@
     zone.querySelector('a').onclick = function (e) { e.preventDefault(); clear(); };
   }
 
+  /* ---------- Evidence Lens ---------- */
+
+  var lens = { profiles: [], project: null, answer: null, matrix: null, tab: 'answer', audit: false, busy: false, answerRequest: 0, matrixRequest: 0 };
+
+  function lensNode(tag, text, cls) {
+    var el = document.createElement(tag);
+    if (text != null) el.textContent = String(text);
+    if (cls) el.className = cls;
+    return el;
+  }
+
+  function lensButton(text, action, cls) {
+    var b = lensNode('button', text, cls || 'btn small');
+    b.type = 'button'; b.onclick = action; return b;
+  }
+
+  var LENS_LABEL = {
+    reported_fact: 'Reported', interpretation: 'Interpretation', unsupported: 'Unsupported',
+    reported: 'Reported', not_reported: 'Not reported', not_found: 'Not found',
+    not_applicable: 'Not applicable', error: 'Error',
+    number_not_in_evidence: 'Number not in evidence', uncited_fact: 'No citation',
+    uncited_interpretation: 'No citation', uncited_value: 'No citation',
+    option_mismatch: 'Option not allowed', type_mismatch: 'Type mismatch',
+    evidence_changed_since_review: 'Evidence changed since review', invalid_kind: 'Invalid sentence kind',
+    truncated: 'Answer shortened', invalid_citations: 'Invalid citations removed',
+    supported: 'Supported', partial: 'Partly supported', contradicted: 'Contradicted',
+    not_audited: 'Not audited', open: '', accepted: 'Accepted', rejected: 'Rejected', edited: 'Edited',
+    sentence: 'Sentence', cell: 'Cell'
+  };
+
+  function lensLabel(value) {
+    var key = String(value).toLowerCase();
+    return Object.prototype.hasOwnProperty.call(LENS_LABEL, key) ? LENS_LABEL[key] :
+      key.replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); });
+  }
+
+  function lensBadges(parent, labels, flags) {
+    var badges = lensNode('div', null, 'lens-badges');
+    function add(value, flag) {
+      if (!value) return;
+      var label = lensLabel(value), key = String(value).toLowerCase();
+      if (!label) return;
+      var severity = flag || ['partial', 'unsupported', 'contradicted'].indexOf(key) >= 0 ? 'warning' :
+        key === 'supported' ? 'ok' : 'neutral';
+      badges.appendChild(lensNode('span', label, 'badge ' + severity));
+    }
+    labels.forEach(function (value) { add(value, false); });
+    (flags || []).forEach(function (value) { add(value, true); });
+    parent.appendChild(badges);
+  }
+
+  function lensEvidence(parent, spans) {
+    if (!spans.length) parent.appendChild(lensNode('p', 'No cited evidence.', 'hint'));
+    spans.forEach(function (s) {
+      var card = lensNode('article', null, 'lens-evidence');
+      card.appendChild(lensNode('h3', s.title || s.paper_id));
+      card.appendChild(lensNode('p', [s.section || s.kind, 'p.' + s.page].join(' · '), 'meta'));
+      card.appendChild(lensNode('blockquote', s.text));
+      card.appendChild(lensNode('p', s.id + ' · ' + s.parser + ' ' + s.parser_version, 'hint'));
+      var link = lensNode('a', 'Open PDF at page ' + s.page, 'btn small');
+      link.href = '/api/papers/' + encodeURIComponent(s.paper_id) + '/pdf#page=' + encodeURIComponent(s.page);
+      link.target = '_blank'; link.rel = 'noopener'; card.appendChild(link); parent.appendChild(card);
+    });
+  }
+
+  function lensDrawer(title, spans, target) {
+    drawerRequest++;
+    $('dhead').replaceChildren(lensNode('h2', title));
+    $('dbody').replaceChildren();
+    lensEvidence($('dbody'), spans);
+    if (target) lensReviewEditor($('dbody'), target);
+    $('drawer').classList.add('open'); $('drawer').setAttribute('aria-hidden', 'false');
+    $('drawer-close').focus();
+  }
+
+  function lensReviewEditor(parent, target) {
+    var box = lensNode('div', null, 'lens-review-editor');
+    var valueLabel = lensNode('label', 'Edited value');
+    var value = lensNode('textarea'); value.rows = 3;
+    value.value = target.value == null ? '' : String(target.value);
+    valueLabel.appendChild(value); box.appendChild(valueLabel);
+    var reasonLabel = lensNode('label', 'Reason (optional)');
+    var reason = lensNode('textarea'); reason.rows = 2;
+    reasonLabel.appendChild(reason); box.appendChild(reasonLabel);
+    var actions = lensNode('div', null, 'lens-actions');
+    ['accept', 'reject', 'edit'].forEach(function (action) {
+      actions.appendChild(lensButton(action.charAt(0).toUpperCase() + action.slice(1), function () {
+        var edited = value.value;
+        if (target.kind === 'cell' && target.type !== 'text') {
+          try { edited = JSON.parse(edited); } catch (e) { /* server validates types */ }
+        }
+        actions.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+        post('/api/review', { target_kind: target.kind, target_id: target.id, action: action,
+          new_value: action === 'edit' ? edited : null, reason: reason.value }).then(function () {
+          closeDrawer(); toast('Review saved');
+          if (lens.answer) loadLensAnswer(lens.answer.run_id);
+          if (lens.matrix) loadLensMatrix(lens.matrix.id);
+          if (lens.tab === 'review') renderLensReviews();
+        }).catch(function (e) { toast(e.message); actions.querySelectorAll('button').forEach(function (b) { b.disabled = false; }); });
+      }));
+    });
+    box.appendChild(actions); parent.appendChild(box);
+  }
+
+  function lensSentence(sentence, evidence) {
+    var row = lensNode('article', null, 'lens-row');
+    row.appendChild(lensNode('p', sentence.text));
+    lensBadges(row, [sentence.kind, sentence.audit_verdict || 'not_audited',
+      sentence.review_status], sentence.flags);
+    if (sentence.audit_note) row.appendChild(lensNode('p', sentence.audit_note, 'hint'));
+    var cited = evidence.filter(function (e) { return sentence.evidence_ids.indexOf(e.id) >= 0; });
+    var chips = lensNode('div', null, 'lens-actions');
+    cited.forEach(function (s) {
+      chips.appendChild(lensButton((s.title || s.paper_id) + ' · p.' + s.page, function () {
+        lensDrawer('Evidence', [s]);
+      }));
+    });
+    chips.appendChild(lensButton('Review', function () {
+      lensDrawer(sentence.text, cited, { kind: 'sentence', id: sentence.id, value: sentence.text });
+    }));
+    row.appendChild(chips); return row;
+  }
+
+  function renderLensAnswer() {
+    var el = $('lens-answer'); el.replaceChildren();
+    document.querySelectorAll('[data-lens-tab]').forEach(function (b) {
+      var selected = b.dataset.lensTab === lens.tab;
+      b.classList.toggle('on', selected); b.setAttribute('aria-selected', String(selected));
+      b.tabIndex = selected ? 0 : -1;
+    });
+    el.setAttribute('aria-labelledby', 'lens-tab-' + lens.tab);
+    $('lens-audit-filter').hidden = lens.tab !== 'answer';
+    if (lens.tab === 'review') { renderLensReviews(); return; }
+    if (!lens.answer) { el.appendChild(lensNode('p', 'Ask a question to see its answer and evidence.', 'hint')); return; }
+    if (lens.tab === 'evidence') { lensEvidence(el, lens.answer.evidence); return; }
+    el.appendChild(lensNode('h3', lens.answer.question));
+    if (lens.answer.insufficient) el.appendChild(lensNode('p', 'Evidence is insufficient for a complete answer.', 'hint'));
+    lensBadges(el, [], (lens.answer.flags || []).concat(lens.answer.invalid_citations.length ? ['invalid_citations'] : []));
+    var sentences = lens.answer.sentences.filter(function (s) { return !lens.audit || s.audit_focus; });
+    sentences.forEach(function (s) { el.appendChild(lensSentence(s, lens.answer.evidence)); });
+    if (!sentences.length) el.appendChild(lensNode('p', 'No sentences match this filter.', 'hint'));
+  }
+
+  function renderLensReviews() {
+    var project = state.project;
+    if (!project) { $('lens-answer').replaceChildren(lensNode('p', 'Choose a project first.', 'hint')); return; }
+    api('/api/review?project=' + encodeURIComponent(project || '')).then(function (items) {
+      if (project !== state.project || lens.tab !== 'review') return;
+      var el = $('lens-answer'); el.replaceChildren();
+      if (!items.length) el.appendChild(lensNode('p', 'No open reviews in this project.', 'hint'));
+      items.forEach(function (item) {
+        var row = lensNode('article', null, 'lens-row');
+        var context = item.target_kind === 'sentence' ? item.question :
+          [item.matrix_name, item.paper_title, item.column_label].filter(Boolean).join(' · ');
+        row.appendChild(lensNode('h3', context));
+        row.appendChild(lensNode('p', item.text));
+        lensBadges(row, [item.target_kind, item.audit_verdict], item.flags);
+        row.appendChild(lensButton('Inspect and review', function () {
+          if (item.target_kind === 'cell') {
+            loadLensMatrix(item.matrix_id).then(function (m) {
+              if (project !== state.project) return;
+              var cell = m.cells.find(function (c) { return c.id === item.target_id; });
+              if (cell) openLensCell(cell, m);
+            }).catch(function (e) { toast(e.message); });
+          } else lensDrawer(item.text, item.evidence, { kind: 'sentence', id: item.target_id, value: item.text });
+        }));
+        el.appendChild(row);
+      });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function loadLensAnswer(id) {
+    var project = state.project, request = ++lens.answerRequest;
+    return api('/api/answers/' + encodeURIComponent(id)).then(function (answer) {
+      if (project !== state.project || request !== lens.answerRequest) return;
+      lens.answer = answer; store.set('answer-' + project, answer.run_id);
+      renderLensAnswer();
+      $('lens-ask-status').textContent = lensAnswerSummary(answer);
+      $('lens-run-audit').disabled = lens.busy;
+      return answer;
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function enterLens(view) {
+    if (lens.project !== state.project) {
+      lens.project = state.project; lens.answer = null; lens.matrix = null;
+      $('lens-matrix-detail').hidden = true; $('lens-answer').replaceChildren();
+      $('lens-question').value = ''; $('lens-ask-status').textContent = '';
+      var saved = store.get('answer-' + state.project, null);
+      if (saved) loadLensAnswer(saved);
+    }
+    if (!state.project) { toast('Choose a project first'); return; }
+    if (view === 'ask') renderLensAnswer(); else loadLensMatrices();
+  }
+
+  function confirmLensPreview(plan) {
+    return new Promise(function (resolve) {
+      var dialog = $('lens-preview');
+      $('lens-preview-content').textContent = 'Profile: ' + plan.profiles.join(', ') + '\nProvider: ' + plan.providers.join(', ') +
+        '\nModel: ' + plan.models.join(', ') + '\nCalls: ' + plan.number_of_calls + '\nEvidence spans: ' + plan.evidence_ids_count +
+        '\nEstimated input tokens: ' + plan.estimated_input_tokens + '\nMaximum cost: ' +
+        (plan.max_cost_usd == null ? 'unknown' : '$' + plan.max_cost_usd.toFixed(4));
+      dialog.returnValue = '';
+      dialog.onclose = function () { resolve(dialog.returnValue === 'approved'); };
+      $('lens-preview-confirm').onclick = function () { dialog.close('approved'); };
+      $('lens-preview-cancel').onclick = function () { dialog.close('cancel'); };
+      dialog.showModal();
+    });
+  }
+
+  function lensAnswerSummary(answer) {
+    var profile = lens.profiles.find(function (p) { return p.model === answer.model && p.provider === answer.provider; });
+    return answer.sentences.length + ' sentences · ' + answer.evidence.length + ' evidence spans · ' +
+      (answer.model ? answer.model + ' (' + (profile && profile.remote ? 'cloud' : 'local') + ')' : 'No model used');
+  }
+
+  function lensBusy(busy) {
+    lens.busy = busy;
+    document.querySelectorAll('[data-lens-work], #lens-matrix-form button[type=submit], #lens-add-column-form button[type=submit]').forEach(function (b) { b.disabled = busy; });
+    $('lens-run-audit').disabled = busy || !lens.answer;
+  }
+
+  function startLensTask(task, path, extra, statusId, autoAudit) {
+    if (lens.busy || !state.project) return;
+    var project = state.project;
+    var body = Object.assign({ task: task, project: project }, extra);
+    lensBusy(true);
+    $('lens-ask-status').textContent = ''; $('lens-matrix-status').textContent = '';
+    $('lens-run-audit').disabled = true;
+    post('/api/preview', body).then(function (plan) {
+      if (plan.blocked_reasons.length) throw new Error('Action blocked: ' + plan.blocked_reasons.join(', '));
+      if (plan.remote || plan.requires_approval) return confirmLensPreview(plan);
+      return null;
+    }).then(function (approved) {
+      if (approved === false || project !== state.project) { lensBusy(false); return; }
+      if (approved === true) body.approved = true;
+      $(statusId).textContent = 'Starting…';
+      return post(path, body).then(function (job) {
+        (function tick() {
+          api('/api/jobs/' + job.id).then(function (j) {
+            if (project === state.project) $(statusId).textContent = j.status === 'running' ?
+              (j.messages[j.messages.length - 1] || 'Working…') : j.status === 'failed' ? j.error : task === 'matrix_extract' ?
+                j.report.stats.extracted + ' cells extracted, ' + j.report.stats.cached + ' cached, ' + j.report.stats.flagged + ' flagged' :
+                lensAnswerSummary(j.report);
+            if (j.status === 'running') { setTimeout(tick, 900); return; }
+            lensBusy(false);
+            if (project !== state.project || j.status !== 'done') return;
+            if (task === 'matrix_extract') loadLensMatrix(body.matrix_id).catch(function (e) { toast(e.message); });
+            else loadLensAnswer(j.run_id).then(function (answer) {
+              if (answer && task === 'ask' && autoAudit && project === state.project) {
+                startLensTask('audit', '/api/audit', { run_id: j.run_id, profile: body.profile }, statusId);
+              }
+            });
+          }).catch(function (e) { lensBusy(false); toast(e.message); });
+        })();
+      });
+    }).catch(function (e) { lensBusy(false); $(statusId).textContent = e.message; toast(e.message); });
+  }
+
+  function lensColumnEditor(parent, removable) {
+    var box = lensNode('div', null, 'lens-column');
+    var grid = lensNode('div', null, 'lens-column-grid');
+    [['key', 'Key (slug)'], ['label', 'Label'], ['instruction', 'Extraction instruction'], ['type', 'Type'],
+      ['unit', 'Unit (optional)'], ['options', 'Categorical options (one per line)']].forEach(function (field) {
+      var label = lensNode('label', field[1], 'f');
+      var input = lensNode(field[0] === 'type' ? 'select' : field[0] === 'options' || field[0] === 'instruction' ? 'textarea' : 'input');
+      input.dataset.columnField = field[0];
+      if (input.tagName === 'INPUT') input.type = 'text';
+      if (input.tagName === 'TEXTAREA') input.rows = 2;
+      if (field[0] === 'type') ['text', 'number', 'categorical', 'boolean'].forEach(function (t) {
+        var option = lensNode('option', t); option.value = t; input.appendChild(option);
+      });
+      input.required = ['key', 'label', 'instruction'].indexOf(field[0]) >= 0;
+      label.appendChild(input); grid.appendChild(label);
+    });
+    box.appendChild(grid);
+    if (removable) box.appendChild(lensButton('Remove column', function () { box.remove(); }));
+    parent.appendChild(box);
+  }
+
+  function lensReadColumn(box) {
+    var data = {};
+    box.querySelectorAll('[data-column-field]').forEach(function (input) { data[input.dataset.columnField] = input.value.trim(); });
+    data.options = data.options ? data.options.split('\n').map(function (s) { return s.trim(); }).filter(Boolean) : null;
+    data.unit = data.unit || null; return data;
+  }
+
+  function loadLensMatrices(selected) {
+    var project = state.project;
+    return api('/api/matrices?project=' + encodeURIComponent(project || '')).then(function (items) {
+      if (project !== state.project) return;
+      var select = $('lens-matrices'); select.replaceChildren(lensNode('option', 'Choose a matrix'));
+      select.firstChild.value = '';
+      items.forEach(function (m) { var option = lensNode('option', m.name); option.value = m.id; select.appendChild(option); });
+      select.value = selected || (lens.matrix ? lens.matrix.id : '');
+      if (select.value) return loadLensMatrix(select.value);
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function openLensCell(cell, matrix) {
+    var col = matrix.columns.find(function (c) { return c.key === cell.column_key; });
+    var paper = matrix.papers.find(function (p) { return p.id === cell.paper_id; });
+    lensDrawer((paper ? paper.title : cell.paper_id) + ' · ' + col.label,
+      matrix.evidence.filter(function (s) { return cell.evidence_ids.indexOf(s.id) >= 0; }),
+      { kind: 'cell', id: cell.id, type: col.type, value: cell.value });
+    var summary = lensNode('article', null, 'lens-row');
+    summary.appendChild(lensNode('p', cell.value == null ? 'No reported value' : cell.value));
+    lensBadges(summary, [cell.status, cell.review_status], cell.flags);
+    if (cell.note) summary.appendChild(lensNode('p', cell.note, 'hint'));
+    $('dbody').prepend(summary);
+  }
+
+  function loadLensMatrix(id) {
+    var project = state.project, request = ++lens.matrixRequest;
+    return api('/api/matrices/' + encodeURIComponent(id)).then(function (m) {
+      if (project !== state.project || request !== lens.matrixRequest) return m;
+      lens.matrix = m; $('lens-matrices').value = m.id; $('lens-matrix-detail').hidden = false;
+      $('lens-matrix-title').textContent = m.name; $('lens-matrix-description').textContent = m.question;
+      $('lens-warnings').textContent = m.warnings.map(function (w) {
+        return w.replace(/\bnot_found\b/g, LENS_LABEL.not_found);
+      }).join('\n');
+      $('lens-exports').replaceChildren();
+      ['md', 'csv', 'json'].forEach(function (fmt) {
+        var a = lensNode('a', 'Export ' + fmt.toUpperCase(), 'btn small');
+        a.href = '/api/matrices/' + encodeURIComponent(m.id) + '/export?format=' + fmt;
+        a.download = ''; $('lens-exports').appendChild(a);
+      });
+      var table = $('lens-table'); table.replaceChildren();
+      var head = lensNode('thead'), header = lensNode('tr'), first = lensNode('th', 'Paper');
+      first.scope = 'col'; header.appendChild(first);
+      m.columns.forEach(function (c) { var th = lensNode('th', c.label); th.scope = 'col'; header.appendChild(th); });
+      head.appendChild(header); table.appendChild(head);
+      var cells = {};
+      m.cells.forEach(function (c) { cells[c.paper_id + '/' + c.column_key] = c; });
+      var tbody = lensNode('tbody');
+      m.papers.forEach(function (p) {
+        var tr = lensNode('tr'), title = lensNode('th', p.title || p.id); title.scope = 'row'; tr.appendChild(title);
+        m.columns.forEach(function (c) {
+          var td = lensNode('td'), cell = cells[p.id + '/' + c.key];
+          if (cell) {
+            var b = lensButton(cell.value == null ? '—' : String(cell.value) + (cell.unit ? ' ' + cell.unit : ''), function () { openLensCell(cell, m); }, 'btn lens-cell');
+            lensBadges(b, [cell.status, cell.review_status], cell.flags); td.appendChild(b);
+          } else td.appendChild(lensNode('span', 'Not extracted', 'hint'));
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody); return m;
+    });
+  }
+
+  function initLens() {
+    api('/api/model-profiles').then(function (profiles) {
+      lens.profiles = profiles;
+      ['lens-profile', 'lens-matrix-profile'].forEach(function (id) {
+        profiles.forEach(function (p) {
+          var option = lensNode('option', p.name + ' · ' + p.model + (p.remote ? ' (cloud)' : ''));
+          option.value = p.name; $(id).appendChild(option);
+        });
+      });
+      if (lens.answer) $('lens-ask-status').textContent = lensAnswerSummary(lens.answer);
+    }).catch(function (e) { toast(e.message); });
+    lensColumnEditor($('lens-columns'), true); lensColumnEditor($('lens-add-column'), false);
+    $('lens-more-column').onclick = function () { lensColumnEditor($('lens-columns'), true); };
+    $('lens-ask-form').onsubmit = function (e) {
+      e.preventDefault(); startLensTask('ask', '/api/ask', { question: $('lens-question').value,
+        profile: $('lens-profile').value.trim() || null, sensitive: $('lens-sensitive').checked }, 'lens-ask-status', $('lens-auto-audit').checked);
+    };
+    $('lens-run-audit').onclick = function () {
+      if (!lens.answer) { toast('Ask a question first'); return; }
+      startLensTask('audit', '/api/audit', { run_id: lens.answer.run_id, profile: $('lens-profile').value.trim() || null }, 'lens-ask-status');
+    };
+    document.querySelectorAll('[data-lens-tab]').forEach(function (b, index, tabs) {
+      b.onclick = function () { lens.tab = b.dataset.lensTab; renderLensAnswer(); };
+      b.onkeydown = function (e) {
+        var next = e.key === 'ArrowRight' ? (index + 1) % tabs.length :
+          e.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length :
+          e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -1;
+        if (next >= 0) { e.preventDefault(); tabs[next].click(); tabs[next].focus(); }
+      };
+    });
+    $('lens-audit-filter').onclick = function () {
+      lens.audit = !lens.audit; this.classList.toggle('on', lens.audit); this.setAttribute('aria-pressed', String(lens.audit)); renderLensAnswer();
+    };
+    $('lens-matrices').onchange = function () {
+      if (this.value) loadLensMatrix(this.value).catch(function (e) { toast(e.message); });
+      else { lens.matrix = null; $('lens-matrix-detail').hidden = true; }
+    };
+    $('lens-matrix-form').onsubmit = function (e) {
+      e.preventDefault();
+      if (!state.project) { toast('Choose a project first'); return; }
+      var columns = Array.from($('lens-columns').children).map(lensReadColumn);
+      post('/api/matrices', { project: state.project, name: $('lens-matrix-name').value,
+        question: $('lens-matrix-question').value, columns: columns }).then(function (m) {
+        $('lens-create-panel').open = false; return loadLensMatrices(m.id);
+      }).catch(function (err) { toast(err.message); });
+    };
+    $('lens-add-column-form').onsubmit = function (e) {
+      e.preventDefault(); if (!lens.matrix) return;
+      post('/api/matrices/' + encodeURIComponent(lens.matrix.id) + '/columns', lensReadColumn($('lens-add-column')))
+        .then(function (m) { return loadLensMatrix(m.id); }).catch(function (err) { toast(err.message); });
+    };
+    $('lens-extract').onclick = function () {
+      if (!lens.matrix) return;
+      startLensTask('matrix_extract', '/api/matrices/' + encodeURIComponent(lens.matrix.id) + '/extract',
+        { matrix_id: lens.matrix.id, profile: $('lens-matrix-profile').value.trim() || null, force: $('lens-force').checked }, 'lens-matrix-status');
+    };
+  }
+
   function init() {
+    initLens();
     // Each open page checks in; when none does for a while, the server stops itself (stop_when_idle).
     // If the server is gone (it stopped while the computer slept, say), the page says so instead of failing quietly.
     var beat = setInterval(function () {
@@ -1157,14 +1573,17 @@
         if (e instanceof TypeError) { clearInterval(beat); showStopped(); }  // fetch failed: no server answered
       });
     }, 15000);
-    document.querySelectorAll('.tabs button').forEach(function (b) { b.onclick = function () { setMode(b.dataset.mode); }; });
+    document.querySelectorAll('[data-mode]').forEach(function (b) { b.onclick = function () { setMode(b.dataset.mode); }; });
     $('pdfs-export').checked = store.get('pdfs-export', true);
     $('pdfs-export-scope').textContent = scopeWords();
     $('pdfs-export').onchange = function () { store.set('pdfs-export', this.checked); setMode(state.mode); };
     setMode(store.get('mode', 'similar'));
     var linked = /^#run=([\w-]+)$/.exec(location.hash);  // a bookmarked search; never set automatically
-    showView(/^#(recents|library)$/.test(location.hash) ? location.hash.slice(1) : 'new');
+    showView(/^#(recents|library|ask|matrix)$/.test(location.hash) ? location.hash.slice(1) : 'new');
     if (linked) loadRun(linked[1]);
+    window.addEventListener('hashchange', function () {
+      if (/^#(ask|matrix|recents|library)$/.test(location.hash)) showView(location.hash.slice(1));
+    });
     $('sort').value = state.sort;
 
     var drop = $('drop'), dropHtml = drop.innerHTML;
@@ -1336,8 +1755,10 @@
     };
 
     document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !document.querySelector('dialog[open]')) { closeDrawer(); return; }
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.metaKey || e.ctrlKey) return;
       if (e.key === '?' && !document.querySelector('dialog[open]')) { openGuide(); e.preventDefault(); return; }
+      if (document.querySelector('dialog[open]')) return;
       if (!state.data || state.page !== 'results') return;
       if (e.key === 'j' || e.key === 'ArrowDown') { select(state.sel + 1, $('drawer').classList.contains('open')); e.preventDefault(); }
       else if (e.key === 'k' || e.key === 'ArrowUp') { select(state.sel - 1, $('drawer').classList.contains('open')); e.preventDefault(); }

@@ -285,3 +285,19 @@ and whether cited spans belong to their row's paper. `litforge eval answers BENC
 local` reports citation precision against relevant targets (invalid IDs count as incorrect citations),
 unsupported-sentence rate, and invalid citation count. Both accept `--json` and store analysis runs. Briefs refuse any factual sentence
 without evidence or an explicit unsupported/interpretation label.
+
+
+### Evidence Lens in the web UI
+
+Select a project, then open **Ask** to ask a question about its library evidence. Sentence rows show
+kind, validation flags and audit verdicts; citation chips open the quote, paper, section and PDF page
+in the drawer. **Run audit** checks the stored answer with the chosen profile. The **Audit** filter
+shows weak or single-source sentences; **Answer · Evidence · Needs review** switches between the
+answer, source cards and the project's open reviews. Accept, reject or edit a sentence or cell in the drawer.
+
+Open **Matrix** to create a comparison with named, typed columns, extract values, inspect cells and
+export Markdown, CSV or JSON. Add columns to an existing matrix and extract again to fill only new
+or changed cells. Unit and retrieval warnings appear above the table. Number and boolean edits use
+numbers and `true`/`false`; categorical edits use an exact option. A blank profile uses the configured
+local default. Every remote action shows provider, model, evidence count, tokens and maximum cost
+before confirmation. Press **?** for the guide and **Esc** to close the drawer or a dialog.

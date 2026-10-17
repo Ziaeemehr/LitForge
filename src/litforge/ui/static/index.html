@@ -16,6 +16,8 @@
   <button class="nav-new" id="nav-new" data-view="new" title="Start a new search: from a paper, keywords, a reference list or your own PDFs">+ New</button>
   <button class="nav-item" data-view="recents" title="Every search you ran, newest first">Recents</button>
   <button class="nav-item" data-view="library" title="All papers LitForge knows, across projects">Library</button>
+  <button class="nav-item" data-view="ask" title="Ask the current project using cited library evidence">Ask</button>
+  <button class="nav-item" data-view="matrix" title="Compare studies in the current project">Matrix</button>
   <h3 title="A project collects the papers, ✓/✗ marks and exports of one review">Projects</h3>
   <div class="side-list" id="side-projects"></div>
   <h3 title="Your latest searches; click one to reopen it with its marks">Recent</h3>
@@ -145,6 +147,65 @@
     </div>
   </section>
 
+  <section id="view-ask" class="view" hidden>
+    <div class="viewhead"><h2>Ask</h2><span class="meta">Evidence from the current project</span></div>
+    <div class="card lens-panel">
+      <form id="lens-ask-form">
+        <label class="f" for="lens-question">Question</label>
+        <textarea id="lens-question" rows="3" required placeholder="What does the library report?"></textarea>
+        <div class="lens-actions">
+          <label class="f" for="lens-profile">Model profile</label>
+          <select id="lens-profile" aria-label="Model profile"><option value="">Configured default</option></select>
+          <label class="check"><input type="checkbox" id="lens-sensitive"> Sensitive content</label>
+          <label class="check"><input type="checkbox" id="lens-auto-audit" checked> Audit after answering</label>
+          <button class="btn accent" type="submit" data-lens-work>Ask library</button>
+          <button class="btn" type="button" id="lens-run-audit" data-lens-work>Run audit</button>
+        </div>
+      </form>
+      <p class="hint" id="lens-ask-status" role="status" aria-live="polite"></p>
+      <div class="tabs" role="tablist" aria-label="Answer views">
+        <button class="on" id="lens-tab-answer" role="tab" aria-selected="true" aria-controls="lens-answer" data-lens-tab="answer">Answer</button>
+        <button id="lens-tab-evidence" role="tab" aria-selected="false" aria-controls="lens-answer" tabindex="-1" data-lens-tab="evidence">Evidence</button>
+        <button id="lens-tab-review" role="tab" aria-selected="false" aria-controls="lens-answer" tabindex="-1" data-lens-tab="review">Needs review</button>
+      </div>
+      <button class="toggle" id="lens-audit-filter" aria-pressed="false" title="Show weak, single-source, flagged or non-supported sentences">Audit</button>
+      <div id="lens-answer" class="lens-rows" role="tabpanel" aria-labelledby="lens-tab-answer"></div>
+    </div>
+  </section>
+
+  <section id="view-matrix" class="view" hidden>
+    <div class="viewhead"><h2>Matrix</h2><span class="meta">Compare studies in the current project</span></div>
+    <div class="card lens-panel">
+      <label class="f" for="lens-matrices">Study matrix</label>
+      <select id="lens-matrices"><option value="">Choose a matrix</option></select>
+      <details id="lens-create-panel">
+        <summary>Create matrix</summary>
+        <form id="lens-matrix-form">
+          <label class="f" for="lens-matrix-name">Name</label><input type="text" id="lens-matrix-name" required>
+          <label class="f" for="lens-matrix-question">Question</label><textarea id="lens-matrix-question" rows="2" required></textarea>
+          <div id="lens-columns"></div>
+          <div class="lens-actions"><button class="btn small" type="button" id="lens-more-column">Add column</button>
+            <button class="btn accent" type="submit">Create matrix</button></div>
+        </form>
+      </details>
+      <div id="lens-matrix-detail" hidden>
+        <h3 id="lens-matrix-title"></h3><p id="lens-matrix-description"></p>
+        <div class="lens-actions">
+          <label class="f" for="lens-matrix-profile">Model profile</label><select id="lens-matrix-profile" aria-label="Matrix model profile"><option value="">Configured default</option></select>
+          <label class="check"><input type="checkbox" id="lens-force"> Re-extract cached cells</label>
+          <button class="btn accent" id="lens-extract" data-lens-work>Extract</button>
+          <span id="lens-exports" class="lens-actions"></span>
+        </div>
+        <details><summary>Add a column to this matrix</summary><form id="lens-add-column-form">
+          <div id="lens-add-column"></div><button class="btn small" type="submit">Save column</button>
+        </form></details>
+        <p class="hint" id="lens-matrix-status" role="status" aria-live="polite"></p>
+        <div id="lens-warnings" role="status"></div>
+        <div class="lens-table-wrap" tabindex="0" role="region" aria-label="Study matrix"><table class="lens-table" id="lens-table"></table></div>
+      </div>
+    </div>
+  </section>
+
   <section id="results" class="view" hidden>
       <div class="runhead"><h2 id="run-title"></h2><span class="meta" id="run-meta"></span></div>
       <div class="stats" id="stats"></div>
@@ -258,6 +319,13 @@
     <button class="btn ghost" id="mathsetup-cancel">Cancel</button>
   </div>
 </dialog>
+<dialog class="modal" id="lens-preview" aria-labelledby="lens-preview-title">
+  <div class="mhead"><h2 id="lens-preview-title">Send evidence to a remote model?</h2></div>
+  <div class="report" id="lens-preview-content"></div>
+  <p class="hint">The listed evidence will leave this computer. Confirm to start this action.</p>
+  <div class="mactions"><button class="btn accent" id="lens-preview-confirm">Confirm and send</button>
+    <button class="btn ghost" id="lens-preview-cancel">Cancel</button></div>
+</dialog>
 <dialog class="modal" id="guide">
   <div class="mhead"><h2>Quick guide</h2><button class="btn small ghost" id="guide-close" title="Close (Esc)">✕</button></div>
   <div class="guide">
@@ -304,6 +372,12 @@
         exclusion criteria. It only suggests; your marks decide. Skip it if you screen by hand.</p>
     </section>
     <section>
+      <h3>Evidence Lens · Ask and Matrix</h3>
+      <p><b>Ask</b> answers from the selected project. Citation chips open quotes, paper details and the PDF at its page.
+        <b>Run audit</b> checks citations; the <b>Audit</b> filter shows sentences that warrant attention.
+        <b>Needs review</b> collects flagged sentences and cells for accept, reject or edit.</p>
+      <p><b>Matrix</b> compares papers using your columns. Extract, inspect cells, review values and export Markdown, CSV or JSON.
+        Remote actions show their evidence count and cost before you confirm sending.</p>
       <h3>Keyboard</h3>
       <p class="keys"><kbd>j</kbd> <kbd>k</kbd> next / previous · <kbd>Enter</kbd> open · <kbd>r</kbd> mark ✓ ·
         <kbd>x</kbd> mark ✗ · <kbd>Esc</kbd> close · <kbd>?</kbd> this guide</p>

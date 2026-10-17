@@ -43,3 +43,22 @@ def test_phrase_page_uses_full_match(query: str, page: int) -> None:
         start += len(text)
     _, terms = build_any_match(query)
     assert _hit_page("".join(texts), spans, terms, 1) == page
+
+
+@pytest.mark.parametrize('k,max_per_paper,expected', [
+    (2, 3, ['cp', 'cq']), (3, 3, ['cp', 'cq', 'front']),
+    (2, 1, ['cp', 'cq']), (0, 3, []),
+])
+def test_front_matter_follows_content(conn: sqlite3.Connection, k: int, max_per_paper: int,
+                                     expected: list[str]) -> None:
+    from lens_fakes import seed
+
+    from litforge.indexing.fts import search
+
+    seed(conn, text='Results: gain ' + 'detailed experimental observations ' * 20)
+    seed(conn, paper='q', text='Results: gain ' + 'detailed experimental observations ' * 20)
+    conn.execute("INSERT INTO chunks(id,parse_run_id,paper_id,kind,section_path,order_idx,text,token_count,"
+                 "page_start,page_end,hash) VALUES ('front','rp','p','text','Front matter',1,'gain',1,1,1,'f')")
+    assert search(conn, 'gain', any_terms=True)[0].chunk_id == 'front'
+    hits = retrieve_for_question(conn, 'gain', k=k, max_per_paper=max_per_paper)
+    assert [h.chunk_id for h in hits] == expected

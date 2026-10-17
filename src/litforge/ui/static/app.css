@@ -366,3 +366,37 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .side-note { font-size: 11px; color: var(--muted); margin: 8px 10px 0; line-height: 1.4; }
 .stopped { max-width: 460px; margin: 18vh auto; text-align: center; color: var(--muted); }
 .stopped h2 { color: var(--ink); }
+
+/* Evidence Lens uses the shared panels, badges, drawer and theme palette. */
+.lens-panel { padding: 16px; }
+.lens-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.lens-actions input[type=text] { width: 180px; max-width: 100%; }
+.lens-actions .check, .lens-actions label.f { margin: 0; }
+.lens-panel details { margin: 14px 0; }
+.lens-panel summary { cursor: pointer; color: var(--accent); }
+.lens-row, .lens-evidence { border-bottom: 1px solid var(--line); padding: 12px 0; overflow-wrap: anywhere; }
+.lens-row p, .lens-evidence p { white-space: pre-wrap; margin: 5px 0; }
+.lens-evidence blockquote { white-space: pre-wrap; margin: 8px 0; padding-left: 12px; border-left: 3px solid var(--line); }
+.lens-badges { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.lens-badges .badge { white-space: normal; text-transform: none; }
+.lens-badges .badge.neutral { background: var(--chip); color: var(--muted); }
+.lens-badges .badge.warning { background: var(--chip); color: var(--warn); }
+.lens-badges .badge.ok { background: var(--good-soft); color: var(--good); }
+.lens-column { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 10px 0; }
+.lens-column-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
+.lens-table-wrap { overflow: auto; margin-top: 12px; }
+.lens-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.lens-table th, .lens-table td { border: 1px solid var(--line); padding: 10px; text-align: left; min-width: 160px; vertical-align: top; }
+.lens-table th { background: var(--chip); }
+.lens-table th[scope=row] { min-width: 200px; }
+.lens-cell { width: 100%; text-align: left; overflow-wrap: anywhere; }
+#lens-warnings { color: var(--warn); white-space: pre-wrap; overflow-wrap: anywhere; }
+#lens-preview-content { white-space: pre-wrap; overflow-wrap: anywhere; }
+.lens-review-editor { display: grid; gap: 8px; margin: 12px 0; }
+@media (max-width: 600px) {
+  .lens-column-grid { grid-template-columns: 1fr; }
+  .lens-panel { padding: 10px; }
+  .lens-actions { align-items: stretch; }
+  .lens-actions input[type=text] { width: 100%; }
+  .viewhead { flex-wrap: wrap; }
+}
