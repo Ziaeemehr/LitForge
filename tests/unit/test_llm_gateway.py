@@ -7,7 +7,9 @@ import pytest
 from pydantic import ValidationError
 
 from litforge.llm import EvidenceItem, EvidencePacket, LlmError, ModelReply
+from litforge.llm.budget import BudgetExceeded, BudgetGuard, Pricing
 from litforge.llm.openai_compatible import OpenAICompatibleClient
+from litforge.llm.router import CloudApprovalRequired, ModelProfile, ModelRequest, ModelRouter, RoutingError
 
 
 def item(evidence_id: str = "e1", text: str = "reported result") -> EvidenceItem:
@@ -83,3 +85,49 @@ def test_openai_compatible_errors_do_not_expose_key(monkeypatch: pytest.MonkeyPa
     with pytest.raises(LlmError) as exc:
         client.chat_json([], {"type": "object"})
     assert "never-print-this" not in str(exc.value)
+
+
+def profiles() -> dict[str, ModelProfile]:
+    return {
+        "local": ModelProfile(name="local", provider="ollama", model="small", remote=False),
+        "large": ModelProfile(name="large", provider="openai_compatible", model="large", remote=True),
+    }
+
+
+def test_router_enforces_local_only_before_remote_dispatch() -> None:
+    router = ModelRouter(profiles(), local_profile="local")
+    request = ModelRequest(task="synthesis", evidence=EvidencePacket(items=[item()]), preferred_profile="large",
+                           allow_cloud=True)
+    with pytest.raises(RoutingError, match="local_only"):
+        router.route(request, policy="local_only")
+
+
+def test_router_requires_approval_and_blocks_sensitive_hybrid() -> None:
+    router = ModelRouter(profiles(), local_profile="local")
+    normal = ModelRequest(task="synthesis", evidence=EvidencePacket(items=[item()]), preferred_profile="large",
+                          allow_cloud=True)
+    with pytest.raises(CloudApprovalRequired):
+        router.route(normal, policy="ask_before_cloud")
+    assert router.route(normal, policy="ask_before_cloud", approved=True).profile.name == "large"
+    sensitive = normal.model_copy(update={"evidence": EvidencePacket(items=[item()], sensitive=True)})
+    with pytest.raises(CloudApprovalRequired):
+        router.route(sensitive, policy="hybrid")
+    assert router.route(sensitive, policy="hybrid", approved=True).profile.name == "large"
+
+
+def test_hybrid_requires_task_cloud_permission() -> None:
+    router = ModelRouter(profiles(), local_profile="local")
+    request = ModelRequest(task="extract", evidence=EvidencePacket(items=[item()]), preferred_profile="large")
+    assert router.route(request, policy="hybrid").profile.name == "local"
+
+
+def test_budget_guard_requires_prices_and_enforces_call_and_run_limits() -> None:
+    guard = BudgetGuard(max_per_call_usd=1, max_per_run_usd=2)
+    with pytest.raises(BudgetExceeded, match="pricing"):
+        guard.check(None, input_tokens=1, max_output_tokens=1, spent_usd=0)
+    pricing = Pricing(input_per_million_usd=10, output_per_million_usd=20)
+    assert guard.check(pricing, input_tokens=10_000, max_output_tokens=10_000, spent_usd=0) == pytest.approx(0.3)
+    with pytest.raises(BudgetExceeded, match="per-call"):
+        guard.check(pricing, input_tokens=100_000, max_output_tokens=100_000, spent_usd=0)
+    with pytest.raises(BudgetExceeded, match="run"):
+        guard.check(pricing, input_tokens=10_000, max_output_tokens=10_000, spent_usd=1.8)
