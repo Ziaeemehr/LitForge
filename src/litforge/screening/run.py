@@ -8,10 +8,16 @@ from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
+from litforge.analysis.errors import run_error
+from litforge.analysis.gateway import ModelGateway
+from litforge.analysis.runs import finish_run, start_run
+from litforge.config import Config
+from litforge.llm.evidence import EvidenceItem, EvidencePacket
 from litforge.observability import EventLog
 from litforge.screening.criteria import criteria_hash, load_criteria
 from litforge.screening.decide import Decision, decide, failed_decision
-from litforge.screening.llm import Llm, LlmError, LlmUnavailable, reply_content
+from litforge.screening.history import append_history
+from litforge.screening.llm import Llm, LlmError, LlmUnavailable
 from litforge.screening.prompt import PROMPT_VERSION, build_messages, fingerprint, response_schema
 from litforge.storage.db import now, transaction
 
@@ -51,45 +57,60 @@ def screen_run(conn: sqlite3.Connection, llm: Llm, run_id: str, top: int,
     report = ScreenReport(run_id=run_id, project_id=project_id, model=llm.name, candidates=len(papers))
     chash, schema, counts = criteria_hash(criteria), response_schema(criteria), Counter[str]()
     say(f"screening {len(papers)} papers with {llm.name}")
-    for i, p in enumerate(papers, 1):
-        fp = fingerprint(criteria, llm.name, p["title"], p["abstract"])
-        if p["fingerprint"] == fp and not p["error"]:
-            report.cached += 1
-            continue
-        messages = build_messages(criteria, p["title"], p["abstract"], p["year"], p["venue"])
-        decision: Decision | None = None
-        error = ""
-        for _attempt in range(2):  # one retry: small models occasionally break the JSON
-            try:
-                raw = reply_content(llm.chat_json(messages, schema))
-                decision = decide(raw, criteria, p["title"], p["abstract"])
-                break
-            except LlmUnavailable:
-                raise
-            except LlmError as exc:
-                error = str(exc)
-        if decision is None:
-            decision = failed_decision(criteria, error)
-            report.failed += 1
-            if log:
-                log.emit("screening.failed", paper=p["id"], error=error)
-        else:
-            report.screened += 1
-        counts[decision.decision] += 1
-        with transaction(conn):
-            conn.execute(
-                """INSERT INTO screening_results(project_id, paper_id, decision, score, result_json, error, model,
-                       prompt_version, criteria_hash, fingerprint, screened_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)
-                   ON CONFLICT(project_id, paper_id) DO UPDATE SET decision=excluded.decision,
-                       score=excluded.score, result_json=excluded.result_json, error=excluded.error,
-                       model=excluded.model, prompt_version=excluded.prompt_version,
-                       criteria_hash=excluded.criteria_hash, fingerprint=excluded.fingerprint,
-                       screened_at=excluded.screened_at""",
-                (project_id, p["id"], decision.decision, decision.score, decision.model_dump_json(),
-                 decision.error, llm.name, PROMPT_VERSION, chash, fp, now()))
-        say(f"[{i}/{len(papers)}] {decision.decision:<9} {(p['title'] or '(no title)')[:70]}")
-    report.counts = dict(counts)
-    if log:
-        log.emit("screening.run", **report.model_dump())
-    say(f"done: {report.screened} screened, {report.cached} unchanged, {report.failed} failed")
-    return report
+    config = Config()
+    config.models.local.model = llm.name
+    gateway = ModelGateway(conn, config, providers={"local": llm})
+    analysis_id = start_run(conn, "screen", project_id, {"discovery_run": run_id, "top": top},
+                            {"model": llm.name}, PROMPT_VERSION)
+    try:
+        for i, p in enumerate(papers, 1):
+            fp = fingerprint(criteria, llm.name, p["title"], p["abstract"])
+            if p["fingerprint"] == fp and not p["error"]:
+                report.cached += 1
+                continue
+            messages = build_messages(criteria, p["title"], p["abstract"], p["year"], p["venue"])
+            decision: Decision | None = None
+            error = ""
+            for _attempt in range(2):  # one retry: small models occasionally break the JSON
+                try:
+                    packet = EvidencePacket(items=[EvidenceItem(id="s1_" + p["id"], paper_id=p["id"], page=1,
+                        text=f"{p['title'] or ''}\n{p['abstract'] or ''}".strip() or "No title or abstract")])
+                    raw = gateway.call("screen", packet, messages, schema, run_id=analysis_id,
+                                       prompt_version=PROMPT_VERSION).content
+                    decision = decide(raw, criteria, p["title"], p["abstract"])
+                    break
+                except LlmUnavailable:
+                    raise
+                except LlmError as exc:
+                    error = str(exc)
+            if decision is None:
+                decision = failed_decision(criteria, error)
+                report.failed += 1
+                if log:
+                    log.emit("screening.failed", paper=p["id"], error=error)
+            else:
+                report.screened += 1
+            counts[decision.decision] += 1
+            with transaction(conn):
+                conn.execute(
+                    """INSERT INTO screening_results(project_id, paper_id, decision, score, result_json, error, model,
+                           prompt_version, criteria_hash, fingerprint, screened_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(project_id, paper_id) DO UPDATE SET decision=excluded.decision,
+                           score=excluded.score, result_json=excluded.result_json, error=excluded.error,
+                           model=excluded.model, prompt_version=excluded.prompt_version,
+                           criteria_hash=excluded.criteria_hash, fingerprint=excluded.fingerprint,
+                           screened_at=excluded.screened_at""",
+                    (project_id, p["id"], decision.decision, decision.score, decision.model_dump_json(),
+                     decision.error, llm.name, PROMPT_VERSION, chash, fp, now()))
+                append_history(conn, project_id, p["id"], "S1", decision.decision, "model", chash,
+                               decision.reason or decision.error or "", llm.name, PROMPT_VERSION)
+            say(f"[{i}/{len(papers)}] {decision.decision:<9} {(p['title'] or '(no title)')[:70]}")
+        report.counts = dict(counts)
+        if log:
+            log.emit("screening.run", **report.model_dump())
+        say(f"done: {report.screened} screened, {report.cached} unchanged, {report.failed} failed")
+        finish_run(conn, analysis_id, "ok", report.model_dump())
+        return report
+    except Exception as exc:
+        finish_run(conn, analysis_id, "error", {}, run_error(exc))
+        raise

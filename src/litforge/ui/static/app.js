@@ -452,15 +452,15 @@
 
   function showView(view) {
     state.page = view;
-    if (history.replaceState) history.replaceState(null, '', /^(recents|library|ask|matrix)$/.test(view) ? '#' + view : location.pathname);
-    ['new', 'recents', 'library', 'ask', 'matrix'].forEach(function (v) { $('view-' + v).hidden = v !== view; });
+    if (history.replaceState) history.replaceState(null, '', /^(recents|library|ask|matrix|claims)$/.test(view) ? '#' + view : location.pathname);
+    ['new', 'recents', 'library', 'ask', 'matrix', 'claims'].forEach(function (v) { $('view-' + v).hidden = v !== view; });
     $('results').hidden = view !== 'results';
     document.querySelectorAll('.sidebar [data-view]').forEach(function (b) { b.classList.toggle('on', b.dataset.view === view); });
     document.querySelectorAll('#side-recent a').forEach(function (a) { a.classList.remove('on'); });
     if (view !== 'results') closeDrawer();
     if (view === 'recents') { $('recents-project').value = state.recentsProject || ''; loadRecents(); }
     if (view === 'library') loadLibrary();
-    if (view === 'ask' || view === 'matrix') enterLens(view);
+    if (view === 'ask' || view === 'matrix' || view === 'claims') enterLens(view);
   }
 
   function deleteRun() {
@@ -651,6 +651,8 @@
     });
     var key = state.sort;
     list.sort(function (a, b) {
+      if (key === 'queue') return ((b.review_queue || {}).info == null ? -1 : b.review_queue.info) -
+        ((a.review_queue || {}).info == null ? -1 : a.review_queue.info) || a.id.localeCompare(b.id);
       if (key === 'screening') {
         return screenRank(a) - screenRank(b) || screenScore(b) - screenScore(a) || b.priority - a.priority;
       }
@@ -698,6 +700,13 @@
         '<button class="irr' + (p.mark === 'irrelevant' ? ' on' : '') + '" title="Not relevant (x)" data-mark="irrelevant">✗</button></div></div></div>';
     }).join('');
     el.querySelectorAll('.item').forEach(function (row) {
+      var paper = view[+row.dataset.i];
+      lensResultBadges(row.querySelector('.badges'), paper);
+      if (state.sort === 'queue' && paper.review_queue) {
+        var score = row.querySelector('.score');
+        score.replaceChildren(lensNode('span', paper.review_queue.info.toFixed(3)));
+        score.title = paper.review_queue.reason;
+      }
       row.onclick = function (e) {
         var i = +row.dataset.i, btn = e.target.closest('button[data-mark]');
         if (btn) {
@@ -732,7 +741,7 @@
 
   function setMarks(papers, mark) {
     if (!papers.length) { toast('No papers to mark'); return Promise.resolve(); }
-    var ids = papers.map(function (p) { return p.id; });
+    var ids = papers.map(function (p) { return p.id; }), project = state.project, data = state.data;
     return post('/api/marks', { project: state.project, paper_ids: ids, mark: mark }).then(function () {
       papers.forEach(function (p) { p.mark = mark; });
       if (state.hide && mark === 'irrelevant') state.anchor = -1;  // those rows just left the list
@@ -741,6 +750,12 @@
       render();
       var open = state.view[state.sel];
       if ($('drawer').classList.contains('open') && open && papers.indexOf(open) >= 0) openDrawer(open);
+      return api('/api/queue?project=' + encodeURIComponent(project) + '&limit=2147483647').then(function (queue) {
+        if (project !== state.project || data !== state.data) return;
+        var byId = {}; queue.forEach(function (q) { byId[q.paper_id] = q; });
+        data.papers.forEach(function (p) { p.review_queue = byId[p.id] || null; });
+        renderList();
+      });
     }).catch(function (e) { toast(e.message); });
   }
 
@@ -837,6 +852,7 @@
       html += '<h3>Abstract</h3><div class="md" id="abstract-md"></div>';
       if (d.markdown) html += '<div id="full" hidden><h3>Full text</h3><div class="md" id="full-md"></div></div>';
       $('dbody').innerHTML = html;
+      lensScreeningDetail($('dbody'), d);
       window.renderMarkdown($('abstract-md'), d.abstract || '_No abstract available._');
       if (d.markdown) {
         $('btn-full').onclick = function () {
@@ -1157,7 +1173,7 @@
 
   /* ---------- Evidence Lens ---------- */
 
-  var lens = { profiles: [], project: null, answer: null, matrix: null, tab: 'answer', audit: false, busy: false, answerRequest: 0, matrixRequest: 0 };
+  var lens = { profiles: [], project: null, answer: null, matrix: null, tab: 'answer', audit: false, busy: false, answerRequest: 0, matrixRequest: 0, claimRequest: 0 };
 
   function lensNode(tag, text, cls) {
     var el = document.createElement(tag);
@@ -1182,7 +1198,8 @@
     truncated: 'Answer shortened', invalid_citations: 'Invalid citations removed',
     supported: 'Supported', partial: 'Partly supported', contradicted: 'Contradicted',
     not_audited: 'Not audited', open: '', accepted: 'Accepted', rejected: 'Rejected', edited: 'Edited',
-    sentence: 'Sentence', cell: 'Cell'
+    sentence: 'Sentence', cell: 'Cell', single_source: 'Single-source', proposed: 'Proposed',
+    unsupported_hypothesis: 'Unsupported hypothesis', replicates: 'Replicated', contradicts: 'Contradicted'
   };
 
   function lensLabel(value) {
@@ -1197,8 +1214,8 @@
       if (!value) return;
       var label = lensLabel(value), key = String(value).toLowerCase();
       if (!label) return;
-      var severity = flag || ['partial', 'unsupported', 'contradicted'].indexOf(key) >= 0 ? 'warning' :
-        key === 'supported' ? 'ok' : 'neutral';
+      var severity = flag || ['partial', 'unsupported', 'contradicted', 'contradicts', 'uncertain', 'exclude', 'single_source', 'unsupported_hypothesis', 'stale'].indexOf(key) >= 0 ? 'warning' :
+        ['supported', 'supports', 'replicates', 'include'].indexOf(key) >= 0 ? 'ok' : 'neutral';
       badges.appendChild(lensNode('span', label, 'badge ' + severity));
     }
     labels.forEach(function (value) { add(value, false); });
@@ -1343,11 +1360,14 @@
       lens.project = state.project; lens.answer = null; lens.matrix = null;
       $('lens-matrix-detail').hidden = true; $('lens-answer').replaceChildren();
       $('lens-question').value = ''; $('lens-ask-status').textContent = '';
+      $('lens-claims-clusters').replaceChildren(); $('lens-claims-detail').replaceChildren();
+      $('lens-claims-status').textContent = '';
       var saved = store.get('answer-' + state.project, null);
       if (saved) loadLensAnswer(saved);
     }
     if (!state.project) { toast('Choose a project first'); return; }
-    if (view === 'ask') renderLensAnswer(); else loadLensMatrices();
+    if (view === 'claims') loadLensClaims();
+    else if (view === 'ask') renderLensAnswer(); else loadLensMatrices();
   }
 
   function confirmLensPreview(plan) {
@@ -1398,10 +1418,17 @@
             if (project === state.project) $(statusId).textContent = j.status === 'running' ?
               (j.messages[j.messages.length - 1] || 'Working…') : j.status === 'failed' ? j.error : task === 'matrix_extract' ?
                 j.report.stats.extracted + ' cells extracted, ' + j.report.stats.cached + ' cached, ' + j.report.stats.flagged + ' flagged' :
+                task === 'claim_extract' ? j.report.claims.length + ' claims · ' + j.report.cached + ' cached' :
+                task === 'claim_relation' ? j.report.relations.length + ' relations assessed' :
+                task === 'screen_fulltext' ? j.report.screened + ' screened · ' + j.report.needs_pdf.length + ' need PDF' :
                 lensAnswerSummary(j.report);
+            if (project === state.project && j.status === 'done' && j.report.budget_stopped)
+              $(statusId).textContent += ' · Stopped at budget';
             if (j.status === 'running') { setTimeout(tick, 900); return; }
             lensBusy(false);
             if (project !== state.project || j.status !== 'done') return;
+            if (task === 'claim_extract' || task === 'claim_relation') { loadLensClaims(); return; }
+            if (task === 'screen_fulltext') { if (state.runId) loadRun(state.runId); return; }
             if (task === 'matrix_extract') loadLensMatrix(body.matrix_id).catch(function (e) { toast(e.message); });
             else loadLensAnswer(j.run_id).then(function (answer) {
               if (answer && task === 'ask' && autoAudit && project === state.project) {
@@ -1506,10 +1533,133 @@
     });
   }
 
+  function lensResultBadges(parent, paper) {
+    if (paper.fulltext_screening) {
+      var s = paper.fulltext_screening;
+      var badge = lensNode('span', 'S2 · ' + lensLabel(s.decision),
+        'badge ' + (s.decision === 'include' ? 'ok' : 'warning'));
+      badge.title = (s.stale ? 'Criteria changed. ' : '') + (s.result.reason || ''); parent.appendChild(badge);
+    }
+    if (paper.review_queue) {
+      var q = paper.review_queue;
+      var badge = lensNode('span', 'Review ' + q.info.toFixed(3), 'badge neutral');
+      badge.title = q.reason; parent.appendChild(badge);
+      if (q.predicted_relevant != null) {
+        var prediction = lensNode('span', 'Nearby marks: ' + Math.round(q.predicted_relevant * 100) + '% relevant', 'badge neutral');
+        prediction.title = 'Prediction from nearby human marks; model decisions stay unchanged.'; parent.appendChild(prediction);
+      }
+    }
+  }
+
+  function lensScreeningDetail(parent, paper) {
+    var s = paper.fulltext_screening;
+    if (s) {
+      var box = lensNode('section'); box.appendChild(lensNode('h3', 'Full-text screening (S2)'));
+      lensBadges(box, [s.decision], s.stale ? ['Criteria changed'] : []);
+      box.appendChild(lensNode('p', s.result.reason));
+      ['inclusion', 'exclusion'].forEach(function (kind) {
+        (s.result[kind] || []).forEach(function (c) {
+          box.appendChild(lensNode('p', c.criterion + ': ' + lensLabel(c.status)));
+          if (c.evidence) box.appendChild(lensNode('blockquote', c.evidence));
+          if (c.verified !== true && c.evidence) lensBadges(box, [], ['Quote not verified in cited span']);
+        });
+      });
+      lensEvidence(box, s.evidence || []); parent.appendChild(box);
+    }
+    if ((paper.screening_history || []).length) {
+      var history = lensNode('details'); history.appendChild(lensNode('summary', 'Screening history'));
+      paper.screening_history.forEach(function (h) {
+        history.appendChild(lensNode('p', h.stage + ' · ' + lensLabel(h.decision) + ' · ' + h.source +
+          ' · ' + h.created_at + ' · criteria ' + h.criteria_hash + (h.model ? ' · ' + h.model : '') +
+          (h.prompt_version ? ' · ' + h.prompt_version : '') + ': ' + h.reason));
+      }); parent.appendChild(history);
+    }
+  }
+
+  function loadLensClaims(cluster) {
+    var project = state.project, request = ++lens.claimRequest;
+    if (!project) return Promise.resolve();
+    return api('/api/claims?project=' + encodeURIComponent(project) +
+      (cluster ? '&cluster=' + encodeURIComponent(cluster) : '')).then(function (data) {
+      if (project !== state.project || request !== lens.claimRequest) return;
+      function paperLabel(id) {
+        var paper = (data.papers || {})[id];
+        return paper ? (paper.title || 'Untitled paper') + (paper.year != null ? ' (' + paper.year + ')' : '') : 'Unknown paper';
+      }
+      var list = $('lens-claims-clusters'), detail = $('lens-claims-detail');
+      list.replaceChildren(); detail.replaceChildren();
+      if (!data.clusters.length) list.appendChild(lensNode('p', 'Extract and cluster claims to see the landscape.', 'hint'));
+      data.clusters.forEach(function (c) {
+        var row = lensNode('article', null, 'lens-row');
+        row.appendChild(lensButton(c.label, function () { loadLensClaims(c.cluster_id); }));
+        lensBadges(row, c.single_source ? ['single_source'] : [], c.contradicting_papers ? ['contradicted'] : []);
+        if (c.replication_count) lensBadges(row, ['Replicated ×' + c.replication_count], []);
+        row.appendChild(lensNode('p', c.papers.length + ' papers · Evidence strength ' + c.strength +
+          ' · ' + c.cited_by_count + ' citations · Origin: ' + paperLabel(c.origin_paper_id), 'hint'));
+        if (c.later_citing_papers.length) row.appendChild(lensNode('p', 'Later citing papers: ' + c.later_citing_papers.map(paperLabel).join(', '), 'hint'));
+        list.appendChild(row);
+      });
+      var evidence = {}; data.evidence.forEach(function (e) { evidence[e.id] = e; });
+      data.claims.forEach(function (claim) {
+        var row = lensNode('article', null, 'lens-row');
+        row.appendChild(lensNode('h3', claim.text));
+        row.appendChild(lensNode('p', paperLabel(claim.paper_id) + ' · ' + lensLabel(claim.type) + ' · ' + lensLabel(claim.polarity), 'meta'));
+        lensBadges(row, [claim.status], []);
+        var cards = lensNode('details'); cards.appendChild(lensNode('summary', 'Cited evidence'));
+        lensEvidence(cards, claim.evidence_ids.map(function (id) { return evidence[id]; }).filter(Boolean));
+        row.appendChild(cards);
+        var actions = lensNode('div', null, 'lens-actions');
+        ['accept', 'reject'].forEach(function (action) {
+          actions.appendChild(lensButton(lensLabel(action), function () {
+            post('/api/claims/review', { id: claim.id, action: action }).then(function () {
+              if (project === state.project) loadLensClaims(cluster);
+            }).catch(function (e) { toast(e.message); });
+          }));
+        }); row.appendChild(actions); detail.appendChild(row);
+      });
+      data.relations.forEach(function (r) {
+        var row = lensNode('article', null, 'lens-row');
+        var source = data.claims.find(function (c) { return c.id === r.source_claim_id; });
+        var target = data.claims.find(function (c) { return c.id === r.target_claim_id; });
+        row.appendChild(lensNode('h3', (source ? paperLabel(source.paper_id) + ': ' + source.text : 'Unknown claim') + ' → ' +
+          (target ? paperLabel(target.paper_id) + ': ' + target.text : 'Unknown claim')));
+        lensBadges(row, [r.relation, r.status], []); row.appendChild(lensNode('p', r.explanation));
+        r.causes.forEach(function (cause) {
+          var box = lensNode('section');
+          lensBadges(box, ['hypothesis'], cause.unsupported_hypothesis ? ['unsupported_hypothesis'] : []);
+          box.appendChild(lensNode('p', lensLabel(cause.factor) + ': ' + cause.detail));
+          lensEvidence(box, cause.evidence_ids.map(function (id) { return evidence[id]; }).filter(Boolean)); row.appendChild(box);
+        }); detail.appendChild(row);
+      });
+    }).catch(function (e) { if (project === state.project) toast(e.message); });
+  }
+
   function initLens() {
+    $('lens-claims-extract').onclick = function () {
+      startLensTask('claim_extract', '/api/claims/extract', { profile: $('lens-claims-profile').value || null,
+        force: $('lens-claims-force').checked }, 'lens-claims-status');
+    };
+    $('lens-claims-cluster').onclick = function () {
+      if (!state.project || lens.busy) return;
+      var project = state.project; lensBusy(true);
+      post('/api/claims/cluster', { project: project }).then(function () {
+        if (project === state.project) loadLensClaims();
+      }).catch(function (e) { toast(e.message); }).finally(function () { lensBusy(false); });
+    };
+    $('lens-claims-relate').onclick = function () {
+      startLensTask('claim_relation', '/api/claims/relate', { profile: $('lens-claims-profile').value || null,
+        max_pairs: Number($('lens-claims-pairs').value) }, 'lens-claims-status');
+    };
+    $('lens-screen-fulltext').onclick = function () {
+      saveCriteria().then(function () {
+        startLensTask('screen_fulltext', '/api/screen-fulltext', { profile: $('lens-screen-profile').value || null,
+          top: Number($('screen-n').value) }, 'lens-screen-status');
+      }).catch(function (e) { toast(e.message); });
+    };
+
     api('/api/model-profiles').then(function (profiles) {
       lens.profiles = profiles;
-      ['lens-profile', 'lens-matrix-profile'].forEach(function (id) {
+      ['lens-profile', 'lens-matrix-profile', 'lens-claims-profile', 'lens-screen-profile'].forEach(function (id) {
         profiles.forEach(function (p) {
           var option = lensNode('option', p.name + ' · ' + p.model + (p.remote ? ' (cloud)' : ''));
           option.value = p.name; $(id).appendChild(option);
@@ -1579,10 +1729,10 @@
     $('pdfs-export').onchange = function () { store.set('pdfs-export', this.checked); setMode(state.mode); };
     setMode(store.get('mode', 'similar'));
     var linked = /^#run=([\w-]+)$/.exec(location.hash);  // a bookmarked search; never set automatically
-    showView(/^#(recents|library|ask|matrix)$/.test(location.hash) ? location.hash.slice(1) : 'new');
+    showView(/^#(recents|library|ask|matrix|claims)$/.test(location.hash) ? location.hash.slice(1) : 'new');
     if (linked) loadRun(linked[1]);
     window.addEventListener('hashchange', function () {
-      if (/^#(ask|matrix|recents|library)$/.test(location.hash)) showView(location.hash.slice(1));
+      if (/^#(ask|matrix|claims|recents|library)$/.test(location.hash)) showView(location.hash.slice(1));
     });
     $('sort').value = state.sort;
 

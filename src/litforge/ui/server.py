@@ -31,6 +31,7 @@ from pydantic import ValidationError
 
 from litforge.analysis import ask as answers
 from litforge.analysis import audit as audits
+from litforge.analysis import claim_graph, claims
 from litforge.analysis import matrix as matrices
 from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.review import record_review
@@ -50,6 +51,7 @@ from litforge.parsing.vision import OllamaVision, Vision, enhance_project
 from litforge.parsing.vision_setup import OllamaSetup
 from litforge.pipeline import add_pdfs
 from litforge.projects import MARK_SCOPES, ProjectNotFound, create_project, delete_project, get_project_id, set_active
+from litforge.screening import active, fulltext
 from litforge.screening.criteria import load_criteria
 from litforge.screening.llm import Llm, LlmError, ollama_from_config
 from litforge.screening.run import screen_run
@@ -170,7 +172,7 @@ class App:
     def lens_job(self, request: api.LensRequest) -> Job:
         conn = self.db()
         try:
-            if request.task == 'ask':
+            if request.task in ('ask', 'claim_extract', 'claim_relation', 'screen_fulltext'):
                 project = request.project or ''
             else:
                 pid = (get_run(conn, request.run_id).project_id if request.task == 'audit'
@@ -199,6 +201,22 @@ class App:
                     audits.audit_answer(conn, gateway, request.run_id, request.profile, request.approved)
                     job.report = api.lens_answer(conn, request.run_id)
                     return request.run_id
+                if request.task in ("claim_extract", "claim_relation", "screen_fulltext"):
+                    if not request.project:
+                        raise ValueError("choose a project")
+                    pid = get_project_id(conn, request.project)
+                    phase2: claims.ClaimsResult | claim_graph.RelationsResult | fulltext.FulltextReport
+                    if request.task == "claim_extract":
+                        phase2 = claims.extract_claims(conn, gateway, pid, request.paper_ids, request.profile,
+                                                       request.approved, request.force)
+                    elif request.task == "claim_relation":
+                        phase2 = claim_graph.classify_relations(conn, gateway, pid, request.max_pairs, request.profile,
+                                                               request.approved, request.force)
+                    else:
+                        phase2 = fulltext.screen_fulltext(conn, gateway, pid, request.top, request.profile,
+                                                        request.approved, request.force, request.paper_ids)
+                    job.report = phase2.model_dump()
+                    return phase2.run_id
                 result = matrices.extract_matrix(conn, gateway, request.matrix_id, request.paper_ids,
                                                   request.profile, request.approved, request.force)
                 job.report = api.lens_matrix(conn, request.matrix_id)
@@ -694,12 +712,24 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
 
         def _is_lens(self, path: str) -> bool:
             return path in ('/api/ask', '/api/audit', '/api/preview', '/api/review', '/api/matrices') or \
-                path.startswith(('/api/answers/', '/api/matrices/'))
+                path.startswith(('/api/answers/', '/api/matrices/', '/api/claims')) or \
+                path in ('/api/queue', '/api/screen-fulltext')
 
         def _lens(self, path: str, query: dict[str, str], body: dict[str, Any] | None) -> None:
             conn = app.db()
             try:
                 if body is None:
+                    if path.startswith("/api/claims") or path == "/api/queue":
+                        phase2_pid = get_project_id(conn, query.get("project", ""))
+                        if path == "/api/queue":
+                            return self._json([i.model_dump() for i in active.review_queue(
+                                conn, phase2_pid, int(query.get("limit", "20")))])
+                        if path == "/api/claims/landscape":
+                            return self._json([i.model_dump() for i in claim_graph.claim_landscape(conn, phase2_pid)])
+                        if path == "/api/claims":
+                            return self._json(api.lens_claims(conn, phase2_pid, query.get("cluster")))
+                        if match := re.fullmatch(r"/api/claims/clusters/([\w-]+)", path):
+                            return self._json(api.lens_claims(conn, phase2_pid, match[1]))
                     if path == '/api/review':
                         pid = get_project_id(conn, query['project']) if query.get('project') else None
                         return self._json(api.lens_reviews(conn, pid))
@@ -719,10 +749,22 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                             return self._send(200, content.encode(), types[fmt] + '; charset=utf-8', headers)
                         return self._json(api.lens_matrix(conn, match[1]))
                 else:
-                    if path in ('/api/preview', '/api/ask', '/api/audit') or path.endswith('/extract'):
+                    if path == "/api/claims/cluster":
+                        phase2_pid = get_project_id(conn, str(body.get("project") or ""))
+                        return self._json([c.model_dump() for c in claim_graph.cluster_claims(
+                            conn, phase2_pid, float(body.get("threshold", .55)))])
+                    if path == "/api/claims/review":
+                        claim_review = api.ClaimReviewRequest.model_validate(body)
+                        return self._json(claims.review_claim(conn, claim_review.id, claim_review.action,
+                                                            claim_review.text, claim_review.reason).model_dump())
+                    if path in ('/api/preview', '/api/ask', '/api/audit', '/api/claims/relate',
+                                '/api/claims/extract', '/api/screen-fulltext') or path.endswith('/extract'):
                         values = dict(body)
                         if path != '/api/preview':
-                            values['task'] = {'/api/ask': 'ask', '/api/audit': 'audit'}.get(path, 'matrix_extract')
+                            values['task'] = {'/api/ask': 'ask', '/api/audit': 'audit',
+                                              '/api/claims/extract': 'claim_extract',
+                                              '/api/claims/relate': 'claim_relation',
+                                              '/api/screen-fulltext': 'screen_fulltext'}.get(path, 'matrix_extract')
                             if values['task'] == 'matrix_extract':
                                 match = re.fullmatch(r'/api/matrices/([\w-]+)/extract', path)
                                 if match is None:

@@ -40,14 +40,24 @@ class MatrixTarget(BaseModel):
     value: str | int | float | bool | None = None
 
 
+class ScreeningTarget(BaseModel):
+    paper: str = Field(min_length=1)
+    relevant: bool = Field(strict=True)
+
+
 class RetrievalBenchmark(BaseModel):
     name: str = Field(min_length=1)
-    questions: list[BenchmarkQuestion] = Field(min_length=1)
+    questions: list[BenchmarkQuestion] = Field(default_factory=list)
     matrix: list[MatrixTarget] = Field(default_factory=list)
+    screening: list[ScreeningTarget] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def unique_ids(self) -> RetrievalBenchmark:
         ids = [q.id for q in self.questions]
+        if not self.questions and not self.screening:
+            raise ValueError("benchmark needs questions or screening labels")
+        if len({t.paper for t in self.screening}) != len(self.screening):
+            raise ValueError("screening papers must be unique")
         if len(ids) != len(set(ids)):
             raise ValueError("question IDs must be unique")
         return self
@@ -97,6 +107,8 @@ def _matches(conn: sqlite3.Connection, hit: SearchHit, target: RetrievalTarget) 
 
 def evaluate_retrieval(conn: sqlite3.Connection, bench: RetrievalBenchmark, k: int = 10,
                        project_id: str | None = None, retriever: Retriever = retrieve_for_question) -> RetrievalReport:
+    if not bench.questions:
+        raise ValueError("benchmark has no retrieval questions")
     if k < 1:
         raise ValueError("k must be positive")
     run_id = start_run(conn, "eval_retrieval", project_id, bench.model_dump(), {"k": k})
@@ -225,4 +237,63 @@ def evaluate_matrix(conn: sqlite3.Connection, bench: RetrievalBenchmark, matrix_
         return report
     except Exception:
         finish_run(conn, run_id, "error", {}, "matrix evaluation failed")
+        raise
+
+
+class ScreeningStageReport(BaseModel):
+    papers: int
+    screened: int
+    false_negative_rate: float
+    exclusion_rate: float
+    uncertain_rate: float
+    shortlist_recall: float
+
+
+class ScreeningReport(BaseModel):
+    run_id: str
+    name: str
+    threshold: float
+    stages: dict[str, ScreeningStageReport]
+    passed: bool
+
+
+def evaluate_screening(conn: sqlite3.Connection, bench: RetrievalBenchmark, project_id: str,
+                       threshold: float = .05) -> ScreeningReport:
+    if not bench.screening:
+        raise ValueError("benchmark has no screening labels")
+    if not 0 <= threshold <= 1:
+        raise ValueError("false-negative threshold must be between 0 and 1")
+    run_id = start_run(conn, "eval_screening", project_id, bench.model_dump(), {"threshold": threshold})
+    try:
+        members = [r[0] for r in conn.execute("SELECT paper_id FROM project_papers WHERE project_id=?", (project_id,))]
+        resolved: dict[str, bool] = {}
+        for target in bench.screening:
+            matches = [p for p in members if _paper_matches(conn, p, target.paper)]
+            if len(matches) != 1:
+                raise ValueError("screening target must resolve to one paper in project: " + target.paper)
+            paper_id = matches[0]
+            if paper_id in resolved and resolved[paper_id] != target.relevant:
+                raise ValueError("conflicting screening labels for paper: " + paper_id)
+            resolved[paper_id] = target.relevant
+        stages = {}
+        for stage, table in (("S1", "screening_results"), ("S2", "fulltext_screening")):
+            excluded = uncertain = fn = screened = 0
+            relevant = sum(label for label in resolved.values())
+            for paper, label in resolved.items():
+                row = conn.execute(f"SELECT decision FROM {table} WHERE project_id=? AND paper_id=?",
+                                   (project_id, paper)).fetchone()
+                decision = row[0] if row else "uncertain"
+                screened += row is not None
+                excluded += decision == "exclude"
+                uncertain += decision == "uncertain"
+                fn += label and decision == "exclude"
+            stages[stage] = ScreeningStageReport(papers=len(resolved), screened=screened,
+                false_negative_rate=fn / relevant if relevant else 0, exclusion_rate=excluded / len(resolved),
+                uncertain_rate=uncertain / len(resolved), shortlist_recall=1 - fn / relevant if relevant else 1)
+        report = ScreeningReport(run_id=run_id, name=bench.name, threshold=threshold, stages=stages,
+                                 passed=all(s.false_negative_rate <= threshold for s in stages.values()))
+        finish_run(conn, run_id, "ok", report.model_dump())
+        return report
+    except Exception:
+        finish_run(conn, run_id, "error", {}, "screening evaluation failed")
         raise

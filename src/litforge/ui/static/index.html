@@ -18,6 +18,7 @@
   <button class="nav-item" data-view="library" title="All papers LitForge knows, across projects">Library</button>
   <button class="nav-item" data-view="ask" title="Ask the current project using cited library evidence">Ask</button>
   <button class="nav-item" data-view="matrix" title="Compare studies in the current project">Matrix</button>
+  <button class="nav-item" data-view="claims" title="Explore cited claims and disagreements in this project">Claims</button>
   <h3 title="A project collects the papers, ✓/✗ marks and exports of one review">Projects</h3>
   <div class="side-list" id="side-projects"></div>
   <h3 title="Your latest searches; click one to reopen it with its marks">Recent</h3>
@@ -173,6 +174,25 @@
     </div>
   </section>
 
+  <section id="view-claims" class="view" hidden>
+    <div class="viewhead"><h2>Claims</h2><span class="meta">Explore findings, replications and disagreements</span></div>
+    <p class="hint">Possible causes are hypotheses.</p>
+    <div class="card lens-panel">
+      <div class="lens-actions">
+        <label class="f" for="lens-claims-profile">Model profile</label>
+        <select id="lens-claims-profile" aria-label="Claims model profile"><option value="">Configured default</option></select>
+        <label class="check"><input type="checkbox" id="lens-claims-force"> Re-extract cached claims</label>
+        <button class="btn accent" id="lens-claims-extract" data-lens-work>Extract claims</button>
+        <button class="btn" id="lens-claims-cluster" data-lens-work>Cluster claims</button>
+        <label class="f" for="lens-claims-pairs">Pair limit</label><input type="number" id="lens-claims-pairs" min="1" value="200">
+        <button class="btn" id="lens-claims-relate" data-lens-work>Assess relations</button>
+      </div>
+      <p class="hint" id="lens-claims-status" role="status" aria-live="polite"></p>
+      <div id="lens-claims-clusters" class="lens-rows"></div>
+      <div id="lens-claims-detail" class="lens-rows"></div>
+    </div>
+  </section>
+
   <section id="view-matrix" class="view" hidden>
     <div class="viewhead"><h2>Matrix</h2><span class="meta">Compare studies in the current project</span></div>
     <div class="card lens-panel">
@@ -220,7 +240,7 @@
           <span class="meta" id="screen-summary"></span></summary>
         <div class="screen-body">
           <p class="hint">A local model reads each paper's title and abstract and checks it against these criteria. It only
-            suggests include / uncertain / exclude; your ✓/✗ marks decide. Nothing leaves this computer.</p>
+            suggests include / uncertain / exclude; your ✓/✗ marks decide. Title/abstract screening uses the local model; full-text screening uses the selected profile.</p>
           <label class="f" for="crit-question">Research question</label>
           <textarea id="crit-question" rows="2" placeholder="e.g. How does network directionality affect synchronization of excitatory neurons?"></textarea>
           <div class="crit-grid">
@@ -236,6 +256,10 @@
               title="How many papers, in review-priority order, the model reads"> papers
             <button class="btn small accent" id="btn-screen" title="Save the criteria and let the local model screen the papers (runs in the background)">Screen</button>
             <span class="hint" id="screen-model"></span>
+            <label for="lens-screen-profile">Full-text model profile</label>
+            <select id="lens-screen-profile" aria-label="Full-text model profile"><option value="">Configured default</option></select>
+            <button class="btn small" id="lens-screen-fulltext" data-lens-work>Screen full text (S2)</button>
+            <span class="hint" id="lens-screen-status" role="status" aria-live="polite"></span>
           </div>
         </div>
       </details>
@@ -247,6 +271,7 @@
           <button class="toggle" id="t-hide" title="Hide papers you marked not relevant">Hide ✗</button>
           <select id="sort" title="Order of the list. Review priority mixes relevance and importance">
             <option value="score">Sort: review priority</option>
+            <option value="queue">Sort: Review queue</option>
             <option value="screening" data-screen>Sort: screening</option>
             <option value="relevance">Sort: relevance</option>
             <option value="importance">Sort: importance</option>

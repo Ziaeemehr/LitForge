@@ -425,3 +425,81 @@ def test_model_profiles_are_local_first_and_public(lens_server: LensServer) -> N
     assert profiles[-1]['remote']
     assert all(set(p) == {'name', 'provider', 'model', 'remote'} for p in profiles)
     assert SECRET not in json.dumps(profiles) and 'private.example' not in json.dumps(profiles)
+
+
+def test_phase2_claims_queue_and_screening(lens_server: LensServer) -> None:
+    server = lens_server
+    conn = server.app.db()
+    try:
+        from litforge.screening.criteria import Criteria, save_criteria
+        save_criteria(conn, 'proj', Criteria(question='gain'))
+    finally:
+        conn.close()
+    def reply(m: list[dict[str, str]]) -> dict[str, Any]:
+        if 'Classify' in m[0]['content']:
+            return {'relation': 'replicates', 'explanation': UNTRUSTED, 'possible_causes': []}
+        if 'Screen' in m[0]['content']:
+            return {'relevance': 4, 'inclusion': [], 'exclusion': [], 'reason': UNTRUSTED}
+        return {'claims': [{'text': UNTRUSTED, 'type': 'finding', 'polarity': 'positive',
+                            'evidence_ids': [evidence_id(m)]}]}
+    fake = FakeLlm(reply)
+    server.app.make_gateway = lambda c: ModelGateway(c, server.app.config, providers={'local': fake, 'paid': fake})
+    status, plan = server.call('/api/preview', {'task': 'claim_extract', 'project': 'demo', 'profile': 'paid'})
+    assert status == 200 and plan['requires_approval']
+    assert server.call('/api/claims/extract', {'project': 'demo', 'profile': 'paid'})[0] == 403
+    job = server.job('/api/claims/extract', {'project': 'demo'})
+    assert job['status'] == 'done', job
+    assert server.call('/api/claims/cluster', {'project': 'demo'})[0] == 200
+    status, data = server.call('/api/claims?project=demo')
+    assert status == 200 and data['claims'][0]['text'] == UNTRUSTED
+    assert data['evidence'][0]['text'].startswith('Results')
+    cid = data['claims'][0]['id']
+    assert server.call('/api/claims/review', {'id': cid, 'action': 'accept'})[0] == 200
+    assert server.call('/api/claims/landscape?project=demo')[1][0]['single_source']
+    assert server.job('/api/claims/relate', {'project': 'demo'})['status'] == 'done'
+    job = server.job('/api/screen-fulltext', {'project': 'demo'})
+    assert job['status'] == 'done', job
+    status, queue = server.call('/api/queue?project=demo')
+    assert status == 200 and queue[0]['stage'] == 'S2' and queue[0]['reason']
+    assert server.call('/api/marks', {'project': 'demo', 'paper_ids': ['p'], 'mark': 'relevant'})[0] == 200
+    assert server.call('/api/queue?project=demo')[1] == []
+    _, paper = server.call('/api/papers/p?project=demo')
+    assert paper['fulltext_screening']['decision'] == 'include'
+    assert paper['screening_history'][-1]['source'] == 'human'
+
+
+@pytest.mark.parametrize('path', ['/api/claims/extract', '/api/claims/cluster', '/api/claims/relate',
+                                 '/api/claims/review', '/api/screen-fulltext'])
+def test_phase2_posts_require_same_origin(lens_server: LensServer, path: str) -> None:
+    assert lens_server.call(path, {}, origin='https://attacker.example')[0] == 403
+
+
+@pytest.mark.parametrize(('task', 'path'), [('claim_extract', '/api/claims/extract'),
+                                          ('screen_fulltext', '/api/screen-fulltext')])
+def test_phase2_remote_jobs_and_invalid_inputs(lens_server: LensServer, task: str, path: str) -> None:
+    server = lens_server
+    conn = server.app.db()
+    try:
+        from litforge.screening.criteria import Criteria, save_criteria
+        save_criteria(conn, 'proj', Criteria(question='gain'))
+    finally:
+        conn.close()
+    def reply(m: list[dict[str, str]]) -> dict[str, Any]:
+        if task == 'claim_extract':
+            return {'claims': [{'text': UNTRUSTED, 'type': 'finding', 'polarity': 'positive',
+                                'evidence_ids': [evidence_id(m)]}]}
+        return {'relevance': 3, 'reason': UNTRUSTED}
+    fake = FakeLlm(reply)
+    server.app.make_gateway = lambda c: ModelGateway(c, server.app.config, providers={'paid': fake})
+    body = {'project': 'demo', 'profile': 'paid'}
+    status, plan = server.call('/api/preview', {**body, 'task': task})
+    assert status == 200 and plan['number_of_calls'] == 1 and fake.calls == 0
+    assert server.call(path, body)[0] == 403
+    assert server.call(path, {**body, 'approved': 'true'})[0] == 400
+    assert server.call(path, {**body, 'profile': 'missing'})[0] == 400
+    assert server.job(path, {**body, 'approved': True})['status'] == 'done'
+    assert fake.calls == 1
+    assert server.call('/api/claims?project=unknown')[0] in (400, 404)
+    assert server.call('/api/queue?project=demo&limit=0')[0] == 400
+    assert server.call('/api/claims/review', {'id': 'missing', 'action': 'accept'})[0] == 404
+    assert server.call('/api/claims/cluster', {'project': 'demo', 'threshold': 2})[0] == 400

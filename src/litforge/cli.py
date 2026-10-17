@@ -566,10 +566,18 @@ def screen(
     run: Annotated[str | None, typer.Option("--run", help="Run id (default: the project's latest run)")] = None,
     top: Annotated[int | None, typer.Option(help="How many top papers of the run to screen")] = None,
     model: Annotated[str | None, typer.Option(help="Ollama model (default: screening.model)")] = None,
+    fulltext: Annotated[bool, typer.Option("--fulltext")] = False,
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+    approve: Annotated[bool, typer.Option("--approve")] = False,
+    preview: Annotated[bool, typer.Option("--preview")] = False,
     project: ProjectOpt = None,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Screen a run's top papers against the project's criteria with a local model (set criteria in the web UI)."""
+    if fulltext:
+        from litforge.analysis.claim_commands import fulltext as run_fulltext
+        run_fulltext(ctx, project, top, profile, approve, preview, as_json)
+        return
     st = _state(ctx)
     conn = st.db()
     name, pid = _project(st, conn, project, required=True)

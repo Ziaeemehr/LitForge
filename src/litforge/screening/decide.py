@@ -1,6 +1,7 @@
 """Deterministic screening decision from the model's structured answer.
 
-- exclude   if any exclusion criterion is `violated` (never when the abstract is missing);
+- exclude   if an exclusion criterion is `violated` with a verified quote and an abstract;
+- uncertain if exclusions are violated without a verified quote or without an abstract;
 - include   if no inclusion criterion is `not_met` and relevance >= 3;
 - uncertain otherwise.
 score = 0.5 * relevance/5 + 0.5 * inclusion fraction (met 1, unclear 0.5, not_met 0); relevance/5 alone
@@ -65,8 +66,12 @@ def decide(raw: dict[str, Any], c: Criteria, title: str | None, abstract: str | 
         relevance = 0
     inclusion = _items(raw.get("inclusion"), c.include, INCLUSION, source)
     exclusion = _items(raw.get("exclusion"), c.exclude, EXCLUSION, source)
+    reason = str(raw.get("reason") or "").strip()
     if any(r.status == "violated" for r in exclusion):
-        decision = "exclude" if (abstract or "").strip() else "uncertain"  # a missing abstract is not evidence
+        verified = any(r.status == "violated" and r.verified is True for r in exclusion)
+        decision = "exclude" if verified and (abstract or "").strip() else "uncertain"
+        if not verified:
+            reason = (reason + " Exclusion quote not verified.").strip()
     elif all(r.status != "not_met" for r in inclusion) and relevance >= INCLUDE_MIN_RELEVANCE:
         decision = "include"
     else:
@@ -75,7 +80,7 @@ def decide(raw: dict[str, Any], c: Criteria, title: str | None, abstract: str | 
     if inclusion:
         score = 0.5 * score + 0.5 * sum(_MET_VALUE[r.status] for r in inclusion) / len(inclusion)
     return Decision(decision=decision, score=round(score, 4), relevance=relevance, inclusion=inclusion,
-                    exclusion=exclusion, reason=str(raw.get("reason") or "").strip())
+                    exclusion=exclusion, reason=reason)
 
 
 def failed_decision(c: Criteria, error: str) -> Decision:

@@ -28,7 +28,9 @@ def test_include_when_all_met_and_relevant() -> None:
 
 
 def test_exclude_when_any_exclusion_violated() -> None:
-    assert decide(raw(exc=("violated",)), C, "Title", ABSTRACT).decision == "exclude"
+    answer = raw(exc=("violated",))
+    answer["exclusion"][0]["evidence"] = "neural mass model"
+    assert decide(answer, C, "Title", ABSTRACT).decision == "exclude"
 
 
 def test_uncertain_when_inclusion_not_met_or_low_relevance() -> None:
@@ -111,3 +113,18 @@ def test_fingerprint_changes_with_model_criteria_and_text() -> None:
 def test_infinite_relevance_does_not_crash() -> None:
     assert decide({"relevance": float("inf")}, C, "T", ABSTRACT).relevance == 0
     assert decide({"relevance": float("nan")}, C, "T", ABSTRACT).relevance == 0
+
+
+@pytest.mark.parametrize("quote", ["", "Invented animal experiment"])
+def test_unverified_exclusion_is_uncertain_with_reason(quote: str) -> None:
+    answer = raw(exc=("violated",))
+    answer["exclusion"][0]["evidence"] = quote
+    result = decide(answer, C, "Title", ABSTRACT)
+    assert result.decision == "uncertain"
+    assert "exclusion quote not verified" in result.reason.lower()
+
+
+def test_verified_title_quote_does_not_override_missing_abstract() -> None:
+    answer = raw(exc=("violated",))
+    answer["exclusion"][0]["evidence"] = "Title"
+    assert decide(answer, C, "Title", None).decision == "uncertain"

@@ -253,13 +253,13 @@ def matrix_list(ctx: typer.Context, project: Project = None) -> None:
 
 
 def brief(ctx: typer.Context, run_id: str, matrix: Annotated[str | None, typer.Option("--matrix")] = None,
-          out: Output = None) -> None:
+          out: Output = None, claims: Annotated[bool, typer.Option("--claims")] = False) -> None:
     """Write a cited research brief with method and evidence appendix."""
     with _context(ctx) as (st, conn, _):
         run = get_run(conn, run_id)
         matrix_id = _matrix_id(conn, matrix, run.project_id) if matrix else None
         destination = out or st.paths.exports_root / f"brief-{run_id}.md"
-        typer.echo(str(write_brief(conn, run_id, matrix_id, out=destination)))
+        typer.echo(str(write_brief(conn, run_id, matrix_id, out=destination, claims=claims)))
 
 
 def eval_answers(ctx: typer.Context, benchmark: Path, profile: Profile = None, approve: Approve = False,
@@ -288,6 +288,8 @@ def eval_matrix(ctx: typer.Context, benchmark: Path, matrix: Annotated[str, type
 
 
 def register(app: typer.Typer, eval_app: typer.Typer) -> None:
+    from litforge.analysis.claim_commands import register as register_claims
+    register_claims(app, eval_app)
     app.add_typer(matrix_app, name="matrix")
     app.add_typer(review_app, name="review")
     app.command("audit")(audit)

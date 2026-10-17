@@ -15,7 +15,7 @@ from litforge.analysis.runs import get_run
 
 
 def write_brief(conn: sqlite3.Connection, answer_run_id: str, matrix_id: str | None = None,
-                *, out: Path) -> Path:
+                *, out: Path, claims: bool = False) -> Path:
     answer = get_answer(conn, answer_run_id)
     run = get_run(conn, answer_run_id)
     config = json.loads(run.config_json)
@@ -73,6 +73,11 @@ def write_brief(conn: sqlite3.Connection, answer_run_id: str, matrix_id: str | N
         quote = inert(excerpt(s.text))
         lines.extend([f"[^{s.id}]: {inert(s.citation)}; section={inert(s.section or s.kind)}; evidence ID={s.id}; "
                       f"parse={s.parse_run_id}; parser={s.parser} {s.parser_version} — \"{quote}\""])
+    if claims:
+        if run.project_id is None:
+            raise ValueError("claim landscape requires a project-scoped answer")
+        from litforge.analysis.claim_graph import landscape_markdown
+        lines.extend(["", landscape_markdown(conn, run.project_id)])
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out

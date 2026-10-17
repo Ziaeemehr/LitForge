@@ -39,8 +39,9 @@ Relevance counts shared words and citations; it does not read the paper. Screeni
 model (Ollama, default `qwen3:4b`) reads the title and abstract of a run's top papers and checks them
 against the project's research question and inclusion/exclusion criteria. It suggests **include**,
 **uncertain** or **exclude** with a reason and quotes from the abstract (quotes not found in the
-abstract are flagged). The decision and a 0–1 score are computed by fixed rules, not by the model;
-a paper without an abstract is never excluded. Your ✓/✗ marks are separate and always decide.
+title or abstract are flagged). A violated exclusion criterion requires a verified quote to exclude;
+otherwise the decision is uncertain with the reason “exclusion quote not verified”. The decision and a
+0–1 score are computed by fixed rules, not by the model; a paper without an abstract is never excluded. Your ✓/✗ marks are separate and always decide.
 Nothing leaves your computer.
 
 1. `ollama pull qwen3:4b` once (`qwen3:8b` is slower but more careful: set `screening.model`).
@@ -301,3 +302,78 @@ or changed cells. Unit and retrieval warnings appear above the table. Number and
 numbers and `true`/`false`; categorical edits use an exact option. A blank profile uses the configured
 local default. Every remote action shows provider, model, evidence count, tokens and maximum cost
 before confirmation. Press **?** for the guide and **Esc** to close the drawer or a dialog.
+
+## Claims, full-text screening and review queue
+
+```bash
+litforge claims extract -p my-review --profile local --preview
+litforge claims extract -p my-review --paper PAPER_ID  # repeat --paper to select papers
+litforge claims cluster -p my-review
+litforge claims relate -p my-review --max-pairs 200
+litforge claims show -p my-review --cluster CLUSTER_ID --json
+litforge claims landscape -p my-review
+litforge claims review accept CLAIM_ID
+litforge claims review reject CLAIM_ID --reason "source disagrees"
+litforge claims review edit CLAIM_ID --text "Corrected finding" --reason "checked source"
+litforge screen --fulltext -p my-review --top 100
+litforge queue -p my-review -n 20 --json
+litforge brief ANSWER_RUN_ID --claims -o brief.md
+litforge eval screening benchmark.yaml -p my-review --json
+```
+
+Claim extraction uses result/discussion/conclusion/abstract sections, with project-question FTS
+retrieval as fallback, then the first chunks of the paper (body before front matter, up to eight).
+Papers without usable text are counted as `no_text` in the extraction report and CLI output.
+Each paper yields at most eight cited claims; unknown IDs are removed,
+uncited claims dropped, identical claims within a paper deduplicated. Cache keys include the current
+parse, provider, model and prompt. `--force` re-extracts while preserving human reviews and edits.
+Clustering uses TF-IDF with an outcome-match boost and links only claims from different papers.
+Relations require model assessment; polarity rules only prioritise candidate contradictions.
+All possible causes are labelled hypotheses; missing citations additionally flag an unsupported hypothesis.
+The landscape displays distinct-paper evidence strength separately from citation popularity.
+
+S2 retrieves up to three chunks per criterion and makes one call per parsed paper. A violated exclusion
+must cite an exact quote inside its own transmitted evidence span (whitespace may vary); otherwise its
+exclude suggestion becomes uncertain. Unparsed papers remain S1 and appear in `needs_pdf`.
+S1 suggestions, S2 decisions and human ✓/✗ changes append reasons and criteria versions to immutable
+screening history. S1 also requires a verified exclusion quote and keeps the missing-abstract rule. Its
+`screen-v2` prompt adds an untrusted-text instruction, so earlier cached S1 results are screened again.
+Marks remain human decisions.
+The queue only ranks unmarked papers; it never changes marks or model decisions.
+
+In the UI, **Claims** lists clusters, claims, relations, hypotheses and reusable evidence cards, with
+accept/reject controls. Results show **S2** badges, nearby-mark relevance predictions and a **Review queue**
+sort with reason tooltips. Paper details include S2 evidence and screening history. Claims and full-text
+screening offer model-profile selectors and the same remote-preview confirmation as Ask/Matrix.
+CLI model commands accept `--profile`, `--approve` and `--preview`; preview makes no model calls.
+Budget exhaustion preserves completed work and reports `budget_stopped`.
+
+Benchmarks may contain only screening labels:
+
+```yaml
+name: screening-check
+screening:
+  - paper: PAPER_ID  # also accepts a DOI or arXiv ID
+    relevant: true
+```
+
+Evaluation reads stored S1/S2 results, reports each stage's false-negative, exclusion and uncertain rates
+and shortlist recall, and saves an analysis run. Exit code 1 means a false-negative rate exceeds
+`screening.max_false_negative_rate` (default `0.05`). Missing stage results count as uncertain and stay
+on the shortlist; the report also shows how many papers were screened.
+
+Implementation choices where the design leaves a formula or representation open:
+
+- Human marks use stage S3; clearing a mark records uncertain with reason “Mark cleared”.
+- With no model score, uncertainty is 1. Coverage is the mean of the missing-parse and missing-abstract
+  indicators. Boundary similarity averages the five closest marks on each side; kNN uses the five closest
+  overall with similarity weights, returning no prediction when all similarities are zero. Exact ties
+  predict 0.5 and do not constitute disagreement. Queue ties use paper ID.
+- Distinct papers stand in for independence. Similarity alone never proves support or replication: counts
+  use explicit relations, with the earliest dated paper as origin (unknown years sort last, then paper ID).
+  Contradicting relations attribute the challenge to the later paper; replication counts distinct later
+  papers with a replication relation. Contradicting papers are removed from the supporting count.
+- S2 criterion evidence is `{evidence_id, quote}`; IDs outside the transmitted packet are removed and
+  counted as `invalid_citations`. S1 verifies quotes against title and abstract; S2 requires an exact
+  quote in the cited span (allowing whitespace differences). Editing a claim invalidates its model relations until
+  reassessed. Project deletion preserves append-only screening history and human review records.

@@ -59,6 +59,7 @@ class SimilarConfig(BaseModel):
 
 
 class ScreeningConfig(BaseModel):
+    max_false_negative_rate: float = Field(default=0.05, ge=0, le=1)
     model: str = "qwen3:4b"  # any Ollama model; qwen3:8b is slower but more careful
     ollama_url: str = "http://localhost:11434"  # LITFORGE_OLLAMA_URL overrides
     default_top: int = 100  # papers of a run screened when no count is given

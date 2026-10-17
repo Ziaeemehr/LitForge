@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from litforge.analysis import ask as answers
 from litforge.analysis import audit as audits
+from litforge.analysis import claim_graph, claims
 from litforge.analysis import matrix as matrices
 from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.ledger import get_spans
@@ -25,7 +26,9 @@ from litforge.export.markdown import default_export_dir
 from litforge.parsing.canonical import read_canonical, to_markdown
 from litforge.parsing.vision import read_page_markdown
 from litforge.projects import MARK_SCOPES, get_project_id
+from litforge.screening import active, fulltext
 from litforge.screening.criteria import Criteria, criteria_hash, load_criteria, save_criteria
+from litforge.screening.history import append_history
 from litforge.storage.db import now
 
 MARKS = ("relevant", "irrelevant")
@@ -172,6 +175,10 @@ def run_results(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
                 "decision": r["s_decision"], "score": r["s_score"], "error": r["s_error"],
                 "reason": json.loads(r["s_result"]).get("reason", ""), "stale": r["s_hash"] != current},
         })
+    queue = {i.paper_id: i.model_dump() for i in active.review_queue(conn, run["project_id"], 2**31 - 1)}
+    for paper in papers:
+        paper["fulltext_screening"] = fulltext_result(conn, run["project_id"], paper["id"])
+        paper["review_queue"] = queue.get(paper["id"])
     params = json.loads(run["params_json"])
     label = _run_label(conn, run["kind"], params)
     return {"run": {**dict(run), "params": params, "label": label, "stats": json.loads(run["stats_json"])},
@@ -241,6 +248,10 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
         "has_pdf": run is not None, "markdown": markdown, "mark": mark,
         "pdf_url": f"/api/papers/{paper_id}/pdf" if _pdf_path(conn, paths, paper_id) else None,
         "links_in_library": {"cites": cites, "cited_by": cited}, "screening": screening,
+        "fulltext_screening": fulltext_result(conn, project_id, paper_id) if project_id else None,
+        "screening_history": [dict(r) for r in conn.execute(
+            "SELECT * FROM screening_history WHERE project_id=? AND paper_id=? ORDER BY rowid",
+            (project_id, paper_id))] if project_id else [],
     }
 
 
@@ -279,6 +290,12 @@ def paper_file(conn: sqlite3.Connection, paths: Paths, paper_id: str, rel: str) 
 def set_marks(conn: sqlite3.Connection, project: str, paper_ids: list[str], mark: str | None) -> None:
     """Set (or clear, with None) the same mark on several papers at once."""
     project_id = get_project_id(conn, project)
+    if mark is not None and mark not in MARKS:
+        raise ValueError(f"mark must be one of {MARKS}")
+    chash = criteria_hash(load_criteria(conn, project_id))
+    for pid in dict.fromkeys(paper_ids):
+        append_history(conn, project_id, pid, "S3", {"relevant": "include", "irrelevant": "exclude"}.get(
+            mark or "", "uncertain"), "human", chash, "Mark cleared" if mark is None else "Human mark: " + mark)
     if mark is None:
         conn.executemany("DELETE FROM paper_marks WHERE project_id=? AND paper_id=?",
                          [(project_id, pid) for pid in paper_ids])
@@ -351,7 +368,7 @@ def put_criteria(conn: sqlite3.Connection, project: str, body: dict[str, Any]) -
 
 # Evidence Lens adapters: validation and presentation only; analysis owns all model work.
 class LensRequest(BaseModel):
-    task: Literal['ask', 'audit', 'matrix_extract']
+    task: Literal['ask', 'audit', 'matrix_extract', 'claim_extract', 'claim_relation', 'screen_fulltext']
     project: str | None = None
     question: str = ''
     run_id: str = ''
@@ -362,6 +379,8 @@ class LensRequest(BaseModel):
     sensitive: bool = False
     force: bool = False
     paper_ids: list[str] | None = None
+    max_pairs: int = Field(default=200, ge=1)
+    top: int | None = Field(default=None, ge=1)
 
 
 def lens_plan(conn: sqlite3.Connection, gateway: ModelGateway, request: LensRequest) -> dict[str, Any]:
@@ -373,6 +392,17 @@ def lens_plan(conn: sqlite3.Connection, gateway: ModelGateway, request: LensRequ
                                    request.profile, request.sensitive)
     elif request.task == 'audit':
         calls = audits.plan_calls(conn, gateway, request.run_id, request.profile)
+    elif request.task in ("claim_extract", "claim_relation", "screen_fulltext"):
+        if not request.project:
+            raise ValueError("choose a project")
+        pid = get_project_id(conn, request.project)
+        if request.task == "claim_extract":
+            calls = claims.plan_calls(conn, gateway, pid, request.paper_ids, request.profile, request.force)
+        elif request.task == "claim_relation":
+            calls = claim_graph.plan_calls(conn, gateway, pid, request.max_pairs, request.profile, request.force)
+        else:
+            calls = fulltext.plan_calls(conn, gateway, pid, request.top, request.profile,
+                                        request.force, request.paper_ids)
     else:
         calls = matrices.plan_calls(conn, gateway, request.matrix_id, request.paper_ids,
                                     request.profile, request.force)
@@ -445,3 +475,46 @@ def model_profiles(config: Config) -> list[dict[str, Any]]:
     profiles = {**config.models.profiles, "local": config.models.local}
     return [{"name": name, "provider": p.provider, "model": p.model, "remote": p.remote}
             for name, p in sorted(profiles.items(), key=lambda item: (item[1].remote, item[0] != "local", item[0]))]
+
+
+def fulltext_result(conn: sqlite3.Connection, project_id: str, paper_id: str) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM fulltext_screening WHERE project_id=? AND paper_id=?",
+                       (project_id, paper_id)).fetchone()
+    if row is None:
+        return None
+    data = dict(row)
+    data["result"] = json.loads(row["result_json"])
+    data["stale"] = row["criteria_hash"] != criteria_hash(load_criteria(conn, project_id))
+    pages = {r["evidence_id"]: r["page"] for r in conn.execute(
+        "SELECT evidence_id,page FROM run_evidence WHERE run_id=?", (row["run_id"],))}
+    data["evidence"] = [{**s.model_dump(), "page": pages.get(s.id) or s.page}
+                        for s in get_spans(conn, json.loads(row["evidence_ids_json"]))]
+    return data
+
+
+def lens_claims(conn: sqlite3.Connection, project_id: str, cluster_id: str | None = None) -> dict[str, Any]:
+    if cluster_id and not conn.execute("SELECT 1 FROM claim_clusters WHERE id=? AND project_id=?",
+                                       (cluster_id, project_id)).fetchone():
+        raise KeyError(cluster_id)
+    members = claims.list_claims(conn, project_id, cluster_id)
+    ids = {c.id for c in members}
+    clusters = claim_graph.claim_landscape(conn, project_id)
+    paper_ids = {c.paper_id for c in members}
+    for cluster in clusters:
+        paper_ids.update(cluster.papers)
+        paper_ids.update(cluster.later_citing_papers)
+    papers = {r["id"]: {"title": r["title"], "year": r["year"]} for r in conn.execute(
+        "SELECT id,title,year FROM papers WHERE id IN (" + ",".join("?" for _ in paper_ids) + ")",
+        sorted(paper_ids))}
+    return {"claims": [c.model_dump() for c in members], "papers": papers,
+            "clusters": [c.model_dump() for c in clusters],
+            "relations": [r.model_dump() for r in claim_graph.list_relations(conn, project_id)
+                          if r.source_claim_id in ids and r.target_claim_id in ids],
+            "evidence": list({s.id: s.model_dump() for c in members for s in claims.claim_spans(conn, c)}.values())}
+
+
+class ClaimReviewRequest(BaseModel):
+    id: str
+    action: Literal["accept", "reject", "edit"]
+    text: str | None = None
+    reason: str = ""
