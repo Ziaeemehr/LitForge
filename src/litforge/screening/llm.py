@@ -6,6 +6,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from base64 import b64encode
 from collections.abc import Callable
 from typing import Any, Protocol
 
@@ -63,6 +64,29 @@ class OllamaClient:
         if not isinstance(out, dict):
             raise LlmError("model reply is not a JSON object")
         return out
+
+    def vision_json(self, messages: list[dict[str, Any]], schema: dict[str, Any], images: list[bytes],
+                    max_output_tokens: int | None = None) -> dict[str, Any]:
+        if not images:
+            raise LlmError("vision calls require an image")
+        vision_messages = [dict(message) for message in messages]
+        user = next((message for message in reversed(vision_messages) if message.get("role") == "user"), None)
+        if user is None:
+            raise LlmError("vision calls require a user message")
+        user["images"] = [b64encode(image).decode("ascii") for image in images]
+        options: dict[str, Any] = {"temperature": 0}
+        if max_output_tokens is not None:
+            options["num_predict"] = max_output_tokens
+        response = self._call("/api/chat", {"model": self.name, "messages": vision_messages, "stream": False,
+                                            "think": False, "format": schema, "options": options})
+        content = (response.get("message") or {}).get("content", "")
+        try:
+            result = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise LlmError("invalid JSON from vision model") from exc
+        if not isinstance(result, dict):
+            raise LlmError("vision model reply is not a JSON object")
+        return result
 
 
 class FakeLlm:

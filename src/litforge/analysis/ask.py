@@ -9,12 +9,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from litforge.analysis.errors import run_error
+from litforge.analysis.figures import relevant_asset_spans
 from litforge.analysis.gateway import CallPreview, ModelGateway
 from litforge.analysis.ledger import EvidenceSpan, record_spans, to_packet
 from litforge.analysis.prompts import ASK_PROMPT_VERSION, ask_messages
 from litforge.analysis.retrieve import retrieve_for_question
 from litforge.analysis.runs import canonical_json, finish_run, get_run, link_evidence, start_run
-from litforge.analysis.validation import citations, missing_numbers
+from litforge.analysis.validation import citations, image_only_numbers, missing_numbers
+from litforge.indexing.fts import SearchHit, current_runs
 from litforge.llm.evidence import EvidencePacket
 from litforge.storage.db import new_id, now, transaction
 
@@ -77,6 +79,26 @@ class Answer(BaseModel):
     provider: str = ""
 
 
+def _question_spans(conn: sqlite3.Connection, hits: list[SearchHit], question: str,
+                    project_id: str | None) -> list[EvidenceSpan]:
+    spans = [span.model_copy(update={"page": hit.page}) for span, hit in
+             zip(record_spans(conn, hits), hits, strict=True)]
+    seen = {span.id for span in spans}
+    selected_runs: set[tuple[str, str]] = set()
+    for hit in hits:
+        row = conn.execute("SELECT parse_run_id FROM chunks WHERE id=?", (hit.chunk_id,)).fetchone()
+        if row is not None:
+            selected_runs.add((hit.paper_id, row["parse_run_id"]))
+    if not hits:
+        selected_runs.update((row["paper_id"], row["id"]) for row in current_runs(conn, project_id))
+    for paper_id, parse_run_id in sorted(selected_runs):
+        for span in relevant_asset_spans(conn, paper_id, parse_run_id, question):
+            if span.id not in seen:
+                spans.append(span)
+                seen.add(span.id)
+    return spans
+
+
 def validate_sentences(drafts: list[SentenceDraft], packet: EvidencePacket | None
                        ) -> tuple[list[AnswerSentence], list[str]]:
     result: list[AnswerSentence] = []
@@ -95,7 +117,7 @@ def validate_sentences(drafts: list[SentenceDraft], packet: EvidencePacket | Non
         elif kind == "interpretation" and not ids:
             flags.append("uncited_interpretation")
         if missing_numbers(text, ids, packet):
-            flags.append("number_not_in_evidence")
+            flags.append("from_image" if image_only_numbers(text, ids, packet) else "number_not_in_evidence")
         result.append(AnswerSentence(idx=len(result), text=text, kind=kind, evidence_ids=ids, flags=flags))
     return result, invalid
 
@@ -118,10 +140,10 @@ def get_answer(conn: sqlite3.Connection, run_id: str) -> Answer:
 def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_id: str | None = None,
                k: int = 8, profile: str | None = None, sensitive: bool = False) -> list[CallPreview]:
     hits = retrieve_for_question(conn, question, project_id, k)
-    if not hits:
+    spans = _question_spans(conn, hits, question, project_id)
+    if not spans:
         return []
-    spans = record_spans(conn, hits)
-    packet = to_packet(spans, sensitive=sensitive, pages=[h.page for h in hits])
+    packet = to_packet(spans, sensitive=sensitive)
     return [gateway.preview("ask", packet, ask_messages(question, packet, spans), profile=profile)]
 
 
@@ -132,9 +154,8 @@ def ask(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_
                         "sensitive": sensitive}, ASK_PROMPT_VERSION)
     try:
         hits = retrieve_for_question(conn, question, project_id, k)
-        spans = [s.model_copy(update={"page": h.page}) for s, h in
-                 zip(record_spans(conn, hits), hits, strict=True)]
-        link_evidence(conn, run_id, spans, [h.score for h in hits])
+        spans = _question_spans(conn, hits, question, project_id)
+        link_evidence(conn, run_id, spans, [*(h.score for h in hits), *([None] * (len(spans) - len(hits)))])
         model, provider = "", ""
         if spans:
             packet = to_packet(spans, sensitive=sensitive)

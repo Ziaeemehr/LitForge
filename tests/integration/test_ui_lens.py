@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -18,8 +19,10 @@ from lens_fakes import evidence_id, seed
 from test_ui_server import call, wait_job
 
 from litforge.analysis import ask as answers
+from litforge.analysis import gaps
 from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.matrix import MatrixColumn, create_matrix
+from litforge.analysis.runs import start_run
 from litforge.config import Config, ModelProfileConfig, Paths
 from litforge.llm.budget import Pricing
 from litforge.screening.llm import FakeLlm
@@ -466,6 +469,121 @@ def test_phase2_claims_queue_and_screening(lens_server: LensServer) -> None:
     _, paper = server.call('/api/papers/p?project=demo')
     assert paper['fulltext_screening']['decision'] == 'include'
     assert paper['screening_history'][-1]['source'] == 'human'
+
+
+def test_asset_crop_and_analysis_endpoints_require_approval(lens_server: LensServer) -> None:
+    server = lens_server
+    crop = b'only this crop'
+    parsed = server.app.paths.root / 'parsed'
+    parsed.mkdir(parents=True, exist_ok=True)
+    (parsed / 'crop.png').write_bytes(crop)
+    conn = server.app.db()
+    try:
+        conn.execute(
+            """INSERT INTO assets(id,parse_run_id,kind,label,caption,page,bbox_json,path,data_json,quality)
+               VALUES ('asset-ui','rp','table','Table 1','Parameter estimates',1,'[]','parsed/crop.png',NULL,
+               'verified')"""
+        )
+    finally:
+        conn.close()
+
+    class VisionFake:
+        def __init__(self) -> None:
+            self.images: list[list[bytes]] = []
+
+        def vision_json(self, messages: list[dict[str, Any]], schema: dict[str, Any],
+                        images: list[bytes]) -> dict[str, Any]:
+            self.images.append(images)
+            return {'columns': ['Parameter', 'Value'], 'rows': [['gain', '3.25']],
+                    'units': {}, 'footnotes': []}
+
+        def chat_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any]:
+            return {}
+
+    vision = VisionFake()
+    server.app.make_gateway = lambda c: ModelGateway(
+        c, server.app.config, providers={'local': vision, 'paid': vision})
+    status, paper = server.call('/api/papers/p?project=demo')
+    assert status == 200 and paper['assets'][0]['id'] == 'asset-ui'
+    assert server.call('/api/assets/asset-ui/crop') == (200, crop)
+    before = len(vision.images)
+    status, denied = server.call('/api/assets/asset-ui/analyze',
+                                 {'mode': 'table', 'profile': 'paid'})
+    assert status == 403 and denied['preview']['requires_approval']
+    assert len(vision.images) == before and not server.app.jobs
+    job = server.job('/api/assets/asset-ui/analyze',
+                     {'mode': 'table', 'profile': 'paid', 'approved': True})
+    assert job['status'] == 'done', job
+    assert vision.images == [[crop]] and job['report']['evidence'][0]['kind'] == 'table_cell'
+    _, paper = server.call('/api/papers/p?project=demo')
+    assert paper['assets'][0]['analyses'][0]['result']['rows'] == [['gain', '3.25']]
+
+
+def test_gaps_view_design_review_and_export_gate(lens_server: LensServer) -> None:
+    server = lens_server
+    conn = server.app.db()
+    try:
+        evidence_id_row = conn.execute(
+            "SELECT id FROM evidence_spans WHERE paper_id='p' ORDER BY id LIMIT 1").fetchone()
+        # A real single-source claim, so the detector itself finds (and keeps finding) the gap.
+        run_id = start_run(conn, 'claim_extract', 'proj', {}, {})
+        conn.execute("INSERT INTO claim_clusters(id,project_id,label,created_at) VALUES ('cl','proj','lone','now')")
+        conn.execute("""INSERT INTO claims(id,project_id,paper_id,text,canonical_text,canonical_hash,type,polarity,
+                        status,run_id,model,prompt_version,created_at,cluster_id) VALUES ('c1','proj','p','lone',
+                        'lone','c1','finding','positive','accepted',?,'fake','v1','now','cl')""", (run_id,))
+        conn.execute("INSERT INTO claim_evidence(claim_id,evidence_id,relation,strength) "
+                     "VALUES ('c1',?,'supports','direct')", (evidence_id_row['id'],))
+        gap_id = next(g.id for g in gaps.detect_gaps(conn, 'proj') if g.kind == 'single_source_claim')
+    finally:
+        conn.close()
+
+    class ProposalFake:
+        def chat_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any]:
+            cited = re.search(r'"id":"(ev_[^"]+)"', messages[-1]['content'])
+            assert cited
+            evidence = cited.group(1)
+            return {
+                'why_it_matters': [{'text': 'A study supports this candidate.', 'evidence_ids': [evidence],
+                                    'label': 'evidence'}],
+                'minimal_experiment': [{'text': 'Test the proposed alternative.', 'evidence_ids': [],
+                                        'label': 'proposal'}],
+                'data': [{'text': 'Collect outcome data.', 'evidence_ids': [], 'label': 'proposal'}],
+                'controls': [{'text': 'Use a matched control.', 'evidence_ids': [], 'label': 'proposal'}],
+                'outcome': [{'text': 'Compare the measured outcomes.', 'evidence_ids': [], 'label': 'proposal'}],
+                'failure_modes': [{'text': 'Recruitment may be incomplete.', 'evidence_ids': [], 'label': 'proposal'}],
+                'what_model_does_not_know': [{'text': 'The effect size is unknown.', 'evidence_ids': [],
+                                              'label': 'unknown'}],
+            }
+
+    fake = ProposalFake()
+    server.app.make_gateway = lambda c: ModelGateway(c, server.app.config, providers={'local': fake})
+    status, listing = server.call('/api/gaps?project=demo')
+    assert status == 200 and listing[0]['id'] == gap_id and listing[0]['evidence']
+    job = server.job('/api/gaps/design', {'gap_id': gap_id})
+    assert job['status'] == 'done' and job['report']['title'] == 'Research proposal — not a literature finding'
+    card_id = job['report']['id']
+    assert server.call(f'/api/gaps/cards/{card_id}/export')[0] == 400
+    status, reviewed = server.call('/api/gaps/review', {
+        'card_id': card_id, 'action': 'accept', 'reason': 'reviewed in the research console',
+    })
+    assert status == 200 and reviewed['review_status'] == 'accepted'
+    conn = server.app.db()
+    try:
+        review = conn.execute(
+            "SELECT reason FROM human_reviews WHERE target_kind='gap_card' AND target_id=?",
+            (card_id,),
+        ).fetchone()
+        assert review['reason'] == 'reviewed in the research console'
+    finally:
+        conn.close()
+    assert server.call('/api/gaps?project=demo')[1][0]['review_status'] == 'accepted'
+    status, exported = server.call(f'/api/gaps/cards/{card_id}/export')
+    assert status == 200 and 'not a literature finding' in exported['markdown']
+    _, html = server.call('/')
+    _, js = server.call('/static/app.js')
+    assert b'id="view-gaps"' in html and b'id="gaps-refresh"' in html
+    gaps_js = js.split(b'function loadGaps()')[1].split(b'/* ---------- running searches ---------- */')[0]
+    assert b'innerHTML' not in gaps_js and b'textContent' in gaps_js
 
 
 @pytest.mark.parametrize('path', ['/api/claims/extract', '/api/claims/cluster', '/api/claims/relate',

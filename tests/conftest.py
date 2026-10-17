@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -143,7 +144,10 @@ def corpus(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture(autouse=True)
 def _exports_in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default exports go to ~/Downloads/LitForge; tests must never write there."""
+    """Default exports go to ~/Downloads/LitForge; tests must never write there. Settings from the
+    developer's shell (a data directory, a running Ollama) must not leak into tests either."""
+    for name in [n for n in os.environ if n.startswith("LITFORGE_")]:
+        monkeypatch.delenv(name)
     monkeypatch.setenv("LITFORGE_EXPORT_ROOT", str(tmp_path / "exports"))
 
 

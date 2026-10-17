@@ -33,6 +33,7 @@ class EvidenceSpan(BaseModel):
     content_hash: str
     created_at: str
     title: str | None = None
+    from_image: bool = False
 
     @property
     def citation(self) -> str:
@@ -94,5 +95,5 @@ def to_packet(spans: Sequence[EvidenceSpan], sensitive: bool = False,
         raise ValueError("pages must match spans in length")
     selected_pages = pages if pages is not None else [s.page for s in spans]
     return EvidencePacket(items=[EvidenceItem(id=s.id, paper_id=s.paper_id, text=_truncate(s.text, max_chars_per_item),
-                                             page=page, section=s.section)
+                                         page=page, section=s.section, kind=s.kind, from_image=s.from_image)
                                 for s, page in zip(spans, selected_pages, strict=True)], sensitive=sensitive)

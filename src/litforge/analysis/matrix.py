@@ -15,12 +15,13 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from litforge.analysis.ask import ReviewStatus
 from litforge.analysis.errors import run_error
+from litforge.analysis.figures import relevant_asset_spans
 from litforge.analysis.gateway import CallPreview, GatewayError, ModelGateway
 from litforge.analysis.ledger import EvidenceSpan, get_spans, record_spans, to_packet
 from litforge.analysis.markdown_safe import excerpt, inert
 from litforge.analysis.prompts import MATRIX_PROMPT_VERSION, matrix_messages
 from litforge.analysis.runs import canonical_json, finish_run, input_hash, link_evidence, start_run
-from litforge.analysis.validation import citations, missing_numbers, number
+from litforge.analysis.validation import citations, image_only_numbers, missing_numbers, number
 from litforge.indexing.fts import current_runs, search
 from litforge.llm.base import LlmError, LlmUnavailable
 from litforge.llm.budget import BudgetExceeded
@@ -39,16 +40,22 @@ class MatrixColumn(BaseModel):
     type: Literal["text", "number", "categorical", "boolean"]
     unit: str | None = None
     options: list[str] | None = None
+    parameter: bool = False
+    sensitivity_analysis: bool = False
+    sensitivity_for: list[str] = Field(default_factory=list)  # parameter column keys this column tests
 
     @model_validator(mode="after")
     def categorical_options(self) -> MatrixColumn:
         if self.type == "categorical" and (not self.options or len(self.options) != len(set(self.options))):
             raise ValueError("categorical columns require unique options")
+        if self.sensitivity_for and not self.sensitivity_analysis:
+            raise ValueError("sensitivity_for requires a sensitivity-analysis column")
         return self
 
     @property
     def column_hash(self) -> str:
-        return input_hash(self.model_dump(exclude={"key"}))
+        # Only what the extraction prompt depends on; gap-detector metadata must not invalidate cached cells.
+        return input_hash(self.model_dump(include={"label", "instruction", "type", "unit", "options"}))
 
 
 class CellDraft(BaseModel):
@@ -183,7 +190,7 @@ def validate_cell(draft: CellDraft, column: MatrixColumn, packet: EvidencePacket
         if parsed is None:
             flags.append("type_mismatch")
         elif missing_numbers(str(parsed), ids, packet):
-            flags.append("number_not_in_evidence")
+            flags.append("from_image" if image_only_numbers(str(parsed), ids, packet) else "number_not_in_evidence")
     elif column.type == "categorical":
         if draft.value not in (column.options or []):
             flags.append("option_mismatch")
@@ -220,6 +227,10 @@ def _work(conn: sqlite3.Connection, gateway: ModelGateway, matrix: Matrix, paper
                           limit=4, max_per_paper=4, any_terms=True, paper_ids=[paper], parse_run_id=run["id"])
             spans = [s.model_copy(update={"page": h.page}) for s, h in
                      zip(record_spans(conn, hits), hits, strict=True)]
+            image_spans = relevant_asset_spans(
+                conn, paper, run["id"], f"{column.label} {column.instruction} {matrix.question}")
+            known_ids = {span.id for span in spans}
+            spans.extend(span for span in image_spans if span.id not in known_ids)
             preview = None
             provider, model = cfg.provider, cfg.model
             if spans:

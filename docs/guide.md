@@ -378,6 +378,44 @@ Implementation choices where the design leaves a formula or representation open:
   quote in the cited span (allowing whitespace differences). Editing a claim invalidates its model relations until
   reassessed. Project deletion preserves append-only screening history and human review records.
 
+## Figure intelligence and research gaps
+
+In the paper drawer, analyze an individual table, figure or equation crop; only that crop is sent
+to the vision-capable model: by default the local vision model (`vision.model`, `qwen2.5vl:7b`),
+or a profile you pick. Remote calls use the normal preview, approval and budget checks.
+Transcribed cells, digitized chart points and equations are image-derived evidence, not text-reported
+values; matrix and Ask validation flags numbers supported only by image evidence. The glossary groups
+equation symbols by meaning.
+
+```bash
+litforge asset analyze ASSET_ID --mode table --preview
+litforge asset analyze ASSET_ID --mode table --approve
+litforge glossary -p my-review
+litforge gaps -p my-review
+litforge gaps design GAP_ID --preview
+litforge gaps design GAP_ID
+litforge gaps review CARD_ID accept
+litforge gaps review CARD_ID reject --reason "baseline is not appropriate"
+litforge gaps export CARD_ID -o proposal.md
+```
+
+The **Gaps** view lists deterministic candidates from claims and matrices and supports proposal design,
+review and export. Generated cards are titled **Research proposal — not a literature finding**; accept
+a card before it can be exported. Review decisions are retained in append-only history, including an
+optional reason. Exports use evidence footnotes and a short, escaped evidence appendix. A gap that the
+current evidence no longer shows (say a single-source claim gained support) disappears from the list
+and its card can no longer be exported.
+
+A matrix column marked `--parameter` is flagged when no sensitivity-analysis column covers it. Mark the
+covering column with `--sensitivity-for PARAMETER_KEY` (repeatable), or name the parameter in its label
+or instruction:
+
+```bash
+litforge matrix add-column studies rate --label "Firing rate" --instruction "Report the rate" --type number --parameter
+litforge matrix add-column studies rate-sens --label "Rate varied?" --instruction "Was the rate varied?" \
+  --type boolean --sensitivity-for rate
+```
+
 ## Living reviews and reproducibility radar
 
 ```bash

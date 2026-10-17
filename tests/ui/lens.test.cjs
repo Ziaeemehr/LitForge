@@ -60,6 +60,29 @@ test('badges use readable labels, severity and hide open review status', () => {
   assert.ok(badges.slice(6).every(b => b.className === 'badge warning'));
 });
 
+test('evidence quote helper caps at a word boundary and leaves short quotes intact', () => {
+  const { ctx } = setup();
+  const short = ctx.lensEvidenceQuote('A short quote.');
+  assert.deepEqual(JSON.parse(JSON.stringify(short)), { text: 'A short quote.', truncated: false });
+  const longText = 'alpha '.repeat(60);
+  const quote = ctx.lensEvidenceQuote(longText);
+  assert.equal(quote.truncated, true);
+  assert.ok(quote.text.length <= 300);
+  assert.match(quote.text, /alpha…$/);
+});
+
+test('asset fidelity helper returns readable labels for tables, charts and equations', () => {
+  const { ctx } = setup();
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.lensFidelityLabels('table',
+    { table_number_fraction: 0.5, units_recognized: ['mV'] }, {}))),
+  ['50 % of numbers found in page text', 'Units recognised: mV']);
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.lensFidelityLabels('chart',
+    { legend_entries_found: ['Control'] }, { legend: ['Control', 'Treatment'] }))),
+  ['Legend entries in caption: 1 of 2']);
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.lensFidelityLabels('equation',
+    { symbols_found: ['A'] }, {}))), ['Symbols found in text: A']);
+});
+
 test('profile dropdowns show cloud labels and tabs support selection and keyboard navigation', async () => {
   const { ctx, $, tabs } = setup();
   ctx.initLens(); await flush();

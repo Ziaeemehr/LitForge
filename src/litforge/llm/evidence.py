@@ -12,6 +12,8 @@ class EvidenceItem(BaseModel):
     text: str = Field(min_length=1)
     page: int = Field(ge=1)
     section: str | None = None
+    kind: str = "text"
+    from_image: bool = False
 
 
 class EvidencePacket(BaseModel):

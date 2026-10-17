@@ -203,10 +203,19 @@ def matrix_add_column(ctx: typer.Context, name: str, key: str,
                       type: Annotated[str, typer.Option("--type")],
                       unit: Annotated[str | None, typer.Option("--unit")] = None,
                       options: Annotated[str | None, typer.Option("--options")] = None,
-                      project: Project = None) -> None:
+                  parameter: Annotated[bool, typer.Option("--parameter")] = False,
+                  sensitivity_analysis: Annotated[bool, typer.Option("--sensitivity-analysis")] = False,
+                  sensitivity_for: Annotated[list[str] | None, typer.Option(
+                      "--sensitivity-for", help="Parameter column key this sensitivity column tests (repeatable)")]
+                  = None,
+                  project: Project = None) -> None:
     with _context(ctx, project) as (_, conn, pid):
-        column = MatrixColumn.model_validate(dict(key=key, label=label, instruction=instruction, type=type, unit=unit,
-                                                  options=options.split(",") if options else None))
+        column = MatrixColumn.model_validate(
+            dict(key=key, label=label, instruction=instruction, type=type, unit=unit,
+                 options=options.split(",") if options else None, parameter=parameter,
+                 sensitivity_analysis=sensitivity_analysis or bool(sensitivity_for),
+                 sensitivity_for=sensitivity_for or [])
+        )
         add_column(conn, _matrix_id(conn, name, pid), column)
         typer.echo(f"added {key} to {name}")
 
@@ -289,9 +298,11 @@ def eval_matrix(ctx: typer.Context, benchmark: Path, matrix: Annotated[str, type
 
 def register(app: typer.Typer, eval_app: typer.Typer) -> None:
     from litforge.analysis.claim_commands import register as register_claims
+    from litforge.analysis.figure_commands import register as register_figures
     from litforge.analysis.living_commands import register as register_living
     register_claims(app, eval_app)
     register_living(app)
+    register_figures(app)
     app.add_typer(matrix_app, name="matrix")
     app.add_typer(review_app, name="review")
     app.command("audit")(audit)

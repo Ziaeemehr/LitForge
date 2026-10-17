@@ -323,3 +323,11 @@ def test_unicode_minus_cell_validation(conn: sqlite3.Connection, value: object, 
     _, actual = validate_cell(CellDraft(status="reported", value=value, evidence_ids=[span.id]),
                               column(), to_packet([span]))
     assert actual == flags
+
+
+def test_column_hash_ignores_gap_metadata_so_cached_cells_survive() -> None:
+    from litforge.analysis.runs import input_hash
+    plain = MatrixColumn(key="rate", label="Rate", instruction="rate", type="number", unit="Hz")
+    tagged = plain.model_copy(update={"parameter": True, "sensitivity_analysis": True, "sensitivity_for": ["x"]})
+    expected = input_hash({"label": "Rate", "instruction": "rate", "type": "number", "unit": "Hz", "options": None})
+    assert plain.column_hash == tagged.column_hash == expected

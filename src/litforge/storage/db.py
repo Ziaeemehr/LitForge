@@ -56,7 +56,11 @@ def available_migrations() -> list[tuple[int, str, str]]:
         match = _MIGRATION_RE.match(entry.name)
         if match:
             out.append((int(match.group(1)), entry.name, entry.read_text(encoding="utf-8")))
-    return sorted(out)
+    out.sort()
+    for (a, name_a, _), (b, name_b, _) in zip(out, out[1:], strict=False):
+        if a == b:  # migrate() would skip the second file silently
+            raise RuntimeError(f"duplicate migration number: {name_a} and {name_b}")
+    return out
 
 
 def schema_version(conn: sqlite3.Connection) -> int:

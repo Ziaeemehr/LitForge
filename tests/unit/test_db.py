@@ -40,3 +40,9 @@ def test_model_call_audit_excludes_credentials(tmp_path: Path) -> None:
     assert row["provider"] == "openai_compatible" and row["evidence_ids_json"] == '["e1"]'
     columns = set(row.keys())
     assert "api_key" not in columns and "authorization" not in columns and "headers" not in columns
+
+
+def test_bundled_migration_numbers_are_unique() -> None:
+    from litforge.storage.db import available_migrations
+    versions = [version for version, _, _ in available_migrations()]
+    assert len(versions) == len(set(versions)), "two migrations share a number; the second would be skipped"

@@ -23,13 +23,24 @@ from litforge.llm.openai_compatible import OpenAICompatibleClient
 from litforge.llm.router import CloudApprovalRequired, ModelProfile, ModelRequest, ModelRouter, RoutingError
 from litforge.screening.llm import OllamaClient
 
+LOCAL_VISION = "local_vision"  # default route for image calls: the configured local vision model
+
 
 class GatewayError(RuntimeError):
     pass
 
 
+class VisionUnsupported(GatewayError):
+    """The selected configured provider does not expose image input."""
+
+
 class ProviderLike(Protocol):
     def chat_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any] | ModelReply: ...
+
+
+class VisionProviderLike(Protocol):
+    def vision_json(self, messages: list[dict[str, Any]], schema: dict[str, Any],
+                    images: list[bytes]) -> dict[str, Any] | ModelReply: ...
 
 
 class CallPreview(BaseModel):
@@ -53,7 +64,9 @@ class ModelGateway:
         self.provider_factory = provider_factory
 
     def _profiles(self) -> dict[str, ModelProfileConfig]:
-        return {**self.config.models.profiles, "local": self.config.models.local}
+        # Image input needs a vision model; the text model would ignore the image and invent an answer.
+        vision = ModelProfileConfig(provider="ollama", model=self.config.vision.model)
+        return {LOCAL_VISION: vision, **self.config.models.profiles, "local": self.config.models.local}
 
     def _guard(self) -> BudgetGuard:
         return BudgetGuard(**self.config.budget.model_dump())
@@ -85,12 +98,12 @@ class ModelGateway:
         return spent_run, spent_month
 
     @staticmethod
-    def _estimate(messages: list[dict[str, str]], max_output_tokens: int) -> int:
+    def _estimate(messages: list[dict[str, Any]], max_output_tokens: int) -> int:
         if max_output_tokens < 0:
             raise GatewayError("max_output_tokens must be non-negative")
-        return math.ceil(sum(len(m.get("content", "")) for m in messages) / 4)
+        return math.ceil(sum(len(str(m.get("content", ""))) for m in messages) / 4)
 
-    def preview(self, task: str, evidence: EvidencePacket, messages: list[dict[str, str]],
+    def preview(self, task: str, evidence: EvidencePacket, messages: list[dict[str, Any]],
                 profile: str | None = None, max_output_tokens: int = 1024) -> CallPreview:
         estimated = self._estimate(messages, max_output_tokens)
         profiles = self._profiles()
@@ -120,6 +133,27 @@ class ModelGateway:
                            max_output_tokens=max_output_tokens, max_cost_usd=cost, requires_approval=approval,
                            blocked_reason=blocked)
 
+    def preview_vision(self, task: str, evidence: EvidencePacket, messages: list[dict[str, Any]],
+                       profile: str | None = None, max_output_tokens: int = 1024,
+                       image_count: int = 1) -> CallPreview:
+        if image_count < 1:
+            raise GatewayError("vision preview requires at least one image")
+        preview = self.preview(task, evidence, messages, profile or LOCAL_VISION, max_output_tokens)
+        estimated = preview.estimated_input_tokens + 1024 * image_count
+        blocked = preview.blocked_reason
+        cost = preview.max_cost_usd
+        if preview.remote and preview.profile in self._profiles():
+            cfg = self._profiles()[preview.profile]
+            cost = None if cfg.pricing is None else BudgetGuard._cost(cfg.pricing, estimated, max_output_tokens)
+            if blocked is None:
+                try:
+                    self._guard().check(cfg.pricing, estimated, max_output_tokens, *self._spend())
+                except BudgetExceeded:
+                    blocked = "missing pricing" if cfg.pricing is None else "over budget"
+        return preview.model_copy(update={
+            "estimated_input_tokens": estimated, "max_cost_usd": cost, "blocked_reason": blocked,
+        })
+
     def _default_provider(self, name: str, profile: ModelProfileConfig) -> ProviderLike:
         if profile.provider == "ollama":
             return OllamaClient(os.environ.get("LITFORGE_OLLAMA_URL") or self.config.screening.ollama_url,
@@ -132,6 +166,8 @@ class ModelGateway:
 
     @staticmethod
     def _safe_error(exc: Exception, remote: bool = True) -> LlmError | GatewayError:
+        if isinstance(exc, VisionUnsupported):
+            return exc
         if not remote and (
             isinstance(exc, LlmUnavailable)
             or (isinstance(exc, LlmError)
@@ -158,9 +194,22 @@ class ModelGateway:
     def call(self, task: str, evidence: EvidencePacket, messages: list[dict[str, str]], schema: dict[str, Any],
              profile: str | None = None, approved: bool = False, run_id: str | None = None,
              max_output_tokens: int = 1024, prompt_version: str = "") -> ModelReply:
+        def send(provider: ProviderLike) -> dict[str, Any] | ModelReply:
+            if isinstance(provider, OllamaClient | OpenAICompatibleClient):
+                return provider.chat_json(messages, schema, max_output_tokens=max_output_tokens)
+            return provider.chat_json(messages, schema)
+
+        return self._dispatch(task, evidence, messages, schema, profile, approved, run_id, max_output_tokens,
+                              prompt_version, 0, send, {})
+
+    def _dispatch(self, task: str, evidence: EvidencePacket, messages: list[dict[str, Any]],
+                  schema: dict[str, Any], profile: str | None, approved: bool, run_id: str | None,
+                  max_output_tokens: int, prompt_version: str, extra_input_tokens: int,
+                  send: Callable[[ProviderLike], dict[str, Any] | ModelReply],
+                  input_extra: dict[str, Any]) -> ModelReply:
         chosen = self._route(task, evidence, profile, approved)
         cfg = self._profiles()[chosen.name]
-        estimated = self._estimate(messages, max_output_tokens)
+        estimated = self._estimate(messages, max_output_tokens) + extra_input_tokens
         guard = self._guard()
         spent_run, spent_month = self._spend(run_id)
         if chosen.remote:
@@ -169,15 +218,12 @@ class ModelGateway:
         record = ModelCallRecord(
             provider=chosen.provider, model=chosen.model, task=task,
             input_hash=input_hash({"messages": messages, "schema": schema, "evidence_hash": evidence.content_hash,
-                                   "model": chosen.model, "provider": chosen.provider}),
+                                   "model": chosen.model, "provider": chosen.provider, **input_extra}),
             evidence_ids=[e.id for e in evidence.items], run_id=run_id, prompt_version=prompt_version, status="ok",
         )
         started = time.monotonic()
         try:
-            if isinstance(provider, OllamaClient | OpenAICompatibleClient):
-                result = provider.chat_json(messages, schema, max_output_tokens=max_output_tokens)
-            else:
-                result = provider.chat_json(messages, schema)
+            result = send(provider)
             reply = result if isinstance(result, ModelReply) else ModelReply(
                 content=result, provider=chosen.provider, model=chosen.model, usage=ModelUsage(),
             )
@@ -202,3 +248,26 @@ class ModelGateway:
                 raise
         record_model_call(self.conn, record)
         return reply
+
+    def call_vision(self, task: str, evidence: EvidencePacket, messages: list[dict[str, Any]],
+                    schema: dict[str, Any], images: list[bytes], profile: str | None = None,
+                    approved: bool = False, run_id: str | None = None, max_output_tokens: int = 1024,
+                    prompt_version: str = "") -> ModelReply:
+        if not images:
+            raise ValueError("vision calls require at least one image")
+
+        def send(provider: ProviderLike) -> dict[str, Any] | ModelReply:
+            vision_call = getattr(provider, "vision_json", None)
+            if not callable(vision_call):
+                raise VisionUnsupported("vision is not supported by this provider")
+            if isinstance(provider, OllamaClient | OpenAICompatibleClient):
+                return provider.vision_json(messages, schema, images, max_output_tokens=max_output_tokens)
+            result = vision_call(messages, schema, images)
+            if isinstance(result, ModelReply | dict):
+                return result
+            raise GatewayError("vision provider returned an invalid response")
+
+        return self._dispatch(
+            task, evidence, messages, schema, profile or LOCAL_VISION, approved, run_id, max_output_tokens,
+            prompt_version, 1024 * len(images), send, {"image_hashes": [input_hash(image.hex()) for image in images]},
+        )

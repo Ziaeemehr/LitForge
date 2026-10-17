@@ -86,7 +86,8 @@ def test_duplicate_inserts_cannot_replace_spans(conn: sqlite3.Connection, hit: S
         conn.execute(f"INSERT {conflict} INTO evidence_spans SELECT * FROM evidence_spans")
     with pytest.raises(sqlite3.IntegrityError, match="immutable"):
         conn.execute(f"INSERT {conflict} INTO evidence_spans SELECT id,paper_id,parse_run_id,chunk_id,parser,"
-                     "parser_version,kind,section,page,page_start,page_end,bbox_json,'forged',content_hash,created_at "
+                     "parser_version,kind,section,page,page_start,page_end,bbox_json,'forged',content_hash,created_at,"
+                     "from_image "
                      "FROM evidence_spans")
     assert get_spans(conn, [span.id]) == [span]
     assert record_spans(conn, [hit, hit]) == [span, span]

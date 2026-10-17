@@ -31,7 +31,7 @@ from pydantic import ValidationError
 
 from litforge.analysis import ask as answers
 from litforge.analysis import audit as audits
-from litforge.analysis import claim_graph, claims, living, repro, snapshots
+from litforge.analysis import claim_graph, claims, figures, gaps, living, repro, snapshots
 from litforge.analysis import matrix as matrices
 from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.review import record_review
@@ -233,6 +233,68 @@ class App:
                 conn.close()
 
         return self.start_job(request.task, project, work)
+
+    def asset_job(self, asset_id: str, request: api.AssetAnalysisRequest) -> Job:
+        conn = self.db()
+        try:
+            row = conn.execute(
+                """SELECT p.id,p.title FROM assets a JOIN parse_runs r ON r.id=a.parse_run_id
+                   JOIN artifacts f ON f.id=r.artifact_id JOIN papers p ON p.id=f.paper_id WHERE a.id=?""",
+                (asset_id,),
+            ).fetchone()
+            if row is None:
+                raise LookupError("asset not found")
+            project = str(row["title"] or row["id"])
+        finally:
+            conn.close()
+
+        def work(job: Job) -> str:
+            conn = self.db()
+            try:
+                gateway = self.make_gateway(conn)
+                preview = figures.plan_asset(conn, gateway, asset_id, request.mode, request.profile)
+                if preview.blocked_reason or (preview.requires_approval and not request.approved):
+                    raise ValueError("analysis plan needs approval or is blocked")
+                result = figures.analyze_asset(conn, gateway, self.paths, asset_id, request.mode,
+                                               request.profile, request.approved)
+                job.report = result.model_dump()
+                return result.run_id
+            except Exception:
+                raise RuntimeError("Asset analysis failed; check model settings and the selected crop.") from None
+            finally:
+                conn.close()
+
+        return self.start_job("asset_analyze", project, work)
+
+    def gap_design_job(self, request: api.GapDesignRequest) -> Job:
+        conn = self.db()
+        try:
+            row = conn.execute(
+                """SELECT p.name FROM gap_candidates g JOIN projects p ON p.id=g.project_id WHERE g.id=?""",
+                (request.gap_id,),
+            ).fetchone()
+            if row is None:
+                raise LookupError("gap candidate not found")
+            project = str(row["name"])
+        finally:
+            conn.close()
+
+        def work(job: Job) -> str:
+            conn = self.db()
+            try:
+                gateway = self.make_gateway(conn)
+                preview = gaps.plan_gap(conn, gateway, request.gap_id, request.profile)[0]
+                if preview.blocked_reason or (preview.requires_approval and not request.approved):
+                    raise ValueError("proposal plan needs approval or is blocked")
+                card = gaps.design_gap(conn, gateway, request.gap_id, request.profile, request.approved)
+                job.report = card.model_dump()
+                return card.run_id
+            except Exception:
+                raise RuntimeError("Proposal design failed; check model settings and evidence.") from None
+            finally:
+                conn.close()
+
+        return self.start_job("gap_design", project, work)
 
     def refresh_job(self, request: api.RefreshRequest) -> Job:
         conn = self.db()
@@ -612,6 +674,10 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     pdf, name = api.paper_pdf(conn, app.paths, m.group(1))
                     return self._send(200, pdf.read_bytes(), "application/pdf",
                                       {"Content-Disposition": f"inline; filename*=UTF-8''{quote(name)}"})
+                if m := re.fullmatch(r"/api/assets/([\w-]+)/crop", path):
+                    target = api.asset_crop(conn, app.paths, m.group(1))
+                    ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+                    return self._send(200, target.read_bytes(), ctype)
                 if m := re.fullmatch(r"/api/papers/([\w-]+)/files/(.+)", path):
                     target = api.paper_file(conn, app.paths, m.group(1), unquote(m.group(2)))
                     ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
@@ -739,19 +805,27 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
         def _is_lens(self, path: str) -> bool:
             return (path in ("/api/ask", "/api/audit", "/api/preview", "/api/review", "/api/matrices",
                              "/api/queue", "/api/screen-fulltext", "/api/snapshots",
-                             "/api/refresh", "/api/repro/matrix")
+                             "/api/refresh", "/api/repro/matrix", "/api/gaps", "/api/gaps/detect",
+                             "/api/gaps/design", "/api/gaps/review")
                     or path.startswith(("/api/answers/", "/api/matrices/", "/api/claims"))
+                    or bool(re.fullmatch(r"/api/assets/[\w-]+/analyze", path))
+                    or bool(re.fullmatch(r"/api/gaps/cards/[\w-]+/export", path))
                     or bool(re.fullmatch(r"/api/papers/[\w-]+/repro", path)))
 
         def _lens(self, path: str, query: dict[str, str], body: dict[str, Any] | None) -> None:
             conn = app.db()
             try:
                 if body is None:
+                    if path == "/api/gaps":
+                        gap_pid = get_project_id(conn, query.get("project", ""))
+                        return self._json(api.gap_panel(conn, gap_pid))
+                    if match := re.fullmatch(r"/api/gaps/cards/([\w-]+)/export", path):
+                        return self._json({"markdown": gaps.export_gap_card(conn, match[1])})
                     if path == "/api/snapshots":
                         return self._json(api.living_panel(conn, get_project_id(conn, query.get("project", ""))))
                     if match := re.fullmatch(r"/api/papers/([\w-]+)/repro", path):
-                        pid = get_project_id(conn, query["project"]) if query.get("project") else None
-                        return self._json(repro.repro_card(conn, match[1], pid).model_dump(exclude={"brief"}))
+                        repro_pid = get_project_id(conn, query["project"]) if query.get("project") else None
+                        return self._json(repro.repro_card(conn, match[1], repro_pid).model_dump(exclude={"brief"}))
                     if path.startswith("/api/claims") or path == "/api/queue":
                         phase2_pid = get_project_id(conn, query.get("project", ""))
                         if path == "/api/queue":
@@ -764,11 +838,12 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         if match := re.fullmatch(r"/api/claims/clusters/([\w-]+)", path):
                             return self._json(api.lens_claims(conn, phase2_pid, match[1]))
                     if path == '/api/review':
-                        pid = get_project_id(conn, query['project']) if query.get('project') else None
-                        return self._json(api.lens_reviews(conn, pid))
+                        review_pid = get_project_id(conn, query['project']) if query.get('project') else None
+                        return self._json(api.lens_reviews(conn, review_pid))
                     if path == '/api/matrices':
-                        pid = get_project_id(conn, query['project']) if query.get('project') else None
-                        return self._json([m.model_dump(exclude={'cells'}) for m in matrices.list_matrices(conn, pid)])
+                        matrix_pid = get_project_id(conn, query['project']) if query.get('project') else None
+                        return self._json([m.model_dump(exclude={'cells'})
+                                           for m in matrices.list_matrices(conn, matrix_pid)])
                     if match := re.fullmatch(r'/api/answers/([\w-]+)', path):
                         return self._json(api.lens_answer(conn, match[1]))
                     if match := re.fullmatch(r'/api/matrices/([\w-]+)(/export)?', path):
@@ -782,6 +857,37 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                             return self._send(200, content.encode(), types[fmt] + '; charset=utf-8', headers)
                         return self._json(api.lens_matrix(conn, match[1]))
                 else:
+                    if path == "/api/gaps/detect":
+                        project_id = get_project_id(conn, str(body.get("project") or ""))
+                        return self._json(api.gap_panel(conn, project_id))
+                    if match := re.fullmatch(r"/api/assets/([\w-]+)/analyze", path):
+                        asset_request = api.AssetAnalysisRequest.model_validate(body)
+                        gateway = app.make_gateway(conn)
+                        preview = figures.plan_asset(conn, gateway, match[1], asset_request.mode,
+                                                     asset_request.profile)
+                        if preview.blocked_reason:
+                            return self._json({"error": "Analysis route is blocked. Check model and budget settings.",
+                                               "preview": preview.model_dump()}, 400)
+                        if preview.requires_approval and not asset_request.approved:
+                            return self._json({"error": "Approval required before sending the asset crop.",
+                                               "preview": preview.model_dump()}, 403)
+                        return self._json(app.asset_job(match[1], asset_request).__dict__)
+                    if path == "/api/gaps/design":
+                        gap_request = api.GapDesignRequest.model_validate(body)
+                        preview = gaps.plan_gap(conn, app.make_gateway(conn), gap_request.gap_id,
+                                                gap_request.profile)[0]
+                        if preview.blocked_reason:
+                            return self._json({"error": "Proposal route is blocked. Check model and budget settings.",
+                                               "preview": preview.model_dump()}, 400)
+                        if preview.requires_approval and not gap_request.approved:
+                            return self._json({"error": "Approval required before sending project evidence.",
+                                               "preview": preview.model_dump()}, 403)
+                        return self._json(app.gap_design_job(gap_request).__dict__)
+                    if path == "/api/gaps/review":
+                        gap_review = api.GapReviewRequest.model_validate(body)
+                        return self._json(gaps.review_gap(
+                            conn, gap_review.card_id, gap_review.action, gap_review.reason,
+                        ).model_dump())
                     if path == "/api/snapshots":
                         snapshot_request = api.SnapshotRequest.model_validate(body)
                         pid = get_project_id(conn, snapshot_request.project)
@@ -814,17 +920,17 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                                 if match is None:
                                     raise LookupError('not found')
                                 values['matrix_id'] = match[1]
-                        request = api.LensRequest.model_validate(values)
-                        plan = api.lens_plan(conn, app.make_gateway(conn), request)
+                        lens_request = api.LensRequest.model_validate(values)
+                        plan = api.lens_plan(conn, app.make_gateway(conn), lens_request)
                         if path == '/api/preview':
                             return self._json(plan)
                         if plan['blocked_reasons']:
                             return self._json({'error': 'Analysis route is blocked. Check model and budget settings.',
                                                'preview': plan}, 400)
-                        if plan['requires_approval'] and not request.approved:
+                        if plan['requires_approval'] and not lens_request.approved:
                             return self._json({'error': 'Approval required before sending evidence.',
                                                'preview': plan}, 403)
-                        return self._json(app.lens_job(request).__dict__)
+                        return self._json(app.lens_job(lens_request).__dict__)
                     if path == '/api/review':
                         review = api.ReviewRequest.model_validate(body)
                         rid = record_review(conn, review.target_kind, review.target_id, review.action,
@@ -832,8 +938,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         return self._json({'id': rid})
                     if path == '/api/matrices':
                         create = api.MatrixRequest.model_validate(body)
-                        pid = get_project_id(conn, create.project) if create.project else None
-                        matrix = matrices.create_matrix(conn, pid, create.name, create.question, create.columns)
+                        create_pid = get_project_id(conn, create.project) if create.project else None
+                        matrix = matrices.create_matrix(conn, create_pid, create.name, create.question, create.columns)
                         return self._json(matrix.model_dump())
                     if match := re.fullmatch(r'/api/matrices/([\w-]+)/columns', path):
                         column = matrices.MatrixColumn.model_validate(body)

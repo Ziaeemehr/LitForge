@@ -32,7 +32,11 @@
   function api(path, opts) {
     return fetch(path, opts).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (body) {
-        if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
+        if (!r.ok) {
+          var error = new Error(body.error || ('HTTP ' + r.status));
+          error.status = r.status; error.preview = body.preview || null;
+          throw error;
+        }
         return body;
       });
     });
@@ -452,8 +456,8 @@
 
   function showView(view) {
     state.page = view;
-    if (history.replaceState) history.replaceState(null, '', /^(recents|library|ask|matrix|claims)$/.test(view) ? '#' + view : location.pathname);
-    ['new', 'recents', 'library', 'ask', 'matrix', 'claims'].forEach(function (v) { $('view-' + v).hidden = v !== view; });
+    if (history.replaceState) history.replaceState(null, '', /^(recents|library|ask|matrix|claims|gaps)$/.test(view) ? '#' + view : location.pathname);
+    ['new', 'recents', 'library', 'ask', 'matrix', 'claims', 'gaps'].forEach(function (v) { $(('view-' + v)).hidden = v !== view; });
     $('results').hidden = view !== 'results';
     document.querySelectorAll('.sidebar [data-view]').forEach(function (b) { b.classList.toggle('on', b.dataset.view === view); });
     document.querySelectorAll('#side-recent a').forEach(function (a) { a.classList.remove('on'); });
@@ -461,6 +465,7 @@
     if (view === 'recents') { $('recents-project').value = state.recentsProject || ''; loadRecents(); }
     if (view === 'library') loadLibrary();
     if (view === 'ask' || view === 'matrix' || view === 'claims') enterLens(view);
+    if (view === 'gaps') loadGaps();
   }
 
   function deleteRun() {
@@ -852,6 +857,7 @@
       html += '<h3>Abstract</h3><div class="md" id="abstract-md"></div>';
       if (d.markdown) html += '<div id="full" hidden><h3>Full text</h3><div class="md" id="full-md"></div></div>';
       $('dbody').innerHTML = html;
+      renderPaperAssets($('dbody'), d.assets || [], request);
       lensScreeningDetail($('dbody'), d);
       window.renderMarkdown($('abstract-md'), d.abstract || '_No abstract available._');
       if (d.markdown) {
@@ -870,6 +876,317 @@
     drawerRequest++;
     $('drawer').classList.remove('open');
     $('drawer').setAttribute('aria-hidden', 'true');
+  }
+
+  function renderPaperAssets(parent, assets, request) {
+    if (!assets.length) return;
+    var section = lensNode('section', null, 'paper-assets');
+    section.id = 'paper-assets';
+    section.appendChild(lensNode('h3', 'Figure, table and equation analysis'));
+    assets.forEach(function (asset) {
+      var row = lensNode('article', null, 'asset-analysis-row');
+      var heading = asset.label || (asset.kind + ' · p.' + asset.page);
+      row.appendChild(lensNode('h4', heading));
+      if (asset.caption) row.appendChild(lensNode('p', asset.caption, 'meta'));
+      var layout = lensNode('div', null, 'asset-analysis-layout');
+      if (asset.crop_url) {
+        var cropWrap = lensNode('div', null, 'asset-crop-wrap');
+        var crop = lensNode('img', null, 'asset-crop');
+        crop.src = asset.crop_url; crop.alt = (asset.kind + ' crop, page ' + asset.page);
+        crop.onerror = function () {
+          crop.hidden = true;
+          cropWrap.appendChild(lensNode('p', 'Crop image could not be loaded.', 'hint'));
+          layout.classList.add('asset-no-crop');
+        };
+        cropWrap.appendChild(crop);
+        layout.appendChild(cropWrap);
+      } else {
+        layout.classList.add('asset-no-crop');
+      }
+      var analyses = lensNode('div', null, 'asset-analysis-results');
+      if (!asset.crop_url) analyses.appendChild(lensNode('p', 'Asset crop is unavailable.', 'hint'));
+      var results = lensNode('div', null, 'asset-analysis-result-list');
+      var mode = asset.kind === 'figure' ? 'chart' : asset.kind;
+      var button = lensButton('Analyze crop', function () {
+        button.disabled = true;
+        results.replaceChildren(lensNode('p', 'Analyzing the selected crop…', 'hint'));
+        function start(approved) {
+          return post('/api/assets/' + encodeURIComponent(asset.id) + '/analyze',
+            { mode: mode, approved: approved }).catch(function (error) {
+              if (error.status !== 403) throw error;
+              var plan = error.preview || {};
+              var cost = plan.max_cost_usd == null ? 'unknown cost' : '$' + Number(plan.max_cost_usd).toFixed(4);
+              var message = 'Send this asset crop to ' + (plan.provider || 'the configured provider') + ' (' +
+                (plan.model || 'model') + ')? Estimated maximum cost: ' + cost + '.';
+              if (!window.confirm(message)) throw new Error('Cloud vision analysis was not approved.');
+              return post('/api/assets/' + encodeURIComponent(asset.id) + '/analyze',
+                { mode: mode, approved: true });
+            });
+        }
+        start(false).then(function (job) {
+          (function poll() {
+            api('/api/jobs/' + encodeURIComponent(job.id)).then(function (state) {
+              if (request !== drawerRequest) return;
+              if (state.status === 'running') { setTimeout(poll, 500); return; }
+              button.disabled = false;
+              results.replaceChildren();
+              if (state.status !== 'done') {
+                results.appendChild(lensNode('p', state.error || 'Analysis failed.', 'hint'));
+                return;
+              }
+              var refreshed = assets.find(function (candidate) { return candidate.id === asset.id; });
+              if (refreshed) refreshed.analyses.push(state.report);
+              renderAssetAnalyses(results, refreshed ? refreshed.analyses : [state.report]);
+            }).catch(function (error) { button.disabled = false; analyses.textContent = error.message; });
+          })();
+        }).catch(function (error) {
+          button.disabled = false; analyses.replaceChildren(lensNode('p', error.message, 'hint'));
+        });
+      });
+      button.disabled = !asset.crop_url;
+      analyses.appendChild(button);
+      renderAssetAnalyses(results, asset.analyses || []);
+      analyses.appendChild(results);
+      layout.appendChild(analyses);
+      row.appendChild(layout);
+      section.appendChild(row);
+    });
+    parent.appendChild(section);
+  }
+
+  function renderAssetAnalyses(parent, analyses) {
+    analyses.forEach(function (analysis) {
+      var block = lensNode('div', null, 'asset-analysis-result');
+      block.appendChild(lensNode('strong', 'Read from the image — check against the crop'));
+      block.appendChild(lensNode('p', analysis.mode + ' · ' + analysis.model, 'meta'));
+      var result = analysis.result || {};
+      var rendered = lensNode('div', null, 'asset-read-result');
+      if (analysis.mode === 'table') {
+        var table = lensNode('table', null, 'asset-result-table');
+        var head = lensNode('thead'), headerRow = lensNode('tr');
+        (result.columns || []).forEach(function (column) {
+          var unit = result.units && result.units[column];
+          headerRow.appendChild(lensNode('th', unit ? column + ' (' + unit + ')' : column));
+        });
+        head.appendChild(headerRow); table.appendChild(head);
+        var body = lensNode('tbody');
+        (result.rows || []).forEach(function (row) {
+          var tr = lensNode('tr');
+          row.forEach(function (cell) { tr.appendChild(lensNode('td', cell)); });
+          body.appendChild(tr);
+        });
+        table.appendChild(body);
+        var tableWrap = lensNode('div', null, 'asset-result-table-wrap');
+        tableWrap.appendChild(table); rendered.appendChild(tableWrap);
+        if ((result.footnotes || []).length) {
+          var footnotes = lensNode('ul', null, 'asset-footnotes');
+          result.footnotes.forEach(function (note) { footnotes.appendChild(lensNode('li', note)); });
+          rendered.appendChild(footnotes);
+        }
+      } else if (analysis.mode === 'chart') {
+        var axes = result.axes || {};
+        var axisLabels = Object.keys(axes).map(function (axis) { return axis + ': ' + axes[axis]; });
+        if (axisLabels.length) rendered.appendChild(lensNode('p', axisLabels.join(' · '), 'asset-chart-axes'));
+        if ((result.legend || []).length) {
+          var legend = lensNode('div', null, 'asset-chart-legend');
+          legend.appendChild(lensNode('strong', 'Legend:'));
+          result.legend.forEach(function (entry) { legend.appendChild(lensNode('span', entry, 'chip')); });
+          rendered.appendChild(legend);
+        }
+        (result.series || []).forEach(function (series) {
+          rendered.appendChild(lensNode('h5', series.name || 'Series'));
+          var points = lensNode('table', null, 'asset-result-table asset-chart-points');
+          var pointHead = lensNode('thead'), pointHeader = lensNode('tr');
+          pointHeader.appendChild(lensNode('th', axes.x || 'x'));
+          pointHeader.appendChild(lensNode('th', axes.y || 'y'));
+          pointHead.appendChild(pointHeader); points.appendChild(pointHead);
+          var pointBody = lensNode('tbody');
+          (series.points || []).forEach(function (point) {
+            var tr = lensNode('tr');
+            point.forEach(function (value) {
+              var cell = lensNode('td');
+              cell.appendChild(lensNode('span', value));
+              cell.appendChild(lensNode('span', 'Digitized estimate', 'badge neutral'));
+              tr.appendChild(cell);
+            });
+            pointBody.appendChild(tr);
+          });
+          points.appendChild(pointBody);
+          var pointWrap = lensNode('div', null, 'asset-result-table-wrap');
+          pointWrap.appendChild(points); rendered.appendChild(pointWrap);
+          if (series.error_bars) rendered.appendChild(lensNode('p', 'Error bars: ' + series.error_bars, 'meta'));
+        });
+        if (result.error_bars) rendered.appendChild(lensNode('p', 'Error bars: ' + result.error_bars, 'meta'));
+      } else if (analysis.mode === 'equation') {
+        var math = lensNode('div', null, 'asset-equation-latex');
+        if (window.renderMarkdown) window.renderMarkdown(math, '$$\n' + (result.latex || '') + '\n$$');
+        else math.textContent = result.latex || '';
+        rendered.appendChild(math);
+        if ((result.symbols || []).length) {
+          var symbols = lensNode('ul', null, 'asset-symbols');
+          result.symbols.forEach(function (symbol) {
+            var item = lensNode('li');
+            item.appendChild(lensNode('span', symbol.symbol + ' — ' + symbol.meaning));
+            var source = symbol.evidence === 'text' ? 'from text' :
+              symbol.evidence === 'caption' ? 'from caption' : 'unknown';
+            item.appendChild(lensNode('span', source, 'badge ' + (source === 'unknown' ? 'warning' : 'neutral')));
+            symbols.appendChild(item);
+          });
+          rendered.appendChild(symbols);
+        }
+      }
+      block.appendChild(rendered);
+      var fidelity = lensFidelityLabels(analysis.mode, analysis.fidelity || {}, result);
+      if (fidelity.length) {
+        var badges = lensNode('div', null, 'lens-badges asset-fidelity');
+        fidelity.forEach(function (label) { badges.appendChild(lensNode('span', label, 'badge neutral')); });
+        block.appendChild(badges);
+      }
+      var json = lensNode('details', null, 'asset-result-details');
+      json.appendChild(lensNode('summary', 'Show JSON'));
+      json.appendChild(lensNode('pre', JSON.stringify(result, null, 2), 'asset-result-json'));
+      block.appendChild(json);
+      if (analysis.evidence && analysis.evidence.length) lensEvidence(block, analysis.evidence);
+      parent.appendChild(block);
+    });
+  }
+
+  function loadGaps() {
+    var list = $('gaps-list'), project = state.project;
+    list.replaceChildren();
+    if (!project) {
+      list.appendChild(lensNode('p', 'Choose a project to detect research gaps.', 'hint'));
+      return Promise.resolve();
+    }
+    $('gaps-status').textContent = 'Checking claims and study matrices…';
+    return api('/api/gaps?project=' + encodeURIComponent(project)).then(function (items) {
+      if (project !== state.project || state.page !== 'gaps') return;
+      $('gaps-status').textContent = items.length + ' deterministic candidate' + (items.length === 1 ? '' : 's');
+      list.replaceChildren();
+      if (!items.length) {
+        list.appendChild(lensNode('p', 'No candidates yet. Extract claims or add matrix data to find evidence gaps.', 'hint'));
+      }
+      items.forEach(function (item) { renderGapCandidate(list, item); });
+    }).catch(function (error) {
+      if (project === state.project) $('gaps-status').textContent = error.message;
+    });
+  }
+
+  function renderGapCandidate(parent, item) {
+    var row = lensNode('article', null, 'lens-row');
+    row.appendChild(lensNode('h3', item.title));
+    var kindLabels = {
+      single_source_claim: 'Single-source claim', contradicted_cluster: 'Contradicted claim',
+      underrepresented_category: 'Underrepresented category', missing_baseline: 'Missing baseline',
+      parameter_without_sensitivity: 'No sensitivity analysis'
+    };
+    lensBadges(row, [kindLabels[item.kind] || lensLabel(item.kind)], []);
+    var statusBadges = lensNode('div', null, 'lens-badges');
+    var cardStatus = item.card ? item.card.review_status : item.review_status;
+    statusBadges.appendChild(lensNode('span', lensLabel(cardStatus) || 'Open', 'badge neutral'));
+    row.appendChild(statusBadges);
+    if (item.detail && item.detail.trim().toLowerCase() !== (item.title || '').trim().toLowerCase()) {
+      row.appendChild(lensNode('p', item.detail));
+    }
+    row.appendChild(lensNode('p', (item.evidence || []).length + ' evidence span' +
+      ((item.evidence || []).length === 1 ? '' : 's'), 'meta'));
+    if (item.evidence && item.evidence.length) lensEvidence(row, item.evidence);
+    var actions = lensNode('div', null, 'lens-actions');
+    if (!item.card) {
+      actions.appendChild(lensButton('Design proposal', function () { designGap(item.id); }, 'btn accent small'));
+    } else {
+      renderGapCard(row, item.card, item.evidence || []);
+      if (item.card.review_status === 'open') {
+        actions.appendChild(lensButton('Accept proposal', function () { reviewGap(item.card.id, 'accept'); }, 'btn small'));
+        actions.appendChild(lensButton('Reject proposal', function () { reviewGap(item.card.id, 'reject'); }, 'btn small'));
+      } else {
+        if (item.card.review_status === 'rejected') {
+          actions.appendChild(lensButton('Redesign proposal', function () { designGap(item.id); }, 'btn small'));
+        }
+      }
+      var exportButton = lensButton('Export proposal', function () { exportGap(item.card.id); }, 'btn accent small');
+      exportButton.disabled = item.card.review_status !== 'accepted';
+      exportButton.title = exportButton.disabled ? 'Accept the proposal before exporting.' : 'Export accepted proposal';
+      actions.appendChild(exportButton);
+    }
+    row.appendChild(actions);
+    parent.appendChild(row);
+  }
+
+  function renderGapCard(parent, card, evidence) {
+    var block = lensNode('section', null, 'gap-card');
+    block.appendChild(lensNode('h4', 'Research proposal — not a literature finding', 'gap-card-title'));
+    var statusBadges = lensNode('div', null, 'lens-badges');
+    statusBadges.appendChild(lensNode('span', lensLabel(card.review_status) || 'Open', 'badge neutral'));
+    block.appendChild(statusBadges);
+    var headings = {
+      why_it_matters: 'Why it matters', minimal_experiment: 'Minimal experiment or analysis',
+      data: 'Data', controls: 'Controls', outcome: 'Outcome', failure_modes: 'Failure modes',
+      what_model_does_not_know: 'What the model does not know'
+    };
+    Object.keys(headings).forEach(function (key) {
+      var sentences = card.content[key] || [];
+      var section = lensNode('section');
+      section.appendChild(lensNode('h5', headings[key]));
+      sentences.forEach(function (sentence) {
+        var line = lensNode('p', sentence.text, 'gap-sentence');
+        var spans = evidence.filter(function (span) { return sentence.evidence_ids.indexOf(span.id) >= 0; });
+        if (spans.length) {
+          spans.forEach(function (span) {
+            var chip = lensNode('a', (span.title || span.paper_id) + ' · p.' + span.page, 'chip gap-citation');
+            chip.href = '/api/papers/' + encodeURIComponent(span.paper_id) + '/pdf#page=' +
+              encodeURIComponent(span.page);
+            chip.target = '_blank'; chip.rel = 'noopener'; line.appendChild(chip);
+          });
+        } else {
+          var label = sentence.label === 'unknown' ? 'Unknown' : 'Proposal';
+          line.appendChild(lensNode('span', label, 'badge neutral'));
+        }
+        section.appendChild(line);
+        if (spans.length) lensEvidence(section, spans);
+      });
+      block.appendChild(section);
+    });
+    parent.appendChild(block);
+  }
+
+  function designGap(gapId, approved) {
+    var status = $('gaps-status');
+    status.textContent = 'Planning proposal…';
+    function start(isApproved) {
+      return post('/api/gaps/design', { gap_id: gapId, approved: isApproved }).catch(function (error) {
+        if (error.status !== 403) throw error;
+        var plan = error.preview || {};
+        var cost = plan.max_cost_usd == null ? 'unknown cost' : '$' + Number(plan.max_cost_usd).toFixed(4);
+        if (!window.confirm('Send project evidence to ' + (plan.provider || 'the configured provider') + ' (' +
+            (plan.model || 'model') + ')? Estimated maximum cost: ' + cost + '.')) throw error;
+        return post('/api/gaps/design', { gap_id: gapId, approved: true });
+      });
+    }
+    start(approved === true).then(function (job) {
+      (function poll() {
+        api('/api/jobs/' + encodeURIComponent(job.id)).then(function (result) {
+          if (result.status === 'running') { status.textContent = 'Designing a cited proposal…'; setTimeout(poll, 500); return; }
+          if (result.status !== 'done') { status.textContent = result.error || 'Proposal design failed.'; return; }
+          loadGaps();
+        }).catch(function (error) { status.textContent = error.message; });
+      })();
+    }).catch(function (error) { status.textContent = error.message; });
+  }
+
+  function reviewGap(cardId, action) {
+    var reason = window.prompt('Optional reason for this decision:', '');
+    if (reason === null) return;
+    post('/api/gaps/review', { card_id: cardId, action: action, reason: reason }).then(loadGaps)
+      .catch(function (error) { $('gaps-status').textContent = error.message; });
+  }
+
+  function exportGap(cardId) {
+    api('/api/gaps/cards/' + encodeURIComponent(cardId) + '/export').then(function (result) {
+      var url = URL.createObjectURL(new Blob([result.markdown], { type: 'text/markdown;charset=utf-8' }));
+      var link = lensNode('a'); link.href = url; link.download = 'research-proposal-' + cardId + '.md';
+      link.click(); URL.revokeObjectURL(url);
+    }).catch(function (error) { $('gaps-status').textContent = error.message; });
   }
 
   /* ---------- running searches ---------- */
@@ -1211,6 +1528,34 @@
       key.replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); });
   }
 
+  function lensEvidenceQuote(text, limit) {
+    var full = String(text || ''), cap = limit || 300;
+    if (full.length <= cap) return { text: full, truncated: false };
+    var end = cap - 1, prefix = full.slice(0, end + 1);
+    var boundary = prefix.search(/\s+\S*$/);
+    if (boundary > 0) end = boundary;
+    return { text: full.slice(0, end).trimEnd() + '…', truncated: true };
+  }
+
+  function lensFidelityLabels(mode, fidelity, result) {
+    fidelity = fidelity || {}; result = result || {};
+    if (mode === 'table') {
+      var fraction = Number(fidelity.table_number_fraction);
+      var labels = ['' + (Number.isFinite(fraction) ? Math.round(fraction * 100) : 0) +
+        ' % of numbers found in page text'];
+      labels.push('Units recognised: ' + ((fidelity.units_recognized || []).join(', ') || 'none'));
+      return labels;
+    }
+    if (mode === 'chart') {
+      var found = fidelity.legend_entries_found || [];
+      return ['Legend entries in caption: ' + found.length + ' of ' + (result.legend || []).length];
+    }
+    if (mode === 'equation') {
+      return ['Symbols found in text: ' + ((fidelity.symbols_found || []).join(', ') || 'none')];
+    }
+    return [];
+  }
+
   function lensBadges(parent, labels, flags) {
     var badges = lensNode('div', null, 'lens-badges');
     function add(value, flag) {
@@ -1232,7 +1577,17 @@
       var card = lensNode('article', null, 'lens-evidence');
       card.appendChild(lensNode('h3', s.title || s.paper_id));
       card.appendChild(lensNode('p', [s.section || s.kind, 'p.' + s.page].join(' · '), 'meta'));
-      card.appendChild(lensNode('blockquote', s.text));
+      var fullText = String(s.text || ''), quote = lensEvidenceQuote(fullText);
+      var excerpt = lensNode('blockquote', quote.text);
+      card.appendChild(excerpt);
+      if (quote.truncated) {
+        var toggle = lensButton('Show more', function () {
+          var expanded = toggle.textContent === 'Show less';
+          excerpt.textContent = expanded ? lensEvidenceQuote(fullText).text : fullText;
+          toggle.textContent = expanded ? 'Show more' : 'Show less';
+        }, 'btn small evidence-toggle');
+        card.appendChild(toggle);
+      }
       card.appendChild(lensNode('p', s.id + ' · ' + s.parser + ' ' + s.parser_version, 'hint'));
       var link = lensNode('a', 'Open PDF at page ' + s.page, 'btn small');
       link.href = '/api/papers/' + encodeURIComponent(s.paper_id) + '/pdf#page=' + encodeURIComponent(s.page);
@@ -1792,6 +2147,7 @@
   }
 
   function initLens() {
+    $('gaps-refresh').onclick = function () { loadGaps(); };
     $('living-take').onclick = function () {
       if (!state.project || lens.busy) return;
       var project = state.project;
@@ -1895,10 +2251,10 @@
     $('pdfs-export').onchange = function () { store.set('pdfs-export', this.checked); setMode(state.mode); };
     setMode(store.get('mode', 'similar'));
     var linked = /^#run=([\w-]+)$/.exec(location.hash);  // a bookmarked search; never set automatically
-    showView(/^#(recents|library|ask|matrix|claims)$/.test(location.hash) ? location.hash.slice(1) : 'new');
+    showView(/^#(recents|library|ask|matrix|claims|gaps)$/.test(location.hash) ? location.hash.slice(1) : 'new');
     if (linked) loadRun(linked[1]);
     window.addEventListener('hashchange', function () {
-      if (/^#(ask|matrix|claims|recents|library)$/.test(location.hash)) showView(location.hash.slice(1));
+      if (/^#(ask|matrix|claims|gaps|recents|library)$/.test(location.hash)) showView(location.hash.slice(1));
     });
     $('sort').value = state.sort;
 

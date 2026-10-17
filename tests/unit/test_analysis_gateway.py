@@ -50,6 +50,19 @@ class ReplyProvider:
         return self.reply
 
 
+class VisionProvider:
+    def __init__(self, reply: dict[str, Any] | Exception) -> None:
+        self.reply = reply
+        self.calls: list[tuple[list[dict[str, Any]], list[bytes]]] = []
+
+    def vision_json(self, messages: list[dict[str, Any]], schema: dict[str, Any],
+                    images: list[bytes]) -> dict[str, Any]:
+        self.calls.append((messages, images))
+        if isinstance(self.reply, Exception):
+            raise self.reply
+        return self.reply
+
+
 def test_local_normalisation_hash_and_lazy_cache(conn: sqlite3.Connection, packet: EvidencePacket) -> None:
     fake = FakeLlm(lambda _: {"ok": True})
     made: list[str] = []
@@ -238,6 +251,130 @@ def test_sensitive_router_approval_remains_strict(conn: sqlite3.Connection, cfg:
     assert fake.calls == 1
 
 
+def test_vision_call_audits_image_hash_and_only_sends_crop(
+    conn: sqlite3.Connection, packet: EvidencePacket,
+) -> None:
+    provider = VisionProvider({"ok": True})
+    gateway = ModelGateway(conn, Config(), providers={"local_vision": provider})  # type: ignore[arg-type]
+    reply = gateway.call_vision("asset_analyze", packet, MESSAGES, SCHEMA, [b"crop-only"])
+    assert reply.content == {"ok": True}
+    assert provider.calls[0][1] == [b"crop-only"]
+    row = conn.execute("SELECT * FROM model_calls").fetchone()
+    assert row["task"] == "asset_analyze" and row["status"] == "ok"
+    assert json.loads(row["evidence_ids_json"]) == ["ev_1"]
+    assert row["input_hash"] != hashlib.sha256(b"crop-only").hexdigest()
+
+
+@pytest.mark.parametrize("reason", ["approval", "privacy", "budget"])
+def test_vision_guards_run_before_provider_access(
+    conn: sqlite3.Connection, cfg: Config, packet: EvidencePacket, reason: str,
+) -> None:
+    cfg.models.policy = "ask_before_cloud"
+    cfg.models.profiles["remote"].provider = "not_vision"
+    if reason == "privacy":
+        cfg.privacy.allow_cloud = False
+    if reason == "budget":
+        cfg.budget.max_per_call_usd = 0
+    made: list[str] = []
+
+    def factory(name: str, profile: ModelProfileConfig) -> ReplyProvider:
+        made.append(name)
+        pytest.fail("provider accessed before the vision guard passed")
+
+    gateway = ModelGateway(conn, cfg, provider_factory=factory)  # type: ignore[arg-type]
+    if reason == "approval":
+        with pytest.raises(CloudApprovalRequired):
+            gateway.call_vision("t", packet, MESSAGES, SCHEMA, [b"crop"], profile="remote")
+    elif reason == "privacy":
+        with pytest.raises(RoutingError):
+            gateway.call_vision("t", packet, MESSAGES, SCHEMA, [b"crop"], profile="remote", approved=True)
+    else:
+        with pytest.raises(BudgetExceeded):
+            gateway.call_vision("t", packet, MESSAGES, SCHEMA, [b"crop"], profile="remote", approved=True)
+    assert made == []
+    assert conn.execute("SELECT COUNT(*) FROM model_calls").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("reason", ["local_only", "missing_pricing", "over_budget"])
+def test_vision_remote_policy_and_budget_guards_precede_transport(
+    conn: sqlite3.Connection, cfg: Config, packet: EvidencePacket, reason: str,
+) -> None:
+    if reason == "local_only":
+        cfg.models.policy = "local_only"
+    elif reason == "missing_pricing":
+        cfg.models.profiles["remote"].pricing = None
+    else:
+        cfg.budget.max_per_call_usd = 0
+    provider = VisionProvider({"ok": True})
+    gateway = ModelGateway(conn, cfg, {"remote": provider})
+    with pytest.raises(RoutingError if reason == "local_only" else BudgetExceeded):
+        gateway.call_vision("t", packet, MESSAGES, SCHEMA, [b"only-crop"], profile="remote", approved=True)
+    assert provider.calls == []
+    assert conn.execute("SELECT COUNT(*) FROM model_calls").fetchone()[0] == 0
+
+
+def test_vision_provider_capability_is_typed_and_audited(
+    conn: sqlite3.Connection, packet: EvidencePacket,
+) -> None:
+    from litforge.analysis.gateway import VisionUnsupported
+
+    provider = ReplyProvider(ModelReply(content={}, provider="ollama", model="text"))
+    with pytest.raises(VisionUnsupported):
+        ModelGateway(conn, Config(), {"local_vision": provider}).call_vision(
+            "t", packet, MESSAGES, SCHEMA, [b"crop"])
+    assert provider.calls == 0
+    record = conn.execute("SELECT status,error FROM model_calls").fetchone()
+    assert record["status"] == "error" and "vision" in record["error"]
+
+
+def test_vision_audit_never_contains_image_bytes(conn: sqlite3.Connection, packet: EvidencePacket) -> None:
+    image = b"private-image-payload\x00\xff"
+    provider = VisionProvider({"ok": True})
+    ModelGateway(conn, Config(), {"local_vision": provider}).call_vision(
+        "t", packet, MESSAGES, SCHEMA, [image],
+    )
+    row = conn.execute("SELECT * FROM model_calls").fetchone()
+    assert image not in repr(dict(row)).encode()
+    assert image.hex() not in repr(dict(row))
+    assert b"private-image-payload" not in repr(dict(row)).encode()
+    assert provider.calls[0][1] == [image]
+
+
+def test_ollama_and_openai_vision_message_shapes(
+    conn: sqlite3.Connection, cfg: Config, packet: EvidencePacket, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from litforge.llm.openai_compatible import UrllibTransport
+
+    captured: list[dict[str, Any]] = []
+    monkeypatch.setenv("ANALYSIS_FAKE_KEY", "fake")
+    cfg.models.profiles["remote"].base_url = "https://fake.example/v1"
+    cfg.models.profiles["remote"].api_key_env = "ANALYSIS_FAKE_KEY"
+
+    def request(transport: UrllibTransport, url: str, headers: dict[str, str], body: dict[str, Any],
+                timeout_s: float) -> dict[str, Any]:
+        captured.append(body)
+        return {"choices": [{"message": {"content": '{"ok": true}'}}]}
+
+    monkeypatch.setattr(UrllibTransport, "request", request)
+    gateway = ModelGateway(conn, cfg)
+    gateway.call_vision("t", packet, MESSAGES, SCHEMA, [b"\x89PNG\r\n\x1a\npng"], profile="remote", approved=True)
+    image = captured[0]["messages"][0]["content"][1]["image_url"]["url"]
+    assert image == "data:image/png;base64,iVBORw0KGgpwbmc="
+
+    ollama_messages: list[dict[str, Any]] = []
+
+    def ollama_call(client: OllamaClient, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        assert path == "/api/chat"
+        assert body is not None
+        ollama_messages.extend(body["messages"])
+        return {"message": {"content": '{"ok": true}'}}
+
+    monkeypatch.setattr(OllamaClient, "_call", ollama_call)
+    local = ModelGateway(conn, Config())
+    local.call_vision("t", packet, MESSAGES, SCHEMA, [b"\x89PNG\r\n\x1a\npng"])
+    assert ollama_messages[0]["images"] == ["iVBORw0KGgpwbmc="]
+
+
 def test_default_ollama_factory_uses_environment(conn: sqlite3.Connection, packet: EvidencePacket,
                                                monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LITFORGE_OLLAMA_URL", "http://fake.local")
@@ -308,3 +445,23 @@ def test_local_provider_errors_redact_output(
     assert str(raised.value) == "model provider failed"
     row = conn.execute("SELECT status, error FROM model_calls").fetchone()
     assert row["status"] == "error" and row["error"] == "model provider failed"
+
+
+def test_default_vision_route_uses_the_vision_model_not_the_text_model(
+    conn: sqlite3.Connection, packet: EvidencePacket, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[str] = []
+
+    def ollama_call(client: OllamaClient, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        assert body is not None
+        sent.append(body["model"])
+        return {"message": {"content": '{"ok": true}'}}
+
+    monkeypatch.setattr(OllamaClient, "_call", ollama_call)
+    cfg = Config()
+    cfg.vision.model, cfg.models.local.model = "vision-model:7b", "text-model:4b"
+    gateway = ModelGateway(conn, cfg)
+    gateway.call_vision("t", packet, MESSAGES, SCHEMA, [b"crop"])
+    assert sent == ["vision-model:7b"]
+    assert gateway.preview_vision("t", packet, MESSAGES).model == "vision-model:7b"
+    assert conn.execute("SELECT model FROM model_calls").fetchone()[0] == "vision-model:7b"

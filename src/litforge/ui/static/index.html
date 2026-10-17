@@ -19,6 +19,7 @@
   <button class="nav-item" data-view="ask" title="Ask the current project using cited library evidence">Ask</button>
   <button class="nav-item" data-view="matrix" title="Compare studies in the current project">Matrix</button>
   <button class="nav-item" data-view="claims" title="Explore cited claims and disagreements in this project">Claims</button>
+  <button class="nav-item" data-view="gaps" title="Review evidence gaps and design research proposals">Gaps</button>
   <h3 title="A project collects the papers, ✓/✗ marks and exports of one review">Projects</h3>
   <div class="side-list" id="side-projects"></div>
   <h3 title="Your latest searches; click one to reopen it with its marks">Recent</h3>
@@ -236,6 +237,13 @@
         <div class="lens-table-wrap" tabindex="0" role="region" aria-label="Study matrix"><table class="lens-table" id="lens-table"></table></div>
       </div>
     </div>
+  </section>
+
+  <section id="view-gaps" class="view" hidden>
+    <div class="viewhead"><h2>Gaps</h2><span class="meta">Deterministic candidates from claims and study matrices</span>
+      <button class="btn accent" id="gaps-refresh">Refresh candidates</button></div>
+    <p class="hint" id="gaps-status" role="status" aria-live="polite"></p>
+    <div class="card lens-panel lens-rows" id="gaps-list"></div>
   </section>
 
   <section id="results" class="view" hidden>

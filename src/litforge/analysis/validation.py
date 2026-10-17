@@ -25,8 +25,17 @@ def numbers(text: str) -> set[Decimal]:
 
 
 def missing_numbers(text: str, ids: list[str], packet: EvidencePacket | None) -> bool:
-    cited = set() if packet is None else set().union(*(numbers(e.text) for e in packet.items if e.id in ids))
+    cited = set() if packet is None else set().union(
+        *(numbers(e.text) for e in packet.items if e.id in ids and not e.from_image))
     return bool(numbers(text) - cited)
+
+
+def image_only_numbers(text: str, ids: list[str], packet: EvidencePacket | None) -> bool:
+    if packet is None:
+        return False
+    cited = set().union(*(numbers(e.text) for e in packet.items if e.id in ids and e.from_image))
+    textual = set().union(*(numbers(e.text) for e in packet.items if e.id in ids and not e.from_image))
+    return bool((numbers(text) - textual) & cited)
 
 
 def citations(ids: list[str], packet: EvidencePacket | None) -> tuple[list[str], list[str]]:

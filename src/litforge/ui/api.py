@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from litforge.analysis import ask as answers
 from litforge.analysis import audit as audits
-from litforge.analysis import claim_graph, claims
+from litforge.analysis import claim_graph, claims, figures, gaps
 from litforge.analysis import matrix as matrices
 from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.ledger import get_spans
@@ -240,6 +240,23 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
                          "stale": s["criteria_hash"] != criteria_hash(load_criteria(conn, project_id))}
     cites = conn.execute("SELECT COUNT(*) FROM paper_relations WHERE citing_id=?", (paper_id,)).fetchone()[0]
     cited = conn.execute("SELECT COUNT(*) FROM paper_relations WHERE cited_id=?", (paper_id,)).fetchone()[0]
+    assets = []
+    for asset in conn.execute(
+        """SELECT a.*,r.output_dir FROM assets a JOIN parse_runs r ON r.id=a.parse_run_id
+           JOIN artifacts f ON f.id=r.artifact_id WHERE f.paper_id=? AND r.is_current=1
+           ORDER BY a.page,a.kind,a.id""",
+        (paper_id,),
+    ):
+        try:
+            asset_crop(conn, paths, asset["id"])
+            crop_url = f"/api/assets/{asset['id']}/crop"
+        except LookupError:
+            crop_url = None
+        assets.append({
+            "id": asset["id"], "kind": asset["kind"], "label": asset["label"], "caption": asset["caption"],
+            "page": asset["page"], "crop_url": crop_url,
+            "analyses": [analysis.model_dump() for analysis in figures.asset_analyses(conn, asset["id"])],
+        })
     return {
         "id": row["id"], "title": row["title"], "year": row["year"], "venue": row["venue"], "doi": row["doi"],
         "doi_status": row["doi_status"], "arxiv_id": row["arxiv_id"], "openalex_id": row["openalex_id"],
@@ -249,6 +266,7 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
         "pdf_url": f"/api/papers/{paper_id}/pdf" if _pdf_path(conn, paths, paper_id) else None,
         "links_in_library": {"cites": cites, "cited_by": cited}, "screening": screening,
         "fulltext_screening": fulltext_result(conn, project_id, paper_id) if project_id else None,
+        "assets": assets,
         "screening_history": [dict(r) for r in conn.execute(
             "SELECT * FROM screening_history WHERE project_id=? AND paper_id=? ORDER BY rowid",
             (project_id, paper_id))] if project_id else [],
@@ -530,6 +548,46 @@ class RefreshRequest(BaseModel):
     screen: bool = Field(default=True, strict=True)
     extract: bool = Field(default=True, strict=True)
     claims: bool = Field(default=True, strict=True)
+
+
+class AssetAnalysisRequest(BaseModel):
+    mode: Literal["table", "chart", "equation"]
+    profile: str | None = None
+    approved: bool = Field(default=False, strict=True)
+
+
+class GapDesignRequest(BaseModel):
+    gap_id: str = Field(min_length=1)
+    profile: str | None = None
+    approved: bool = Field(default=False, strict=True)
+
+
+class GapReviewRequest(BaseModel):
+    card_id: str = Field(min_length=1)
+    action: Literal["accept", "reject"]
+    reason: str = ""
+
+
+def asset_crop(conn: sqlite3.Connection, paths: Paths, asset_id: str) -> Path:
+    row = conn.execute(
+        """SELECT a.path,r.output_dir,r.is_current FROM assets a JOIN parse_runs r ON r.id=a.parse_run_id
+           WHERE a.id=?""",
+        (asset_id,),
+    ).fetchone()
+    if row is None or not row["path"] or not row["output_dir"] or not row["is_current"]:
+        raise LookupError("asset crop not found")
+    base = (paths.root / row["output_dir"]).resolve()
+    target = (paths.root / str(row["path"])).resolve()
+    if base not in target.parents or not target.is_file():
+        raise LookupError("asset crop not found")
+    return target
+
+
+def gap_panel(conn: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:
+    items = gaps.detect_gaps(conn, project_id)
+    return [{**item.model_dump(), "evidence": [span.model_dump() for span in get_spans(conn, item.evidence_ids)],
+             "card": gaps.get_gap_card(conn, item.card_id).model_dump() if item.card_id else None}
+            for item in items]
 
 
 def living_panel(conn: sqlite3.Connection, project_id: str) -> dict[str, Any]:
