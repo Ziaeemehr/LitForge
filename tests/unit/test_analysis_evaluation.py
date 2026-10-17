@@ -62,3 +62,64 @@ def test_metrics_match_full_chunks_and_paper_identifiers(conn: sqlite3.Connectio
     row = conn.execute("SELECT * FROM analysis_runs WHERE id=?", (report.run_id,)).fetchone()
     assert row["task"] == "eval_retrieval" and row["status"] == "ok"
     assert json.loads(row["result_json"])["mrr"] == 0.25
+
+
+def test_answer_and_matrix_metric_arithmetic(conn: sqlite3.Connection) -> None:
+    from lens_fakes import gateway, seed
+
+    from litforge.analysis.evaluation import evaluate_answers, evaluate_matrix
+    from litforge.analysis.matrix import MatrixColumn, create_matrix, extract_matrix
+
+    span = seed(conn)
+    other = seed(conn, "q")
+    gw, _ = gateway(conn, {"sentences": [
+        {"text": "Gain 3.25.", "kind": "reported_fact", "evidence_ids": [span.id, other.id, "bogus"]},
+        {"text": "Missing.", "kind": "unsupported", "evidence_ids": []}], "insufficient": True})
+    bench = RetrievalBenchmark.model_validate({"name": "arithmetic", "questions": [
+        {"id": "q", "question": "gain", "relevant": [{"paper": "p", "page": 1, "contains": "3.25"}]}],
+        "matrix": [{"paper": "p", "column": "gain", "status": "reported", "value": 3.26},
+                   {"paper": "q", "column": "gain", "status": "not_reported"}]})
+    report = evaluate_answers(conn, gw, bench)
+    assert report.citation_precision == pytest.approx(1 / 3)
+    assert report.unsupported_sentence_rate == .5
+    assert report.invalid_citation_count == 1
+    assert conn.execute("SELECT status FROM analysis_runs WHERE id=?", (report.run_id,)).fetchone()[0] == "ok"
+    matrix = create_matrix(conn, "proj", "m", "gain", [MatrixColumn(key="gain", label="Gain", instruction="gain",
+                                                                               type="number")])
+    gw, _ = gateway(conn, {"status": "reported", "value": 3.25, "evidence_ids": [span.id]})
+    extract_matrix(conn, gw, matrix.id)
+    # Emulate an invalid stored citation to verify the metric checks paper identity.
+    conn.execute("UPDATE matrix_cells SET evidence_ids_json=?", (json.dumps([span.id]),))
+    metrics = evaluate_matrix(conn, bench, matrix.id)
+    assert metrics.status_accuracy == .5 and metrics.value_accuracy == 1 and metrics.citation_validity == .5
+
+
+def test_matrix_target_rejects_status_typo() -> None:
+    from litforge.analysis.evaluation import MatrixTarget
+
+    with pytest.raises(ValidationError):
+        MatrixTarget(paper="p", column="gain", status="reproted")
+
+
+@pytest.mark.parametrize(("kind", "actual", "expected", "accuracy"), [
+    ("categorical", "101", "100", 0), ("categorical", "1000", "100", 0),
+    ("categorical", "100", "100", 1), ("number", "101", "100", 1),
+    ("text", "101", "100", 0), ("text", "1000", "100", 1),
+])
+def test_matrix_comparison_uses_column_type(conn: sqlite3.Connection, kind: str, actual: str,
+                                           expected: str, accuracy: float) -> None:
+    from lens_fakes import gateway, seed
+
+    from litforge.analysis.evaluation import evaluate_matrix
+    from litforge.analysis.matrix import MatrixColumn, create_matrix, extract_matrix
+
+    span = seed(conn)
+    column = MatrixColumn(key="gain", label="Gain", instruction="gain", type=kind,
+                          options=["100", "101", "1000"] if kind == "categorical" else None)
+    matrix = create_matrix(conn, "proj", "m", "gain", [column])
+    gw, _ = gateway(conn, {"status": "reported", "value": actual, "evidence_ids": [span.id]})
+    extract_matrix(conn, gw, matrix.id)
+    bench = RetrievalBenchmark.model_validate({"name": "typed", "questions": [
+        {"id": "q", "question": "gain", "relevant": [{"paper": "p"}]}], "matrix": [
+        {"paper": "p", "column": "gain", "status": "reported", "value": expected}]})
+    assert evaluate_matrix(conn, bench, matrix.id).value_accuracy == accuracy

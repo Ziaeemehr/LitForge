@@ -46,7 +46,7 @@ def test_ask_records_exact_evidence(conn: sqlite3.Connection, library: tuple[Cli
 def test_ask_empty_and_phase_one(library: tuple[CliRunner, list[str]]) -> None:
     runner, base = library
     no_flag = runner.invoke(app, base + ["ask", "why?"])
-    assert no_flag.exit_code == 2 and "model answers arrive in phase 1; use --evidence-only" in no_flag.output
+    assert no_flag.exit_code == 0 and "No evidence found in the library" in no_flag.output
     result = runner.invoke(app, base + ["ask", "How is it?", "--evidence-only", "--json"])
     assert result.exit_code == 0 and json.loads(result.output)["spans"] == []
 

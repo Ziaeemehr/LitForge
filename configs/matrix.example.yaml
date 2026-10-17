@@ -1,0 +1,20 @@
+# litforge matrix create studies --question "How were neural models evaluated?" --columns configs/matrix.example.yaml
+columns:
+  - key: model
+    label: Model
+    instruction: Name the neural mass model used in this study.
+    type: text
+  - key: participants
+    label: Participants
+    instruction: Report the number of human participants; do not infer it.
+    type: number
+    unit: participants
+  - key: validation
+    label: Validation
+    instruction: Was evaluation simulated, empirical, or both?
+    type: categorical
+    options: [simulated, empirical, both]
+  - key: open_data
+    label: Open data
+    instruction: Does the paper explicitly state that the study data are publicly available?
+    type: boolean

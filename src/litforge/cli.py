@@ -13,6 +13,7 @@ import typer
 import yaml
 from pydantic import BaseModel
 
+from litforge.analysis.commands import register, run_ask
 from litforge.analysis.evaluation import evaluate_retrieval, load_benchmark
 from litforge.analysis.gateway import GatewayError
 from litforge.analysis.ledger import record_spans
@@ -327,11 +328,17 @@ def ask(
     project: ProjectOpt = None,
     k: Annotated[int, typer.Option("-k", min=1)] = 8,
     as_json: Annotated[bool, typer.Option("--json")] = False,
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+    approve: Annotated[bool, typer.Option("--approve")] = False,
+    preview: Annotated[bool, typer.Option("--preview")] = False,
+    audit: Annotated[bool, typer.Option("--audit/--no-audit")] = True,
+    audit_profile: Annotated[str | None, typer.Option("--audit-profile")] = None,
+    sensitive: Annotated[bool, typer.Option("--sensitive")] = False,
 ) -> None:
-    """Retrieve evidence cards with stored citations for a research question."""
+    """Answer a research question with evidence citations and an optional audit."""
     if not evidence_only:
-        typer.echo("model answers arrive in phase 1; use --evidence-only", err=True)
-        raise typer.Exit(2)
+        run_ask(ctx, question, project, k, profile, approve, preview, audit, audit_profile, sensitive, as_json)
+        return
     st = _state(ctx)
     with st.db() as conn:
         _, pid = _project(st, conn, project)
@@ -803,6 +810,8 @@ def shortcut() -> None:
 def launch() -> None:
     """Entry point of the windowless `litforge-app` launcher: the web interface with default options."""
     app(["ui"])
+
+register(app, eval_app)
 
 if __name__ == "__main__":
     app()

@@ -226,3 +226,62 @@ Design documents (in Persian and English) are in this folder.
 ## License note
 
 PyMuPDF is AGPL-licensed. Review this before distributing LitForge or derived work.
+
+## Evidence answers and study matrices (CLI)
+
+`litforge ask "How were neural mass parameters inferred?"` retrieves evidence, generates at
+most eight cited sentences, then audits each cited sentence. Use `--no-audit` to omit the
+second pass, `--audit-profile NAME` for a different auditor, or `--evidence-only` for the
+original retrieval-only cards. `--json` includes sentence flags, audit verdicts and provenance.
+All model calls use the configured gateway. Source text is treated as untrusted data;
+unknown citations are removed and uncited facts become `unsupported`. Numeric checks compare
+normalised numbers (including decimal, scientific and thousands notation) with the cited
+text actually sent to the model. These checks validate citations and numbers, not semantic truth.
+
+```bash
+litforge ask "How were parameters inferred?" --profile local --preview
+litforge ask "How were parameters inferred?" --sensitive --json
+litforge audit ANSWER_RUN_ID --profile local
+litforge review --json
+litforge review accept SENTENCE_OR_CELL_ID --reason "checked the source"
+litforge review reject SENTENCE_OR_CELL_ID --reason "incorrect extraction"
+litforge review edit CELL_ID '3.25' --reason "corrected from the table"
+litforge brief ANSWER_RUN_ID --matrix studies -o brief.md
+
+litforge matrix create studies --question "How were neural models evaluated?" --columns configs/matrix.example.yaml
+litforge matrix extract studies --preview
+litforge matrix extract studies
+litforge matrix add-column studies method --label Method --instruction "Describe the inference method" --type text
+litforge matrix extract studies  # only new/changed cells; --force re-extracts
+litforge matrix show studies
+litforge matrix export studies --format csv -o studies.csv
+litforge matrix list
+```
+
+Commands use the active project, or `-p NAME`. Matrix names are unique within a project;
+IDs can also identify matrices. `matrix extract --paper ID` can be repeated to select rows.
+Cells distinguish `reported`, `not_reported`, `not_found`, `not_applicable`, and `error`.
+Markdown exports include evidence footnotes and unit/retrieval warnings; CSV includes a status
+and evidence column for every field; JSON includes full provenance. Extraction run results
+retain historical model values. Human cell overrides persist through cache reuse and forced
+extraction; similar cells are never changed automatically. Fresh model extractions reopen previous
+accept/reject decisions unless a human value override is present. Human review history is append-only.
+Number/boolean/text edits must match the column type, and categorical edits must match an option.
+When multiple artifacts have current parses for a paper, extraction uses the newest parse.
+Cached errors require `--force` to retry, like other unchanged cells.
+
+`ask`, `audit` and `matrix extract` accept `--profile NAME`, `--approve`, and `--preview`.
+Preview never dispatches a model call and exits 0. A route requiring cloud approval prints the
+plan and exits 3 unless `--approve` is supplied. Plans show routes, evidence counts, estimated
+tokens, maximum costs and blocked reasons. For automatic audit, the ask preview conservatively
+includes up to eight audit calls; actual calls depend on the generated sentences. Matrix runs
+stop dispatching when the run budget is exhausted and mark remaining cells `error: budget`.
+Use `--sensitive` on ask to retain sensitive-content approval requirements during later audits.
+
+The retrieval benchmark YAML can also contain `matrix:` targets with `paper`, `column`,
+`status`, and optional `value`. `litforge eval matrix BENCHMARK --matrix studies` reports status
+accuracy, value accuracy (numbers within 1% relative; text case-insensitive exact/contained),
+and whether cited spans belong to their row's paper. `litforge eval answers BENCHMARK --profile
+local` reports citation precision against relevant targets (invalid IDs count as incorrect citations),
+unsupported-sentence rate, and invalid citation count. Both accept `--json` and store analysis runs. Briefs refuse any factual sentence
+without evidence or an explicit unsupported/interpretation label.

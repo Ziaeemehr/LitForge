@@ -149,7 +149,11 @@ def search(
     max_per_paper: int = 3,
     raw: bool = False,
     any_terms: bool = False,
+    paper_ids: list[str] | None = None,
+    parse_run_id: str | None = None,
 ) -> list[SearchHit]:
+    if paper_ids == [] or limit <= 0 or max_per_paper <= 0:
+        return []
     builder = build_any_match if any_terms else build_match
     match, terms = (query, re.findall(r"\w+", query)) if raw else builder(query)
     if not match:
@@ -166,6 +170,12 @@ def search(
     if project_id is not None:
         sql += " AND c.paper_id IN (SELECT paper_id FROM project_papers WHERE project_id=?)"
         params.append(project_id)
+    if paper_ids is not None:
+        sql += " AND c.paper_id IN (" + ",".join("?" for _ in paper_ids) + ")"
+        params.extend(paper_ids)
+    if parse_run_id is not None:
+        sql += " AND c.parse_run_id=?"
+        params.append(parse_run_id)
     sql += " ORDER BY score LIMIT ?"
     params.append(limit * 5)
     hits: list[SearchHit] = []
