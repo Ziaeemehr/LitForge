@@ -1,0 +1,19 @@
+# Replace these targets with evidence from your own indexed papers.
+# paper: library paper ID, DOI (case-insensitive), or arXiv ID.
+# page: optional PDF page covered by the retrieved chunk (1-based).
+# contains: optional case-insensitive substring of the full chunk, not the snippet.
+# Each question needs a unique ID and at least one relevant target.
+name: synthetic-example
+questions:
+  - id: q1
+    question: How are neural mass parameters inferred?
+    relevant:
+      - paper: 10.1234/synthetic.5678
+        page: 2
+        contains: Jansen Rit
+  - id: q2
+    question: Where is the zebrafinch marker reported?
+    relevant:
+      - paper: 10.1234/synthetic.5678
+        page: 3
+        contains: zebrafinch

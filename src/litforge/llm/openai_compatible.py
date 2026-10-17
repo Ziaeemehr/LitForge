@@ -43,7 +43,8 @@ class OpenAICompatibleClient:
         if not os.environ.get(self.api_key_env):
             raise LlmError(f"API key environment variable {self.api_key_env} is not set")
 
-    def chat_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> ModelReply:
+    def chat_json(self, messages: list[dict[str, str]], schema: dict[str, Any],
+                  max_output_tokens: int | None = None) -> ModelReply:
         self.check()
         key = os.environ[self.api_key_env]
         body = {
@@ -52,6 +53,8 @@ class OpenAICompatibleClient:
             "response_format": {"type": "json_schema", "json_schema": {"name": "litforge", "schema": schema}},
             "temperature": 0,
         }
+        if max_output_tokens is not None:
+            body["max_tokens"] = max_output_tokens
         try:
             response = self.transport.request(
                 f"{self.base_url}/chat/completions",

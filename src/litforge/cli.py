@@ -10,8 +10,14 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
+import yaml
 from pydantic import BaseModel
 
+from litforge.analysis.evaluation import evaluate_retrieval, load_benchmark
+from litforge.analysis.gateway import GatewayError
+from litforge.analysis.ledger import record_spans
+from litforge.analysis.retrieve import retrieve_for_question
+from litforge.analysis.runs import finish_run, link_evidence, start_run
 from litforge.config import Config, EnvSettings, Paths, contact_email, load_config, resolve_paths
 from litforge.discovery.fetch import fetch_open_access
 from litforge.discovery.http import HttpClient
@@ -22,6 +28,8 @@ from litforge.doctor import run_checks
 from litforge.export.markdown import export_markdown
 from litforge.indexing.fts import current_runs, index_run, search
 from litforge.ingest import ingest_paths
+from litforge.llm.budget import BudgetExceeded
+from litforge.llm.router import RoutingError
 from litforge.observability import EventLog
 from litforge.parsing.run import artifacts_for_project, parse_artifact
 from litforge.pipeline import add_pdfs
@@ -42,6 +50,8 @@ from litforge.storage.db import open_db
 app = typer.Typer(help="Local-first scientific literature library.", no_args_is_help=True)
 project_app = typer.Typer(help="Manage project workspaces.", no_args_is_help=True)
 app.add_typer(project_app, name="project")
+eval_app = typer.Typer(help="Evaluate retrieval quality.", no_args_is_help=True)
+app.add_typer(eval_app, name="eval")
 
 
 @dataclass
@@ -307,6 +317,102 @@ def search_cmd(
         typer.echo(f"   p.{h.page} (chunk pp.{h.page_start}-{h.page_end}) · {h.section} · {h.kind}"
                    f" · bm25 {h.score}")
         typer.echo(f"   “{h.snippet}”")
+
+
+@app.command()
+def ask(
+    ctx: typer.Context,
+    question: str,
+    evidence_only: Annotated[bool, typer.Option("--evidence-only")] = False,
+    project: ProjectOpt = None,
+    k: Annotated[int, typer.Option("-k", min=1)] = 8,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Retrieve evidence cards with stored citations for a research question."""
+    if not evidence_only:
+        typer.echo("model answers arrive in phase 1; use --evidence-only", err=True)
+        raise typer.Exit(2)
+    st = _state(ctx)
+    with st.db() as conn:
+        _, pid = _project(st, conn, project)
+        run_id = start_run(conn, "ask_evidence", pid, {"question": question},
+                           {**st.config.model_dump(), "k": k}, "ask_evidence_v1")
+        try:
+            hits = retrieve_for_question(conn, question, pid, k)
+            spans = record_spans(conn, hits)
+            link_evidence(conn, run_id, spans, [h.score for h in hits], pages=[h.page for h in hits])
+            result = {"run_id": run_id, "spans": [{**s.model_dump(), "page": h.page}
+                                                  for s, h in zip(spans, hits, strict=True)]}
+            finish_run(conn, run_id, "ok", result)
+        except (RoutingError, BudgetExceeded, GatewayError, LlmError) as exc:
+            finish_run(conn, run_id, "error", {}, str(exc))
+            typer.echo(" ".join(str(exc).splitlines()), err=True)
+            raise typer.Exit(1) from exc
+        except Exception:
+            finish_run(conn, run_id, "error", {}, "evidence retrieval failed")
+            raise
+    if as_json:
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=1))
+        return
+    if not spans:
+        typer.echo("no results")
+    for rank, (span, hit) in enumerate(zip(spans, hits, strict=True), 1):
+        typer.echo(f"{rank}. [{span.id}] {span.title or span.paper_id} — {span.section or span.kind}, p.{hit.page}")
+        typer.echo(f"   “{hit.snippet}”")
+
+
+@eval_app.command("retrieval")
+def eval_retrieval(
+    ctx: typer.Context,
+    benchmark: Path,
+    project: ProjectOpt = None,
+    k: Annotated[int, typer.Option("-k", min=1)] = 10,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Measure Recall@k, hit-rate@k and MRR against labelled evidence."""
+    st = _state(ctx)
+    with st.db() as conn:
+        _, pid = _project(st, conn, project)
+        try:
+            report = evaluate_retrieval(conn, load_benchmark(benchmark), k, pid)
+        except (OSError, ValueError, yaml.YAMLError, RoutingError, BudgetExceeded, GatewayError, LlmError) as exc:
+            typer.echo(" ".join(str(exc).splitlines()), err=True)
+            raise typer.Exit(1) from exc
+    if as_json:
+        typer.echo(report.model_dump_json(indent=1))
+        return
+    typer.echo(f"Recall@{k}: {report.recall_at_k:.3f} · hit-rate@{k}: {report.hit_rate_at_k:.3f} · "
+               f"MRR: {report.mrr:.3f}")
+    for question in report.questions:
+        for target in question.missed:
+            page = f", p.{target.page}" if target.page is not None else ""
+            contains = f", contains: {target.contains}" if target.contains is not None else ""
+            typer.echo(f"{question.id}: missed {target.paper}{page}{contains}")
+
+
+@app.command()
+def calls(
+    ctx: typer.Context,
+    run: Annotated[str | None, typer.Option("--run")] = None,
+    limit: Annotated[int, typer.Option("--limit", min=1)] = 20,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Show recent model calls, usage, costs and status."""
+    sql = "SELECT * FROM model_calls"
+    params: list[object] = []
+    if run is not None:
+        sql += " WHERE run_id=?"
+        params.append(run)
+    params.append(limit)
+    with _state(ctx).db() as conn:
+        rows = conn.execute(sql + " ORDER BY created_at DESC, rowid DESC LIMIT ?", params).fetchall()
+    if as_json:
+        _emit_json([dict(r) for r in rows])
+        return
+    for row in rows:
+        typer.echo(f"{row['provider']}/{row['model']} · {row['task']} · "
+                   f"{row['input_tokens']} in/{row['output_tokens']} out · "
+                   f"${row['cost_usd']:.6f} · {row['latency_ms']} ms · {row['status']}")
 
 
 @app.command()

@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from litforge.config import Config, Paths
 from litforge.indexing.chunk import chunk_document
+from litforge.indexing.stopwords import STOPWORDS
 from litforge.parsing.canonical import read_canonical
 from litforge.storage.db import dumps, transaction
 
@@ -109,9 +110,27 @@ def build_match(query: str) -> tuple[str, list[str]]:
     return " ".join(parts), terms
 
 
+def build_any_match(query: str) -> tuple[str, list[str]]:
+    """Quote content words and explicit phrases, joined with OR."""
+    parts: list[str] = []
+    terms: list[str] = []
+    seen: set[str] = set()
+    for phrase, word in _PHRASE_RE.findall(query.lower()):
+        tokens = re.findall(r"\w+", phrase or word)
+        groups = [tokens] if phrase and tokens else [[t] for t in tokens if len(t) >= 2 and t not in STOPWORDS]
+        for group in groups:
+            value = " ".join(group)
+            if value in seen:
+                continue
+            seen.add(value)
+            parts.append(f'"{value}"')
+            terms.append(value)
+    return " OR ".join(parts), terms
+
+
 def _hit_page(text: str, spans: list[dict[str, int]], terms: list[str], default: int) -> int:
     lowered = text.lower()
-    positions = [lowered.find(t.lower()[:max(4, len(t) - 2)]) for t in terms]
+    positions = [lowered.find(t.lower()) for t in terms]
     positions = [p for p in positions if p >= 0]
     if not positions:
         return default
@@ -129,8 +148,10 @@ def search(
     limit: int = 10,
     max_per_paper: int = 3,
     raw: bool = False,
+    any_terms: bool = False,
 ) -> list[SearchHit]:
-    match, terms = (query, re.findall(r"\w+", query)) if raw else build_match(query)
+    builder = build_any_match if any_terms else build_match
+    match, terms = (query, re.findall(r"\w+", query)) if raw else builder(query)
     if not match:
         return []
     sql = """SELECT c.id, c.paper_id, c.kind, c.section_path, c.text, c.page_start, c.page_end,

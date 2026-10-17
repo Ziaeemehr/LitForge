@@ -12,6 +12,8 @@ import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from litforge.llm.budget import Pricing
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = REPO_ROOT / "configs" / "default.yaml"
 
@@ -85,6 +87,7 @@ class ModelProfileConfig(BaseModel):
     remote: bool = False
     base_url: str | None = None
     api_key_env: str | None = None
+    pricing: Pricing | None = None
 
 
 class ModelsConfig(BaseModel):

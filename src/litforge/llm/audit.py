@@ -20,6 +20,8 @@ class ModelCallRecord(BaseModel):
     cost_usd: float = 0
     status: str
     error: str | None = None
+    run_id: str | None = None
+    prompt_version: str = ""
 
 
 def record_model_call(conn: sqlite3.Connection, record: ModelCallRecord) -> str:
@@ -28,10 +30,11 @@ def record_model_call(conn: sqlite3.Connection, record: ModelCallRecord) -> str:
         conn.execute(
             """INSERT INTO model_calls(
                id, provider, model, task, input_hash, evidence_ids_json, input_tokens, output_tokens,
-               latency_ms, cost_usd, status, error, created_at
-               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               latency_ms, cost_usd, status, error, created_at, run_id, prompt_version
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (record_id, record.provider, record.model, record.task, record.input_hash,
              json.dumps(record.evidence_ids, separators=(",", ":")), record.input_tokens, record.output_tokens,
-             record.latency_ms, record.cost_usd, record.status, record.error, now()),
+             record.latency_ms, record.cost_usd, record.status, record.error, now(),
+             record.run_id, record.prompt_version),
         )
     return record_id

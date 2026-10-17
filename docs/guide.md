@@ -14,6 +14,10 @@ uv run litforge export
 - `new` creates a project and makes it active, so later commands don't need `--project`.
 - `add` imports, parses and indexes PDFs in one step. Run it again any time; nothing is processed twice.
 - `search` returns the paper, section, page and a quoted snippet for every hit.
+- `ask "your question" --evidence-only` retrieves evidence cards with stable IDs, section and page.
+  It stores full chunk snapshots and an analysis run; reindexing preserves the evidence. Add `--json`
+  for the run ID and spans, `-k 8` to set the number of cards, or `-p NAME` to choose a project.
+  Model-written answers arrive in phase 1.
 - `export` writes Markdown notes to `~/Downloads/LitForge/my-review/markdown/` and each paper's PDF under a readable name to `~/Downloads/LitForge/my-review/pdfs/` (set `LITFORGE_EXPORT_ROOT` to change the base folder, or pick a folder per project in the web UI); `--only relevant` keeps just the papers marked ✓ (`--only not-irrelevant` drops the ✗ ones).
 
 ## Relevance, importance and review priority
@@ -60,6 +64,27 @@ The policies are local_only, ask_before_cloud, and hybrid. Remote fallback is ne
 sensitive evidence and ask_before_cloud require explicit approval from the calling feature. The current
 screening UI continues to use Ollama by default; cloud-backed research features will opt into the
 gateway in later phases.
+
+Remote profiles need `pricing.input_per_million_usd` and `pricing.output_per_million_usd` before
+the gateway can dispatch. `litforge calls --limit 20` shows the audit log; `--run RUN_ID` filters
+one analysis run, and `--json` includes the recorded fields.
+
+### Measure retrieval
+
+```bash
+uv run litforge eval retrieval configs/benchmark.example.yaml -k 10 --json
+```
+
+Copy [benchmark.example.yaml](../configs/benchmark.example.yaml) and label questions against your
+own indexed papers. Use a paper ID, DOI or arXiv ID; optionally require a PDF page and a substring
+of the evidence text. Each question needs a unique ID and at least one target. YAML and JSON both
+work. A useful first benchmark has 30 questions from your reading, with the pages and passages you
+would expect to find; the example uses synthetic test papers.
+
+The command stores a run and reports mean Recall@k (fraction of targets found per question),
+hit-rate@k (questions with any target found), MRR (reciprocal rank of the first relevant hit), and
+missed targets. Retrieval currently uses lexical OR search over content words and quoted phrases.
+Keep the same benchmark when comparing future retrieval methods.
 
 ## Find papers
 

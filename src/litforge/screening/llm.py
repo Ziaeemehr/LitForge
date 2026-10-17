@@ -48,9 +48,13 @@ class OllamaClient:
         if self.name not in names and f"{self.name}:latest" not in names:
             raise LlmError(f"model {self.name} is not pulled; run `ollama pull {self.name}`")
 
-    def chat_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any]:
+    def chat_json(self, messages: list[dict[str, str]], schema: dict[str, Any],
+                  max_output_tokens: int | None = None) -> dict[str, Any]:
+        options = {"temperature": 0}
+        if max_output_tokens is not None:
+            options["num_predict"] = max_output_tokens
         reply = self._call("/api/chat", {"model": self.name, "messages": messages, "stream": False,
-                                         "think": False, "format": schema, "options": {"temperature": 0}})
+                                         "think": False, "format": schema, "options": options})
         content = (reply.get("message") or {}).get("content", "")
         try:
             out = json.loads(content)
