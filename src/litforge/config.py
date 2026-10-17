@@ -6,7 +6,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -75,6 +75,30 @@ class VisionConfig(BaseModel):
 
 class PrivacyConfig(BaseModel):
     allow_cloud: bool = False
+    send_full_pdf: bool = False
+    require_confirmation_for_sensitive_content: bool = True
+
+
+class ModelProfileConfig(BaseModel):
+    provider: str
+    model: str
+    remote: bool = False
+    base_url: str | None = None
+    api_key_env: str | None = None
+
+
+class ModelsConfig(BaseModel):
+    policy: Literal["local_only", "ask_before_cloud", "hybrid"] = "local_only"
+    local: ModelProfileConfig = Field(
+        default_factory=lambda: ModelProfileConfig(provider="ollama", model="qwen3:4b")
+    )
+    profiles: dict[str, ModelProfileConfig] = Field(default_factory=dict)
+
+
+class BudgetConfig(BaseModel):
+    max_per_call_usd: float = 1
+    max_per_run_usd: float = 2
+    max_per_month_usd: float = 20
 
 
 class Config(BaseModel):
@@ -85,6 +109,8 @@ class Config(BaseModel):
     screening: ScreeningConfig = Field(default_factory=ScreeningConfig)
     vision: VisionConfig = Field(default_factory=VisionConfig)
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
+    budget: BudgetConfig = Field(default_factory=BudgetConfig)
 
 
 class EnvSettings(BaseSettings):

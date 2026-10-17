@@ -47,6 +47,20 @@ Nothing leaves your computer.
 Changing the criteria or the model marks earlier results as stale; screening again re-checks them,
 and unchanged papers are not sent to the model twice.
 
+### Model gateway and cloud policy
+
+LitForge's model layer can also target an OpenAI-compatible endpoint, including a university-hosted
+vLLM server. Cloud use is disabled by default. The gateway routes only explicit evidence packets,
+never complete PDF bytes, and supports hard per-call, per-run, and monthly budgets. API keys are read from
+environment variables named by the configuration; their values are not stored in the database or logs.
+Named remote profiles can be added under `models.profiles`; each profile declares its endpoint, model,
+and API-key environment-variable name. No remote profile is configured by default.
+
+The policies are local_only, ask_before_cloud, and hybrid. Remote fallback is never silent:
+sensitive evidence and ask_before_cloud require explicit approval from the calling feature. The current
+screening UI continues to use Ollama by default; cloud-backed research features will opt into the
+gateway in later phases.
+
 ## Find papers
 
 ```bash

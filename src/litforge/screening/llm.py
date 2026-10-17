@@ -10,14 +10,9 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from litforge.config import ScreeningConfig
-
-
-class LlmError(RuntimeError):
-    pass
-
-
-class LlmUnavailable(LlmError):
-    """The server cannot be reached: stop the run instead of recording every paper as failed."""
+from litforge.llm import LlmError as LlmError
+from litforge.llm import LlmUnavailable as LlmUnavailable
+from litforge.llm import ModelReply
 
 
 class Llm(Protocol):
@@ -25,7 +20,11 @@ class Llm(Protocol):
 
     def check(self) -> None: ...
 
-    def chat_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any]: ...
+    def chat_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any] | ModelReply: ...
+
+
+def reply_content(reply: dict[str, Any] | ModelReply) -> dict[str, Any]:
+    return reply.content if isinstance(reply, ModelReply) else reply
 
 
 class OllamaClient:

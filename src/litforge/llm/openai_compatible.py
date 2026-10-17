@@ -29,12 +29,12 @@ class UrllibTransport:
 
 
 class OpenAICompatibleClient:
-    name = "openai_compatible"
+    provider = "openai_compatible"
 
     def __init__(self, base_url: str, model: str, api_key_env: str, transport: HttpTransport | None = None,
                  timeout_s: float = 120) -> None:
         self.base_url = base_url.rstrip("/")
-        self.model = model
+        self.name = self.model = model
         self.api_key_env = api_key_env
         self.transport = transport or UrllibTransport()
         self.timeout_s = timeout_s
@@ -66,7 +66,7 @@ class OpenAICompatibleClient:
             usage = response.get("usage") or {}
             return ModelReply(
                 content=parsed,
-                provider=self.name,
+                provider=self.provider,
                 model=self.model,
                 usage=ModelUsage(input_tokens=int(usage.get("prompt_tokens", 0)),
                                  output_tokens=int(usage.get("completion_tokens", 0))),

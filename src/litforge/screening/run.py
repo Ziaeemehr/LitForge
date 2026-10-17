@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from litforge.observability import EventLog
 from litforge.screening.criteria import criteria_hash, load_criteria
 from litforge.screening.decide import Decision, decide, failed_decision
-from litforge.screening.llm import Llm, LlmError, LlmUnavailable
+from litforge.screening.llm import Llm, LlmError, LlmUnavailable, reply_content
 from litforge.screening.prompt import PROMPT_VERSION, build_messages, fingerprint, response_schema
 from litforge.storage.db import now, transaction
 
@@ -61,7 +61,8 @@ def screen_run(conn: sqlite3.Connection, llm: Llm, run_id: str, top: int,
         error = ""
         for _attempt in range(2):  # one retry: small models occasionally break the JSON
             try:
-                decision = decide(llm.chat_json(messages, schema), criteria, p["title"], p["abstract"])
+                raw = reply_content(llm.chat_json(messages, schema))
+                decision = decide(raw, criteria, p["title"], p["abstract"])
                 break
             except LlmUnavailable:
                 raise

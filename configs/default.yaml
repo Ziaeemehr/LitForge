@@ -55,3 +55,18 @@ vision:
 
 privacy:
   allow_cloud: false
+  send_full_pdf: false
+  require_confirmation_for_sensitive_content: true
+
+models:
+  policy: local_only
+  local:
+    provider: ollama
+    model: qwen3:4b
+    remote: false
+  profiles: {}
+
+budget:
+  max_per_call_usd: 1
+  max_per_run_usd: 2
+  max_per_month_usd: 20

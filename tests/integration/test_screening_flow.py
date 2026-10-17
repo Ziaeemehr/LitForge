@@ -12,6 +12,8 @@ from typing import Any
 import pytest
 
 from litforge.config import Paths
+from litforge.llm import LlmError as ProviderLlmError
+from litforge.llm import ModelReply
 from litforge.projects import create_project
 from litforge.screening.criteria import Criteria, save_criteria
 from litforge.screening.llm import FakeLlm, LlmError, OllamaClient
@@ -166,6 +168,33 @@ def test_model_failure_retries_once_then_records_uncertain(conn: sqlite3.Connect
     row = conn.execute("SELECT decision, error FROM screening_results WHERE paper_id=?", (ids[0],)).fetchone()
     assert row["decision"] == "uncertain" and row["error"]
     assert screen_run(conn, FakeLlm(answer), run_id, top=5).screened == 1  # failed results are retried
+
+
+def test_provider_reply_and_shared_error_follow_screening_contract(
+    conn: sqlite3.Connection, paths: Paths
+) -> None:
+    _, run_id, ids = make_run(conn, paths, PAPERS[:1])
+
+    class Provider:
+        name = "large-model"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def check(self) -> None:
+            pass
+
+        def chat_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> ModelReply:
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderLlmError("temporary invalid response")
+            return ModelReply(content=answer(messages), provider="openai_compatible", model=self.name)
+
+    report = screen_run(conn, Provider(), run_id, top=1)
+    row = conn.execute("SELECT decision, model FROM screening_results WHERE paper_id=?", (ids[0],)).fetchone()
+    assert report.screened == 1
+    assert row["decision"] == "include"
+    assert row["model"] == "large-model"
 
 
 def test_no_criteria_or_unreachable_model_touches_nothing(conn: sqlite3.Connection, paths: Paths) -> None:

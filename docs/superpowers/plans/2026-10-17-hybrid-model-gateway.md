@@ -35,11 +35,11 @@
 
 **Produces:** ModelProvider, ModelReply, ModelUsage, shared errors, EvidenceItem and EvidencePacket.
 
-- [ ] Write tests for evidence-ID uniqueness, empty packets, sensitivity and deterministic hashes.
-- [ ] Run focused tests and verify RED because the package is absent.
-- [ ] Implement typed contracts and evidence models.
-- [ ] Run focused tests and verify GREEN.
-- [ ] Commit the contract foundation.
+- [x] Write tests for evidence-ID uniqueness, empty packets, sensitivity and deterministic hashes.
+- [x] Run focused tests and verify RED because the package is absent.
+- [x] Implement typed contracts and evidence models.
+- [x] Run focused tests and verify GREEN.
+- [x] Commit the contract foundation.
 
 ### Task 2: OpenAI-compatible provider
 
@@ -47,11 +47,11 @@
 
 **Produces:** OpenAICompatibleClient.chat_json(messages, schema) returning ModelReply through an injected transport.
 
-- [ ] Add tests for URL, bearer auth, schema request, response parsing, usage, missing keys and redacted HTTP errors.
-- [ ] Run tests and verify RED.
-- [ ] Implement the minimum client with environment lookup at dispatch.
-- [ ] Run focused tests and refactor while green.
-- [ ] Commit execution loop 1.
+- [x] Add tests for URL, bearer auth, schema request, response parsing, usage, missing keys and redacted HTTP errors.
+- [x] Run tests and verify RED.
+- [x] Implement the minimum client with environment lookup at dispatch.
+- [x] Run focused tests and refactor while green.
+- [x] Commit execution loop 1.
 
 ### Task 3: Routing and budgets
 
@@ -59,11 +59,11 @@
 
 **Produces:** ModelRouter.route(request, approved=False) and BudgetGuard.check.
 
-- [ ] Add tests for all policies, sensitive packets, approval, missing prices and hard limits.
-- [ ] Run tests and verify RED.
-- [ ] Implement typed config, routing and deterministic cost calculation.
-- [ ] Run focused tests and verify GREEN.
-- [ ] Commit routing and budget behavior.
+- [x] Add tests for all policies, sensitive packets, approval, missing prices and hard limits.
+- [x] Run tests and verify RED.
+- [x] Implement typed config, routing and deterministic cost calculation.
+- [x] Run focused tests and verify GREEN.
+- [x] Commit routing and budget behavior.
 
 ### Task 4: Call persistence
 
@@ -71,11 +71,11 @@
 
 **Produces:** record_model_call(conn, record) and model_calls rows without secret material.
 
-- [ ] Add failing migration and persistence tests, including absence of secrets.
-- [ ] Run focused tests and verify RED.
-- [ ] Implement the migration and audit writer.
-- [ ] Run database and gateway tests.
-- [ ] Commit execution loop 2.
+- [x] Add failing migration and persistence tests, including absence of secrets.
+- [x] Run focused tests and verify RED.
+- [x] Implement the migration and audit writer.
+- [x] Run database and gateway tests.
+- [x] Commit execution loop 2.
 
 ### Task 5: Backward-compatible screening integration
 
@@ -83,19 +83,19 @@
 
 **Preserves:** legacy imports, current CLI defaults and vision integration.
 
-- [ ] Add tests exercising a gateway provider through screening and resolving legacy imports.
-- [ ] Run screening tests and verify the new path is RED while legacy tests stay green.
-- [ ] Adapt the screening boundary and keep Ollama as default.
-- [ ] Run screening, vision and integration tests.
-- [ ] Commit gateway integration.
+- [x] Add tests exercising a gateway provider through screening and resolving legacy imports.
+- [x] Run screening tests and verify the new path is RED while legacy tests stay green.
+- [x] Adapt the screening boundary and keep Ollama as default.
+- [x] Run screening, vision and integration tests.
+- [x] Commit gateway integration.
 
 ### Task 6: Regression loop and documentation
 
 **Files:** Modify docs/guide.md and docs/local_ai_research_roadmap_fa.md; test the full project.
 
-- [ ] Run pytest, Ruff and mypy.
-- [ ] Ask Copilot auto/efficiency for a read-only review focused on secret leakage, cloud fallback and compatibility.
-- [ ] Re-grade findings and fix Important findings with a failing test first.
-- [ ] Rerun complete verification and inspect the branch diff.
-- [ ] Commit execution loop 3 and prepare handoff.
+- [x] Run pytest, Ruff and mypy.
+- [x] Attempt a Copilot auto/efficiency read-only review. Automatic approval review blocked exporting private repository content, so the review was completed locally.
+- [x] Re-grade findings and fix Important findings with a failing test first.
+- [x] Rerun complete verification and inspect the branch diff.
+- [x] Commit execution loop 3 and prepare handoff.
 

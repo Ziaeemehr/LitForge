@@ -6,10 +6,12 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from litforge.config import ModelProfileConfig, ModelsConfig, load_config
 from litforge.llm import EvidenceItem, EvidencePacket, LlmError, ModelReply
 from litforge.llm.budget import BudgetExceeded, BudgetGuard, Pricing
 from litforge.llm.openai_compatible import OpenAICompatibleClient
 from litforge.llm.router import CloudApprovalRequired, ModelProfile, ModelRequest, ModelRouter, RoutingError
+from litforge.screening.llm import reply_content
 
 
 def item(evidence_id: str = "e1", text: str = "reported result") -> EvidenceItem:
@@ -57,6 +59,7 @@ def test_openai_compatible_client_builds_request_and_parses_usage(monkeypatch: p
         transport=transport,
         timeout_s=9,
     )
+    assert client.name == "large-model"
     reply = client.chat_json([{"role": "user", "content": "question"}], {"type": "object"})
     assert reply == ModelReply(content={"decision": "include"}, provider="openai_compatible",
                                model="large-model", usage={"input_tokens": 12, "output_tokens": 4})
@@ -122,7 +125,7 @@ def test_hybrid_requires_task_cloud_permission() -> None:
 
 
 def test_budget_guard_requires_prices_and_enforces_call_and_run_limits() -> None:
-    guard = BudgetGuard(max_per_call_usd=1, max_per_run_usd=2)
+    guard = BudgetGuard(max_per_call_usd=1, max_per_run_usd=2, max_per_month_usd=3)
     with pytest.raises(BudgetExceeded, match="pricing"):
         guard.check(None, input_tokens=1, max_output_tokens=1, spent_usd=0)
     pricing = Pricing(input_per_million_usd=10, output_per_million_usd=20)
@@ -131,3 +134,35 @@ def test_budget_guard_requires_prices_and_enforces_call_and_run_limits() -> None
         guard.check(pricing, input_tokens=100_000, max_output_tokens=100_000, spent_usd=0)
     with pytest.raises(BudgetExceeded, match="run"):
         guard.check(pricing, input_tokens=10_000, max_output_tokens=10_000, spent_usd=1.8)
+    with pytest.raises(BudgetExceeded, match="month"):
+        guard.check(pricing, input_tokens=10_000, max_output_tokens=10_000, spent_usd=0,
+                    spent_month_usd=2.8)
+    assert guard.check_actual(pricing, input_tokens=10_000, output_tokens=5_000,
+                              spent_usd=0, spent_month_usd=0) == pytest.approx(0.2)
+
+
+def test_default_model_policy_is_local_and_cloud_disabled() -> None:
+    config = load_config()
+    assert config.models.policy == "local_only"
+    assert config.models.local.provider == "ollama"
+    assert config.privacy.allow_cloud is False
+    assert config.budget.max_per_run_usd == 2
+
+
+def test_named_remote_profiles_are_configurable() -> None:
+    config = ModelsConfig(profiles={
+        "reasoning": ModelProfileConfig(
+            provider="openai_compatible",
+            model="reasoning-model",
+            remote=True,
+            base_url="https://models.example/v1",
+            api_key_env="REASONING_API_KEY",
+        )
+    })
+    assert config.profiles["reasoning"].api_key_env == "REASONING_API_KEY"
+
+
+def test_screening_boundary_accepts_provider_reply() -> None:
+    reply = ModelReply(content={"decision": "include"}, provider="p", model="m")
+    assert reply_content(reply) == {"decision": "include"}
+    assert reply_content({"decision": "exclude"}) == {"decision": "exclude"}
