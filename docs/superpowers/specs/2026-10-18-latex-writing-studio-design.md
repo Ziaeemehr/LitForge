@@ -80,6 +80,10 @@ version is exactly this list; everything else in W1–W4 below waits until this 
 | Language model | Three actions on the selection, each shown as an accept/reject diff: fix compile error, rewrite (clearer / shorter / translate), suggest citations with quotes | Assistant chat, title/abstract, equation/table generators, completion while typing |
 | Safety | Local model by default; cloud only with approval; numbers and `\cite` keys not in the selection or evidence are flagged; compile with shell escape off, inside the document folder, with a time limit | — |
 
+Where it opens: inside the LitForge web page in the browser (the same page as Library, Ask and Matrix), as a new
+"Write" entry in the sidebar of each project; the editor and the compiled PDF sit side by side. No separate program
+or window. Implementation plan: docs/superpowers/plans/2026-10-18-writing-studio-v1.md.
+
 Size: about one W1-lite plus three W3 actions (medium). The heavy parts of the full plan — PDF.js, SyncTeX, git
 history, the assistant panel — are exactly the ones postponed.
 
