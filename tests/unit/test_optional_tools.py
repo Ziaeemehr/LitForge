@@ -82,6 +82,48 @@ def test_pix2text_install_uses_argv_and_install_root(tmp_path: Path, monkeypatch
     assert all((root / name).exists() for name in ("pyproject.toml", ".venv"))
 
 
+def _fake_source(tmp_path: Path, monkeypatch: Any, script: str) -> Any:
+    from litforge import tools
+
+    root = tmp_path / "source"
+    (root / "src" / "litforge").mkdir(parents=True)
+    (root / "pyproject.toml").write_text('[project]\nname = "litforge"\n')
+    module = root / "src" / "litforge" / "__init__.py"
+    module.touch()
+    uv = tmp_path / "uv"
+    uv.write_text("#!/bin/sh\n" + script)
+    uv.chmod(uv.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setattr(tools, "_package_file", lambda: module)
+    monkeypatch.setattr(tools.shutil, "which", lambda name: str(uv) if name == "uv" else None)
+    monkeypatch.setattr(tools, "_has_nvidia_gpu", lambda path: False)
+    return tools
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
+def test_interrupted_pix2text_install_stops_uv(tmp_path: Path, monkeypatch: Any) -> None:
+    pid_file = tmp_path / "pid"
+    tools = _fake_source(tmp_path, monkeypatch, f"echo $$ > '{pid_file}'\necho started\nexec sleep 30\n")
+
+    def interrupt(message: str) -> None:
+        if message == "started":
+            raise KeyboardInterrupt  # Ctrl-C while uv is running
+
+    with pytest.raises(KeyboardInterrupt):
+        tools.install_pix2text(interrupt, timeout_s=20)
+    pid = int(pid_file.read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
+def test_pix2text_progress_bounds_a_huge_line_without_newline(tmp_path: Path, monkeypatch: Any) -> None:
+    tools = _fake_source(tmp_path, monkeypatch,
+                         "head -c 3000000 /dev/zero | tr '\\0' x\nprintf '\\ndone\\n'\nmkdir -p .venv\n")
+    messages: list[str] = []
+    tools.install_pix2text(messages.append, timeout_s=20)
+    assert "done" in messages
+    assert max(map(len, messages)) <= tools._MAX_PROGRESS_LINE
+
+
 def test_tools_cli_installs_pix2text_with_confirmation_and_mineru_alias(
     tmp_path: Path, monkeypatch: Any
 ) -> None:

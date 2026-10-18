@@ -158,12 +158,13 @@ def install_pix2text(progress: Callable[[str], None] = lambda _: None, *,
     assert stream is not None
 
     def read_output() -> None:
-        for line in stream:
-            text = line.rstrip()[:_MAX_PROGRESS_LINE]
-            try:
-                output.put_nowait(text)
-            except queue.Full:
-                continue
+        # Read in bounded pieces: a huge line without a newline must not be held in memory.
+        skipping = False
+        while chunk := stream.readline(_MAX_PROGRESS_LINE):
+            if not skipping:
+                with suppress(queue.Full):
+                    output.put_nowait(chunk.rstrip())
+            skipping = not chunk.endswith("\n")  # drop the rest of an over-long line
 
     reader = threading.Thread(target=read_output, daemon=True, name="litforge-pix2text-output")
     reader.start()
@@ -180,26 +181,33 @@ def install_pix2text(progress: Callable[[str], None] = lambda _: None, *,
             with suppress(ProcessLookupError, PermissionError):
                 os.killpg(process.pid, sig)
 
-    with track_process(process.pid, terminate):
-        while process.poll() is None:
-            check_cancelled()
-            if time.monotonic() >= deadline:
-                terminate(os.name == "nt")
-                if os.name != "nt":
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        terminate(True)
-                process.wait()
-                reader.join(timeout=1)
-                raise subprocess.TimeoutExpired(argv, timeout)
+    def stop_install() -> None:
+        terminate(os.name == "nt")
+        if os.name != "nt":
             try:
-                message = output.get(timeout=0.2)
-            except queue.Empty:
-                continue
-            if message:
-                recent.append(message)
-                progress(message)
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                terminate(True)
+        process.wait()
+        reader.join(timeout=1)
+
+    with track_process(process.pid, terminate):
+        try:
+            while process.poll() is None:
+                check_cancelled()
+                if time.monotonic() >= deadline:
+                    raise subprocess.TimeoutExpired(argv, timeout)
+                try:
+                    message = output.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                if message:
+                    recent.append(message)
+                    progress(message)
+        except BaseException:
+            # Timeout, cancellation or Ctrl-C: uv runs in its own session, so stop it explicitly.
+            stop_install()
+            raise
     reader.join(timeout=1)
     while True:
         try:
