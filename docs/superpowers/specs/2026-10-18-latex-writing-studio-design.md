@@ -2,13 +2,13 @@
 
 Status: plan, not started.
 
-**Decision (2026-10-18):** the user keeps writing in VS Code. The path that will be built is **W0 + the LitForge
-MCP server** described next: LitForge's evidence, citations and checks become tools for the AI assistants already
-in VS Code (Claude Code, Copilot Chat, Continue), and LaTeX Workshop keeps doing editing, compiling and preview.
-The built-in editor (W1–W4 below) stays in this document as a **future plan that is not scheduled**; it is only
-reconsidered if the MCP path turns out not to be enough in practice.
+**Decision (2026-10-18, revised):** the **built-in editor is the main path** (W0 → Persian/Tectonic spike → W1 →
+W2 → W3, built in that order, each a usable release). Reason: it is the simplest experience for ordinary users —
+nothing to install or configure beyond LitForge itself — and keeps privacy guards and evidence links in one place.
+The MCP server below is a small optional add-on for users who prefer VS Code; it exposes the same tools and can be
+built after W2.
 
-## Chosen path: W0 + LitForge MCP server
+## Optional add-on: LitForge MCP server (for VS Code users)
 
 ### What the user does
 
@@ -62,9 +62,11 @@ citation, and squiggles from `check_text`/citation check, without going through 
 
 ---
 
-# Future plan (not scheduled): built-in editor
+# Main plan: built-in editor
 
-Phases are independent deliverables; each would get its own implementation plan and the usual review rounds.
+Phases are independent deliverables; each gets its own implementation plan and the usual review rounds before
+merge. Build order: W0, the Persian/Tectonic spike, W1-lite, the first three W3 actions (fix error, rewrite
+selection, suggest citations), then the rest of W1, W2 and W3.
 
 ## Why
 
@@ -225,7 +227,7 @@ Rough sizes (S ≈ a few days, M ≈ one to two weeks, L ≈ several weeks, each
 "write in LitForge, cite from the library, fix errors and polish text with a local model", with less than half the
 total work. Everything else follows only if this version is used in practice.
 
-**Cheaper alternative, if the editor itself is the bottleneck:** keep writing in an existing editor (VS Code with
+**Alternative kept for VS Code users (MCP add-on above):** keep writing in an existing editor (VS Code with
 LaTeX Workshop, TeXstudio or Overleaf) and make LitForge a companion: W0 export, a "cite" and "check citations"
 panel in the LitForge UI that edits the `.tex` file on disk, and the AI actions applied to a selected range of that
 file. This skips W1 almost entirely; the cost is a less integrated experience (two windows, no shared preview).
