@@ -92,10 +92,36 @@ try {
     if ($LASTEXITCODE -ne 0) {
         Fail 'could not add the LitForge icon'
     }
+
+    $extras = @()
+    if ($env:LITFORGE_EXTRAS) {
+        $extras = @($env:LITFORGE_EXTRAS.Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() })
+    }
+    $canPrompt = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and
+                 $env:LITFORGE_NO_PROMPT -ne '1'
+    foreach ($optional in @(
+        @{ Name = 'mineru'; Prompt = 'Install MinerU for accurate PDF reading (~4 GB)? [y/N]' },
+        @{ Name = 'pix2text'; Prompt = 'Install Pix2Text for better math in exports (~2 GB)? [y/N]' }
+    )) {
+        $install = $extras -contains $optional.Name
+        if (-not $install -and $canPrompt) {
+            $answer = Read-Host $optional.Prompt
+            $install = $answer -match '^(?i:y|yes)$'
+        }
+        if (-not $install) {
+            continue
+        }
+        $tool = $optional.Name
+        Native { uv run litforge tools install $tool --yes }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Optional $tool installation failed; retry with: cd '$dir'; uv run litforge tools install $tool"
+        }
+    }
 } finally {
     Pop-Location
 }
 
 Say "LitForge is installed in $dir. Open it from the LitForge icon on your desktop."
 Write-Host '    Run the same command again to update.'
+Write-Host "    Optional tools: Settings > Optional tools, or run 'uv run litforge tools' in $dir."
 }

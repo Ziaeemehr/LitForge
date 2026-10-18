@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -53,6 +54,7 @@ from litforge.screening.llm import Llm, LlmError, ollama_from_config
 from litforge.screening.run import preview_run, screen_run
 from litforge.storage.db import open_db
 from litforge.storage.recovery import repair_abandoned_runs
+from litforge.tools import install_pix2text, install_timeout_s, pix2text_install_status
 
 app = typer.Typer(help="Local-first scientific literature library.", no_args_is_help=True)
 project_app = typer.Typer(help="Manage project workspaces.", no_args_is_help=True)
@@ -315,13 +317,82 @@ def install_mineru_command(
     ctx: typer.Context,
     yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
 ) -> None:
+    _install_mineru(_state(ctx), yes)
+
+
+def _install_mineru(st: State, yes: bool) -> None:
     from litforge.parsing.mineru_parser import INSTALL_NOTICE, install_mineru
-    st = _state(ctx)
+
     typer.echo(INSTALL_NOTICE)
     typer.echo(f"Tool: {st.paths.root / 'tools' / 'mineru'}; models: {st.paths.root / 'models' / 'mineru'}")
     if not yes and not typer.confirm("Download and install MinerU?"):
         return
     install_mineru(st.paths, typer.echo, timeout_s=st.config.parsing.mineru.install_timeout_s)
+
+
+tools_app = typer.Typer(help="Check and install optional LitForge tools.", invoke_without_command=True)
+app.add_typer(tools_app, name="tools")
+tools_install_app = typer.Typer(help="Install optional tools.", no_args_is_help=True)
+tools_app.add_typer(tools_install_app, name="install")
+
+
+@tools_app.callback()
+def tools_status_command(ctx: typer.Context) -> None:
+    """Show optional parser, math and vision-model status."""
+    if ctx.invoked_subcommand:
+        return
+    from litforge.ui.server import App
+
+    status = App(_state(ctx).paths, _state(ctx).config).optional_tools_status()
+    mineru = status["mineru"]
+    pix2text = status["pix2text"]
+    vision = status["vision"]
+    vision_name = vision.get("model") or vision.get("message") or "Not configured"
+    vision_state = f"{'Ready' if vision.get('ready') else 'Not ready'} · {vision_name}"
+    rows = (
+        ("MinerU", f"Installed · {mineru['version']}" if mineru["installed"] else "Not installed", "~4 GB"),
+        ("Pix2Text", f"Installed · {pix2text['version']}" if pix2text["installed"] else
+         "Not installed" if pix2text["available"] else "Not available on this install", pix2text["size"]),
+        ("Image model", str(vision_state),
+         str(vision.get("notice") or "model-dependent")),
+    )
+    typer.echo(f"{'Tool':<14} {'Status':<42} Size / detail")
+    for name, state, size in rows:
+        typer.echo(f"{name:<14} {state:<42} {size}")
+    if not pix2text["installed"] and not pix2text["offerable"]:
+        typer.echo(f"Pix2Text command: {pix2text['command']}")
+
+
+@tools_install_app.command("pix2text")
+def install_pix2text_command(
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask for confirmation")] = False,
+) -> None:
+    """Install Pix2Text for Math: medium (~2 GB)."""
+    status = pix2text_install_status()
+    if not status["offerable"]:
+        typer.secho(f"Cannot install Pix2Text here. Run `{status['command']}` in the LitForge source root.",
+                    fg="yellow", err=True)
+        raise typer.Exit(1)
+    if not yes and not typer.confirm(f"Install Pix2Text for Math: medium ({status['size']})?"):
+        return
+    try:
+        result = install_pix2text(typer.echo, timeout_s=install_timeout_s())
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        typer.secho(f"Pix2Text installation failed: {exc}", fg="red", err=True)
+        raise typer.Exit(1) from exc
+    if result["installed"]:
+        typer.echo(f"Pix2Text {result['version']} installed.")
+    else:
+        typer.echo("Installation finished; restart LitForge to use Pix2Text.")
+
+
+@tools_install_app.command("mineru")
+def install_mineru_alias(
+    ctx: typer.Context,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask for confirmation")] = False,
+) -> None:
+    """Install MinerU for accurate PDF parsing (~4 GB)."""
+    _install_mineru(_state(ctx), yes)
 
 
 @parse_app.callback()

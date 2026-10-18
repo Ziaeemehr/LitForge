@@ -424,8 +424,8 @@ and exports stay intact. File failures are reported, and space estimates exclude
 3. **Index:** text is split into section-aware chunks and indexed with SQLite FTS5.
 
 [MinerU](https://github.com/opendatalab/MinerU) is the accurate local parser for equations,
-superscripts and tables. Install the pinned 4.0.12 release with `litforge parse install-mineru`
-(or Settings → Accurate PDF parsing). LitForge previews the size and asks before downloading;
+superscripts and tables. Install the pinned 4.0.12 release with `litforge tools install mineru`
+(also available as `litforge parse install-mineru`, or in Settings → Optional tools). LitForge previews the size and asks before downloading;
 `--yes` confirms from the command line. The isolated environment lives in `<data>/tools/mineru`,
 with about 2 GB of models under `<data>/models/mineru`, downloaded on first use; torch and other
 dependencies need additional disk space.
@@ -460,13 +460,29 @@ fragment lines) can be rewritten at two levels, before exporting (**Math** menu 
 
 | Level | How | Speed | Needs |
 |---|---|---|---|
-| medium | [Pix2Text](https://github.com/breezedeus/Pix2Text) finds every formula (inline and displayed) and reads it as LaTeX; the text stays as extracted | ~1.5 s/page on a GPU, ~5 s on a CPU | `uv sync --extra formulas-gpu` (NVIDIA) or `--extra formulas` (CPU) |
+| medium | [Pix2Text](https://github.com/breezedeus/Pix2Text) finds every formula (inline and displayed) and reads it as LaTeX; the text stays as extracted | ~1.5 s/page on a GPU, ~5 s on a CPU | ~2 GB; Settings → Optional tools or `litforge tools install pix2text`; otherwise `uv sync --extra formulas-gpu --inexact` (NVIDIA) or `uv sync --extra formulas --inexact` (CPU) |
 | high | a local vision model (Ollama, `qwen2.5vl:7b`) rewrites whole pages: formulas, tables and text, also in scanned papers; a transcription that does not match the page's text is rejected | ~12 s/page on a GPU, about a minute without | `ollama pull qwen2.5vl:7b` (8 GB of memory); the page offers to install Ollama and the model |
 
 Results are kept per page, so a later export or a higher level only processes what is new. Each
 note's front matter says how its equations were produced (`math: raw | medium | high`), so a
 language model reading the notes knows how far to trust them: a sensible workflow is to screen
 many papers with plain exports and rewrite only the ones you read closely.
+
+## Optional tools
+
+The base installer keeps large tools out of the default setup. It asks separately about MinerU and
+Pix2Text when run in an interactive terminal; answers default to No. Set
+`LITFORGE_EXTRAS="mineru,pix2text"` to install either or both without prompts, or
+`LITFORGE_NO_PROMPT=1` to suppress prompts. Failed optional installs do not undo the base install.
+Pix2Text installation times out after 45 minutes by default; set
+`LITFORGE_PIX2TEXT_INSTALL_TIMEOUT_S` to change the limit.
+The final installer hint and Settings → Optional tools list the same options.
+
+| Tool | Approximate size | What it improves | Install |
+|---|---:|---|---|
+| MinerU | ~4 GB | More accurate local PDF reading of equations and tables | Settings → Optional tools; `litforge tools install mineru` (alias: `litforge parse install-mineru`); installer prompt or `LITFORGE_EXTRAS=mineru` |
+| Pix2Text (Math: medium) | ~2 GB | Reads detected formulas as LaTeX in exported notes | Settings → Optional tools; `litforge tools install pix2text`; installer prompt or `LITFORGE_EXTRAS=pix2text`. Chooses the NVIDIA extra when a GPU is detected. |
+| Image/vision model (Math: high) | Depends on selected model | Rewrites whole pages, including formulas, tables and scanned text | Settings → Models (or the legacy setup action); the installer does not download models. `litforge tools` shows the resolved model status. |
 
 On 31 pages of 12 arXiv papers, scored against the papers' own LaTeX, both levels read about 95% of
 each displayed equation correctly (character similarity), Pix2Text finding a few more and the vision

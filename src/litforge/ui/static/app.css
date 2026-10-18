@@ -461,6 +461,11 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .side-foot { flex-wrap: wrap; }
 #view-settings { width: 100%; min-width: 0; }
 #view-settings .settings-card { padding: 16px; margin: 0 0 16px; min-width: 0; }
+#view-settings .tool-row { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 0; border-top: 1px solid var(--line); }
+#view-settings .tool-row h3, #view-settings .tool-row p { margin: 0 0 4px; }
+#view-settings .tool-row p:last-child { margin-bottom: 0; }
+#view-settings .tool-row button { flex: 0 0 auto; }
 #view-settings input:not([type=checkbox]), #view-settings select { width: 100%; min-width: 0; box-sizing: border-box; }
 #view-settings input:not([type=checkbox]) { padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
 #view-settings select { white-space: normal; overflow-wrap: anywhere; }

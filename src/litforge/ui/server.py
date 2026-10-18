@@ -64,6 +64,7 @@ from litforge.screening.run import screen_run
 from litforge.storage.cache import sha256_file
 from litforge.storage.db import open_db, transaction
 from litforge.storage.recovery import repair_abandoned_runs
+from litforge.tools import install_pix2text, install_timeout_s, pix2text_install_status
 from litforge.ui import api
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
@@ -137,6 +138,44 @@ class App:
                            timeout_s=self.config.parsing.mineru.install_timeout_s)
             job.report = mineru_status(self.paths, self.config.parsing)
         return self.start_job('mineru-install', '', work)
+
+    def pix2text_install_job(self, body: dict[str, Any]) -> Job:
+        if body.get("confirmed") is not True:
+            raise ValueError("Confirm the Pix2Text download size first")
+        status = pix2text_install_status()
+        if not status["offerable"]:
+            raise ValueError("Pix2Text installation is unavailable here; run `" + status["command"] + "` manually")
+        if any(j.kind == "pix2text-install" and j.status == "running" for j in self.jobs.values()):
+            raise ValueError("Pix2Text installation is already running")
+
+        def work(job: Job) -> None:
+            job.messages.append(f"Installing Pix2Text ({status['size']})…")
+
+            def progress(message: str) -> None:
+                if len(job.messages) < 200:
+                    job.messages.append(message[:500])
+                elif len(job.messages) == 200:
+                    job.messages.append("Further installer output is omitted.")
+
+            result = install_pix2text(progress, timeout_s=install_timeout_s())
+            job.report = result
+            if formulas_available():
+                job.messages.append("Pix2Text is ready for Math: medium.")
+            else:
+                job.messages.append("Installation finished. Restart LitForge to use Pix2Text.")
+
+        return self.start_job("pix2text-install", "", work)
+
+    def optional_tools_status(self) -> dict[str, Any]:
+        mineru = mineru_status(self.paths, self.config.parsing)
+        pix2text = pix2text_install_status()
+        pix2text.pop("root", None)
+        vision = self.math_setup_status()
+        return {
+            "mineru": {**mineru, "size": "~4 GB", "available": True},
+            "pix2text": pix2text,
+            "vision": {**vision, "legacy": not self._uses_model_settings(), "size": "model-dependent"},
+        }
 
     def mineru_parse_job(self, paper_id: str) -> Job:
         if not find_command(self.paths, self.config.parsing):
@@ -897,6 +936,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             try:
                 if path == "/api/mineru":
                     return self._json(mineru_status(app.paths, app.config.parsing))
+                if path == "/api/tools":
+                    return self._json(app.optional_tools_status())
                 if path == "/api/keys":
                     return self._json(app.keys.status())
                 if path == "/api/models/catalogue":
@@ -1000,6 +1041,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 body = self._body()
                 if url.path == "/api/mineru/install":
                     return self._json(app.mineru_install_job(body).__dict__)
+                if url.path == "/api/tools/pix2text/install":
+                    return self._json(app.pix2text_install_job(body).__dict__)
                 if m := re.fullmatch(r"/api/papers/([\w-]+)/parse-mineru", url.path):
                     return self._json(app.mineru_parse_job(m[1]).__dict__)
                 if url.path == "/api/library/remove":

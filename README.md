@@ -57,7 +57,7 @@ On Windows (PowerShell):
 powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Ziaeemehr/LitForge/main/install.ps1 | iex"
 ```
 
-Then open LitForge from its icon. Closing its page stops it after about two minutes; **⏻ Quit** stops it at once. Run the same line again to update.
+Then open LitForge from its icon. Closing its page stops it after about two minutes; **⏻ Quit** stops it at once. Run the same line again to update. The installer offers optional tools interactively; choose **No** (the default) to skip large downloads. Install later from Settings → Optional tools or with `litforge tools`. Set `LITFORGE_EXTRAS="mineru,pix2text"` to install either or both without prompts; `LITFORGE_NO_PROMPT=1` skips prompts.
 Details: [docs/install.md](docs/install.md). Scores, screening, the command line and storage:
 [docs/guide.md](docs/guide.md).
 

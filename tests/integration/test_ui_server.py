@@ -538,6 +538,44 @@ def test_math_setup_status_and_job(tmp_path: Path) -> None:
         httpd.server_close()
 
 
+def test_optional_tools_status_and_pix2text_install_origin_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import litforge.ui.server as server_module
+
+    app = App(Paths(tmp_path / "data"), load_config())
+    monkeypatch.setattr(server_module, "mineru_status", lambda *args: {"installed": False, "version": None})
+    monkeypatch.setattr(server_module, "formulas_available", lambda: False)
+    pix_status = {
+        "offerable": True, "installed": False, "command": "uv sync --extra formulas --inexact",
+        "extra": "formulas", "size": "~2 GB", "version": None, "gpu": False,
+    }
+    monkeypatch.setattr(server_module, "pix2text_install_status", lambda: pix_status)
+    monkeypatch.setattr(app, "math_setup_status", lambda: {"ready": False, "model": "vision-model"})
+    monkeypatch.setattr(server_module.App, "start_job", lambda self, kind, project, work:
+                        Job(id="pix-job", kind=kind, project=project))
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        status, tools = call(base, "/api/tools")
+        assert status == 200
+        assert tools["pix2text"]["offerable"] is True
+        assert tools["vision"]["model"] == "vision-model"
+        assert call(base, "/api/tools/pix2text/install", {}, headers={"Origin": "https://evil.example"})[0] == 403
+        assert call(base, "/api/tools/pix2text/install", {})[0] == 400
+        assert call(base, "/api/tools/pix2text/install", {"confirmed": True}) == (200, {
+            "id": "pix-job", "kind": "pix2text-install", "project": "", "status": "running",
+            "messages": [], "run_id": None, "error": None, "report": None,
+        })
+        pix_status["offerable"] = False
+        refused, error = call(base, "/api/tools/pix2text/install", {"confirmed": True})
+        assert refused == 400 and "uv sync --extra formulas" in error["error"]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def test_export_with_math_high_and_no_ollama_says_why(tmp_path: Path) -> None:
     config = load_config()
     probe = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(App(Paths(tmp_path / "x"), config)))

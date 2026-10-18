@@ -48,5 +48,44 @@ uv sync --extra embed --inexact  # --inexact: keep extras installed later, such 
 say "Adding the LitForge icon"
 uv run litforge shortcut
 
+extras=",${LITFORGE_EXTRAS:-},"
+tty_path="${LITFORGE_TTY:-/dev/tty}"
+interactive=false
+if [ "${LITFORGE_NO_PROMPT:-0}" != "1" ] && [ -r "$tty_path" ] && [ -w "$tty_path" ] &&
+   ( : <"$tty_path" ) 2>/dev/null; then
+  exec 3<"$tty_path" 4>>"$tty_path"  # answers in, questions out (also with curl | sh)
+  interactive=true
+fi
+
+install_optional() {
+  tool="$1"
+  if uv run litforge tools install "$tool" --yes; then
+    say "$tool installed"
+  else
+    printf 'warning: optional %s installation failed; retry with: cd "%s" && uv run litforge tools install %s\n' \
+      "$tool" "$dir" "$tool" >&2
+  fi
+}
+
+ask_optional() {
+  tool="$1"
+  prompt="$2"
+  case "$extras" in
+    *,"$tool",*) install_optional "$tool"; return ;;
+  esac
+  if [ "$interactive" != true ]; then
+    return
+  fi
+  printf '%s ' "$prompt" >&4
+  IFS= read -r answer <&3 || answer=""
+  case "$answer" in
+    y|Y|yes|YES|Yes) install_optional "$tool" ;;
+  esac
+}
+
+ask_optional mineru "Install MinerU for accurate PDF reading (~4 GB)? [y/N]"
+ask_optional pix2text "Install Pix2Text for better math in exports (~2 GB)? [y/N]"
+
 say "LitForge is installed in $dir. Open it from the LitForge icon in your apps."
 echo "    Run the same command again to update."
+echo "    Optional tools: Settings → Optional tools, or run 'uv run litforge tools' in $dir."

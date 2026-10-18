@@ -256,7 +256,8 @@
 
   // Better math (high) without Ollama or its model: what is missing, what this computer has, and an offer to
   // install. On success the export the user asked for runs (see poll).
-  function showMathSetup(st) {
+  function showMathSetup(st, fromSettings) {
+    state.settingsVisionSetup = !!fromSettings;
     var req = st.requirements, has = function (ok, text) {
       return '<li class="' + (ok ? 'ok' : 'no') + '">' + (ok ? '✓ ' : '✗ ') + text + '</li>';
     };
@@ -285,9 +286,11 @@
     }
     $('mathsetup-report').innerHTML = html;
     $('mathsetup-install').hidden = !canInstall;
-    $('mathsetup-install').textContent = st.installed ? 'Download the model and export' : 'Install and export';
+    $('mathsetup-install').textContent = fromSettings ?
+      (st.installed ? 'Download the image model' : 'Install the image model') :
+      (st.installed ? 'Download the model and export' : 'Install and export');
     var medium = $('export-math').querySelector('option[value="medium"]');
-    $('mathsetup-medium').hidden = medium.disabled;
+    $('mathsetup-medium').hidden = !!fromSettings || medium.disabled;
     $('mathsetup').showModal();
   }
 
@@ -1742,6 +1745,75 @@
   }
   /* ---------- End MinerU ---------- */
 
+  /* ---------- Optional tools ---------- */
+  function watchOptionalToolJob(job, target, done) {
+    return api('/api/jobs/' + encodeURIComponent(job.id)).then(function (report) {
+      target.textContent = (report.messages || []).join('\n') + (report.error ? '\n' + report.error : '');
+      if (report.status === 'running') {
+        setTimeout(function () { watchOptionalToolJob(job, target, done); }, 1500);
+      } else if (report.status === 'done') {
+        done();
+      }
+    }).catch(function (e) { target.textContent = e.message; });
+  }
+
+  function loadOptionalTools() {
+    return api('/api/tools').then(function (tools) {
+      var mineru = tools.mineru || {};
+      $('mineru-status').textContent = (mineru.installed ? 'Installed · ' + mineru.version : 'Not installed') +
+        ' · Size: ' + (mineru.size || '~4 GB') + (mineru.error ? ' · ' + mineru.error : '');
+      $('mineru-install').hidden = !!mineru.installed;
+      $('mineru-install').onclick = installMineru;
+
+      var pix = tools.pix2text || {};
+      $('tool-pix2text-status').textContent = pix.installed ?
+        'Installed · ' + pix.version + ' · ' + (pix.size || '~2 GB') :
+        pix.offerable ? 'Not installed · ' + (pix.size || '~2 GB') :
+          'Not available on this install. Run: ' + (pix.command || 'uv sync --extra formulas --inexact');
+      $('tool-pix2text-action').hidden = !!pix.installed || !pix.offerable;
+      $('tool-pix2text-action').textContent = 'Install Pix2Text…';
+      $('tool-pix2text-action').onclick = installPix2Text;
+
+      var vision = tools.vision || {};
+      var visionDetail = vision.message || (vision.model ? 'Model: ' + vision.model : 'No image model configured');
+      $('tool-vision-status').textContent = (vision.ready ? 'Ready · ' : 'Not ready · ') + visionDetail;
+      $('tool-vision-action').textContent = vision.legacy ? 'Set up image model…' : 'Open Models';
+      $('tool-vision-action').onclick = vision.legacy ? setupVisionTool : openVisionModels;
+    }).catch(function (e) {
+      $('mineru-status').textContent = e.message;
+      $('tool-pix2text-status').textContent = e.message;
+      $('tool-vision-status').textContent = e.message;
+    });
+  }
+
+  function installPix2Text() {
+    return api('/api/tools').then(function (tools) {
+      var pix = tools.pix2text || {};
+      if (!pix.offerable) {
+        $('tool-pix2text-status').textContent = 'Not available on this install. Run: ' +
+          (pix.command || 'uv sync --extra formulas --inexact');
+        return;
+      }
+      if (!window.confirm('Install Pix2Text for Math: medium (' + (pix.size || '~2 GB') + ')?')) return;
+      $('tool-pix2text-progress').textContent = 'Installing Pix2Text…';
+      return post('/api/tools/pix2text/install', { confirmed: true }).then(function (job) {
+        return watchOptionalToolJob(job, $('tool-pix2text-progress'), loadOptionalTools);
+      });
+    }).catch(function (e) { $('tool-pix2text-progress').textContent = e.message; });
+  }
+
+  function openVisionModels() {
+    showView('settings');
+    $('models-settings-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function setupVisionTool() {
+    return api('/api/math-setup').then(function (status) {
+      showMathSetup(status, true);
+    }).catch(function (e) { $('tool-vision-progress').textContent = e.message; });
+  }
+  /* ---------- End Optional tools ---------- */
+
   /* ---------- Models settings ---------- */
   var modelsInfo = null;
   var modelProviders = {
@@ -1976,7 +2048,7 @@
       }).catch(settingsError);
   }
   function loadSettings() {
-    return Promise.all([loadModels(), loadKeys(), loadMineru()]).then(function () {
+    return Promise.all([loadModels(), loadKeys(), loadOptionalTools()]).then(function () {
       if (modelsInfo && modelsInfo.proposal && modelsInfo.proposal.recommended_tier === 'cloud' && !$('cloud-cheap').value) return searchCatalogue();
     });
   }
@@ -3015,7 +3087,10 @@
     };
     $('missing-fetch').onclick = fetchMissing;
     $('added-close').onclick = function () { $('added').close(); };
-    $('mathsetup-close').onclick = $('mathsetup-cancel').onclick = function () { $('mathsetup').close(); };
+    $('mathsetup-close').onclick = $('mathsetup-cancel').onclick = function () {
+      state.settingsVisionSetup = false;
+      $('mathsetup').close();
+    };
     $('mathsetup-medium').onclick = function () {
       $('mathsetup').close();
       $('export-math').value = 'medium';
@@ -3024,6 +3099,14 @@
     };
     $('mathsetup-install').onclick = function () {
       $('mathsetup').close();
+      if (state.settingsVisionSetup) {
+        state.settingsVisionSetup = false;
+        $('tool-vision-progress').textContent = 'Setting up the image model…';
+        post('/api/math-setup', {}).then(function (job) {
+          return watchOptionalToolJob(job, $('tool-vision-progress'), loadOptionalTools);
+        }).catch(function (e) { $('tool-vision-progress').textContent = e.message; });
+        return;
+      }
       setBusy(true);
       post('/api/math-setup', { project: state.project }).then(poll)
         .catch(function (e) { setBusy(false); toast(e.message); });
@@ -3186,8 +3269,8 @@
       var medium = $('export-math').querySelector('option[value="medium"]');
       if (info.math && !info.math.medium) {  // Pix2Text is an optional install
         medium.disabled = true;
-        medium.textContent = 'Math: medium (install Pix2Text)';
-        medium.title = 'Run `uv sync --extra formulas-gpu` (NVIDIA GPU) or `uv sync --extra formulas` (CPU), then restart';
+        medium.textContent = 'Math: medium (install in Settings → Optional tools)';
+        medium.title = 'Install Pix2Text in Settings → Optional tools, or run uv sync --extra formulas --inexact';
         if ($('export-math').value === 'medium') $('export-math').value = 'off';
       }
     })
