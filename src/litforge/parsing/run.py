@@ -207,7 +207,8 @@ def parse_artifact(
             else:
                 message = f"{structural.name} fallback failed: {'; '.join(d_reasons)}"
         else:
-            message = 'Structural parser not installed; kept PyMuPDF output (run `litforge parse install-mineru`)'
+            message = ('Structural parser not installed; kept PyMuPDF output; '
+                       'install with `litforge parse install-mineru`')
     with transaction(conn):
         if status != 'failed' and (parser != 'mineru' or status == 'ok'):
             _set_current(conn, artifact['id'], current_id)

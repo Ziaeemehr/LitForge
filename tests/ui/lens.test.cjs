@@ -48,6 +48,12 @@ function setup() {
 }
 const flush = async () => { for (let i = 0; i < 5; i++) await new Promise(setImmediate); };
 
+test('legacy structural-parser statuses have a readable label', () => {
+  const { ctx } = setup();
+  assert.equal(ctx.lensLabel('needs_docling'), 'needs accurate parser');
+  assert.equal(ctx.lensLabel('parse_status:needs_docling'), 'needs accurate parser');
+});
+
 test('badges use readable labels, severity and hide open review status', () => {
   const { ctx, $ } = setup();
   ctx.lensBadges($('result'), ['REPORTED_FACT', 'NOT_REPORTED', 'OPEN', 'SENTENCE', 'partial', 'supported', 'accepted'],

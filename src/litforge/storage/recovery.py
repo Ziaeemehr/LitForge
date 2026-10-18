@@ -21,6 +21,17 @@ def _alive(pid: int) -> bool:
     return True
 
 
+def repair_model_reservations(conn: sqlite3.Connection) -> None:
+    """Release crashed/expired owners; callers serialize this with budget reservations."""
+    cutoff = (datetime.now(UTC) - timedelta(hours=OWNER_LEASE_HOURS)).isoformat(timespec="seconds")
+    rows = conn.execute(
+        "SELECT id,owner_pid,julianday(owner_started_at) < julianday(?) AS expired "
+        "FROM model_call_reservations", (cutoff,)).fetchall()
+    for row in rows:
+        if row["expired"] or not _alive(row["owner_pid"]):
+            conn.execute("DELETE FROM model_call_reservations WHERE id=?", (row["id"],))
+
+
 def repair_abandoned_runs(conn: sqlite3.Connection) -> None:
     """Keep live owners; legacy runs without an owner expire under the same lease."""
     cutoff = (datetime.now(UTC) - timedelta(hours=OWNER_LEASE_HOURS)).isoformat(timespec="seconds")

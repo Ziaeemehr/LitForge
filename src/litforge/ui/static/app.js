@@ -891,7 +891,7 @@
         reread.onclick = function () { rereadMineru(d); };
         var parseStatus = document.createElement('p'); parseStatus.id = 'mineru-paper-status';
         parseStatus.setAttribute('role', 'status');
-        parseStatus.textContent = mineruEstimate(d);
+        parseStatus.textContent = [d.parse_status_label, d.parse_status_hint, mineruEstimate(d)].filter(Boolean).join(' · ');
         $('dhead').appendChild(reread); $('dhead').appendChild(parseStatus);
       }
       attachReproTabs(d, request);
@@ -2134,6 +2134,7 @@
 
   function lensLabel(value) {
     var key = String(value).toLowerCase();
+    if (key === 'needs_docling' || key === 'parse_status:needs_docling') return 'needs accurate parser';
     return Object.prototype.hasOwnProperty.call(LENS_LABEL, key) ? LENS_LABEL[key] :
       key.replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); });
   }

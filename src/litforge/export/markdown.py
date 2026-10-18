@@ -11,8 +11,9 @@ from pathlib import Path
 
 import yaml
 
-from litforge.config import Paths
+from litforge.config import Config, Paths, load_config
 from litforge.parsing.canonical import read_canonical, to_markdown
+from litforge.parsing.display import parse_status_label, parser_install_hint
 from litforge.parsing.formulas import FORMULAS
 from litforge.parsing.vision import VISION, read_page_markdown
 from litforge.projects import MARK_SCOPES
@@ -36,6 +37,7 @@ def export_markdown(
     out_dir: Path | None = None,
     only: str = "all",
     paper_ids: Collection[str] | None = None,
+    config: Config | None = None,
 ) -> tuple[Path, int]:
     """Write <export folder>/markdown/{README.md, knowledge_base/*.md, assets/<slug>/...} and
     <export folder>/pdfs/<slug>.pdf; returns (root, papers) with root the markdown folder. Each paper's
@@ -70,6 +72,7 @@ def export_markdown(
         return root, 0
     kb.mkdir(parents=True, exist_ok=True)
     screened = any(r["s_decision"] for r in rows)
+    parse_hint = parser_install_hint((r["status"] for r in rows), paths, config or load_config(data_root=paths.root))
     previous = _previous_slugs(root / "manifest.json")
     written: dict[str, str] = {}  # paper id -> slug
     index_lines = [
@@ -104,6 +107,8 @@ def export_markdown(
             "math": math,
             "pdf_sha256": row["sha256"],
         }
+        if row["status"] == "needs_docling" and parse_hint:
+            front["parse_hint"] = parse_hint
         if row["s_decision"]:
             front["screening_decision"] = row["s_decision"]
             front["screening_score"] = round(row["s_score"], 3)
@@ -133,7 +138,9 @@ def export_markdown(
         (kb / f"{slug}.md").write_text(header + body, encoding="utf-8")
         index_lines.append(
             f"| [{title.replace('|', '/')}](knowledge_base/{slug}.md) | {row['year'] or ''} "
-            f"| {front['parse_status']} | {f'[PDF](../pdfs/{slug}.pdf)' if pdf else ''} |"
+            f"| {parse_status_label(front['parse_status'])}"
+            + (f"; {parse_hint}" if row["status"] == "needs_docling" and parse_hint else "")
+            + f" | {f'[PDF](../pdfs/{slug}.pdf)' if pdf else ''} |"
             + (f" {row['s_decision'] or ''} |" if screened else "")
         )
     for slug in previous - set(written.values()):

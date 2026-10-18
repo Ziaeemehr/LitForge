@@ -39,8 +39,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 
 @contextmanager
-def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
-    conn.execute("BEGIN")
+def transaction(conn: sqlite3.Connection, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:
+    conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
     try:
         yield conn
     except BaseException:

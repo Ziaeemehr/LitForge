@@ -36,6 +36,7 @@ from litforge.llm.budget import BudgetExceeded
 from litforge.llm.commands import register as register_models
 from litforge.llm.router import RoutingError
 from litforge.observability import EventLog
+from litforge.parsing.display import parse_status_label, parser_install_hint
 from litforge.parsing.run import artifacts_for_project, parse_artifact
 from litforge.pipeline import add_pdfs
 from litforge.projects import (
@@ -291,7 +292,9 @@ def add(
     statuses: dict[str, int] = {}
     for res in parsed:
         statuses[res.status or "?"] = statuses.get(res.status or "?", 0) + 1
-    typer.echo("parsed: " + (", ".join(f"{k} {v}" for k, v in sorted(statuses.items())) or "nothing"))
+    hint = parser_install_hint(statuses, st.paths, st.config)
+    typer.echo("parsed: " + (", ".join(f"{parse_status_label(k)} {v}" for k, v in sorted(statuses.items()))
+                            or "nothing") + (f"; {hint}" if hint else ""))
     chunks = sum(index_run(conn, st.paths, st.config, run).chunks for run in current_runs(conn, pid))
     typer.echo(f"indexed: {chunks} chunks. Try: litforge search \"your query\"")
 
@@ -356,8 +359,11 @@ def parse(
         if not as_json:
             color = "green" if res.status == "ok" else "yellow" if res.status != "failed" else "red"
             note = f" — {res.message}" if res.message else ""
+            hint = parser_install_hint([res.status], st.paths, st.config)
+            if hint and hint not in note:
+                note += f"; {hint}"
             reasons = "" if res.status == "ok" else f" ({'; '.join(res.route_reasons)})"
-            typer.secho(f"[{i}/{len(artifacts)}] {res.outcome:<7} {res.status:<14} "
+            typer.secho(f"[{i}/{len(artifacts)}] {res.outcome:<7} {parse_status_label(res.status):<14} "
                         f"{art['sha256'][:10]}{reasons}{note}", fg=color)
     if as_json:
         _emit_json(results)
@@ -538,7 +544,10 @@ def status(ctx: typer.Context, project: Annotated[str | None, typer.Option("--pr
     typer.echo(f"scope: {project or 'whole library'}")
     typer.echo(f"papers: {n_papers} ({n_pdf or 0} with PDF)")
     typer.echo("artifacts: " + (", ".join(f"{r['status']} {r['n']}" for r in art) or "none"))
-    typer.echo("current parses: " + (", ".join(f"{r['status']}/{r['parser']} {r['n']}" for r in runs) or "none"))
+    hint = parser_install_hint((r["status"] for r in runs), st.paths, st.config)
+    typer.echo("current parses: " + (", ".join(
+        f"{parse_status_label(r['status'])}/{r['parser']} {r['n']}" for r in runs) or "none")
+        + (f"; {hint}" if hint else ""))
     typer.echo(f"indexed chunks: {chunks}")
     typer.echo(f"possible duplicates awaiting review (library-wide): {dupes}")
 
@@ -568,7 +577,7 @@ def export(
         raise typer.Exit(2)
     if with_pdfs:
         _fetch(st, conn, pid, only)
-    out, count = export_markdown(conn, st.paths, name, pid, only=only)
+    out, count = export_markdown(conn, st.paths, name, pid, only=only, config=st.config)
     typer.echo(f"exported {count} papers to {out}")
 
 

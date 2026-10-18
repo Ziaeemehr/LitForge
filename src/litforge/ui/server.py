@@ -635,6 +635,7 @@ class App:
             c = self.db()
             try:
                 out, count = export_markdown(c, self.paths, project, pid, only=str(export.get("only") or "all"),
+                                             config=self.config,
                                              paper_ids=paper_ids)
             except OSError as exc:  # the PDFs are in; say why the notes are not, and keep the job done
                 job.report["export_error"] = str(exc)
@@ -764,7 +765,8 @@ class App:
                                         f"{vis.papers} papers" + (f", {vis.pages_rejected} kept as extracted"
                                                                  if vis.pages_rejected else ""))
                 if export:
-                    out, count = export_markdown(c, self.paths, project, pid, only=only, paper_ids=paper_ids)
+                    out, count = export_markdown(c, self.paths, project, pid, only=only, paper_ids=paper_ids,
+                                                 config=self.config)
                     job.messages.append(f"done: exported {count} papers to {out}")
             finally:
                 c.close()
@@ -938,7 +940,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(job.__dict__)
                 if m := re.fullmatch(r"/api/papers/([\w-]+)", path):
                     project_id = get_project_id(conn, query["project"]) if query.get("project") else None
-                    return self._json(api.paper_detail(conn, app.paths, m.group(1), project_id))
+                    return self._json(api.paper_detail(conn, app.paths, m.group(1), project_id, app.config))
                 if m := re.fullmatch(r"/api/papers/([\w-]+)/pdf", path):
                     pdf, name = api.paper_pdf(conn, app.paths, m.group(1))
                     return self._send(200, pdf.read_bytes(), "application/pdf",
@@ -1117,7 +1119,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     conn = app.db()
                     try:
                         pid = app.ensure_project(conn, body["project"], body.get("export_dir"))
-                        out, count = export_markdown(conn, app.paths, body["project"], pid,
+                        out, count = export_markdown(conn, app.paths, body["project"], pid, config=app.config,
                                                      only=body.get("only", "all"), paper_ids=body.get("paper_ids"))
                     finally:
                         conn.close()

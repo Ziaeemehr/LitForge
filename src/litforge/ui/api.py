@@ -43,6 +43,7 @@ from litforge.llm.model_setup import (
 )
 from litforge.llm.pricing import OpenRouterPricing
 from litforge.parsing.canonical import read_canonical, to_markdown
+from litforge.parsing.display import parse_status_label, parser_install_hint
 from litforge.parsing.vision import read_page_markdown
 from litforge.projects import MARK_SCOPES, get_project_id
 from litforge.screening import active, fulltext
@@ -270,12 +271,13 @@ def mineru_estimate_minutes(page_count: int | None, seconds_per_page: float) -> 
     return max(1, math.ceil((page_count or 1) * seconds_per_page / 60))
 
 
-def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_id: str | None) -> dict[str, Any]:
+def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_id: str | None,
+                 config: Config | None = None) -> dict[str, Any]:
     row = conn.execute("SELECT * FROM papers WHERE id=?", (paper_id,)).fetchone()
     if row is None:
         raise LookupError("paper not found")
     run = conn.execute(
-        """SELECT r.output_dir FROM parse_runs r JOIN artifacts a ON a.id = r.artifact_id
+        """SELECT r.output_dir,r.status FROM parse_runs r JOIN artifacts a ON a.id = r.artifact_id
            WHERE a.paper_id=? AND a.status='ok' AND r.is_current=1""", (paper_id,)
     ).fetchone()
     markdown = None
@@ -330,6 +332,9 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
         "oa_url": row["oa_url"], "cited_by_count": row["cited_by_count"], "abstract": row["abstract"],
         "authors": json.loads(row["authors_json"]) if row["authors_json"] else [],
         "has_pdf": pdf is not None, "page_count": page_count, "markdown": markdown, "mark": mark,
+        "parse_status_label": parse_status_label(run["status"]) if run else None,
+        "parse_status_hint": parser_install_hint([run["status"]], paths, config or load_config(data_root=paths.root))
+        if run and run["status"] == "needs_docling" else "",
         "mineru_seconds_per_page": seconds_per_page,
         "mineru_estimate_minutes": mineru_estimate_minutes(page_count, seconds_per_page),
         "unused": conn.execute('SELECT 1 FROM project_papers WHERE paper_id=? LIMIT 1', (paper_id,)).fetchone()

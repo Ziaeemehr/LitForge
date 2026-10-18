@@ -76,3 +76,26 @@ test('Drawer offers removal only for unused papers and selects that paper', asyn
     }
   }
 });
+
+test('Drawer displays the accurate-parser status and installation hint', async () => {
+  const { ctx, $ } = setup();
+  const children = [];
+  ctx.drawerRequest = 0;
+  $('drawer').classList = { add() {} };
+  $('drawer').setAttribute = () => {};
+  $('dhead').appendChild = node => children.push(node);
+  ctx.document = { createElement: () => ({ setAttribute() {} }) };
+  ctx.paperLinks = () => '';
+  ctx.renderPaperAssets = ctx.lensScreeningDetail = ctx.attachReproTabs = () => {};
+  ctx.window.renderMarkdown = () => {};
+  ctx.mineruEstimate = () => 'about 1 min';
+  ctx.api = async () => ({ id: 'p', authors: [], assets: [], pdf_url: '/pdf',
+    parse_status_label: 'needs accurate parser',
+    parse_status_hint: 'install with `litforge parse install-mineru`' });
+  vm.runInContext(app.slice(app.indexOf('  function openDrawer('), app.indexOf('  function closeDrawer(')), ctx);
+  ctx.openDrawer({ id: 'p', title: 'Paper' });
+  await new Promise(resolve => setImmediate(resolve));
+  const status = children.find(node => node.id === 'mineru-paper-status');
+  assert.match(status.textContent, /needs accurate parser.*install with `litforge parse install-mineru`/);
+  assert.doesNotMatch(status.textContent, /needs_docling/);
+});

@@ -5,7 +5,7 @@ import sqlite3
 
 from pydantic import BaseModel, Field
 
-from litforge.storage.db import new_id, now, transaction
+from litforge.storage.db import new_id, now
 
 
 class ModelCallRecord(BaseModel):
@@ -28,16 +28,16 @@ class ModelCallRecord(BaseModel):
 
 def record_model_call(conn: sqlite3.Connection, record: ModelCallRecord) -> str:
     record_id = new_id()
-    with transaction(conn):
-        conn.execute(
-            """INSERT INTO model_calls(
-               id, provider, model, task, input_hash, evidence_ids_json, input_tokens, output_tokens,
-               latency_ms, cost_usd, status, error, created_at, run_id, prompt_version, reasoning,
-               dropped_evidence_ids_json
-               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (record_id, record.provider, record.model, record.task, record.input_hash,
-             json.dumps(record.evidence_ids, separators=(",", ":")), record.input_tokens, record.output_tokens,
-             record.latency_ms, record.cost_usd, record.status, record.error, now(),
-             record.run_id, record.prompt_version, record.reasoning, json.dumps(record.dropped_evidence_ids)),
-        )
+    # A single INSERT is atomic and can also join the caller's reservation transaction.
+    conn.execute(
+        """INSERT INTO model_calls(
+           id, provider, model, task, input_hash, evidence_ids_json, input_tokens, output_tokens,
+           latency_ms, cost_usd, status, error, created_at, run_id, prompt_version, reasoning,
+           dropped_evidence_ids_json
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (record_id, record.provider, record.model, record.task, record.input_hash,
+         json.dumps(record.evidence_ids, separators=(",", ":")), record.input_tokens, record.output_tokens,
+         record.latency_ms, record.cost_usd, record.status, record.error, now(),
+         record.run_id, record.prompt_version, record.reasoning, json.dumps(record.dropped_evidence_ids)),
+    )
     return record_id

@@ -20,13 +20,15 @@ from litforge.config import Config, LlamaCppServerConfig, ModelProfileConfig, Re
 from litforge.jobs import check_cancelled
 from litforge.llm.audit import ModelCallRecord, record_model_call
 from litforge.llm.base import InvalidModelJson, LlmError, LlmUnavailable, ModelReply, ModelTextReply, ModelUsage
-from litforge.llm.budget import BudgetExceeded, BudgetGuard
+from litforge.llm.budget import BudgetExceeded, BudgetGuard, Pricing
 from litforge.llm.evidence import EvidencePacket
 from litforge.llm.files import file_lock
 from litforge.llm.openai_compatible import OpenAICompatibleClient, schema_messages
 from litforge.llm.pricing import OpenRouterPricing, PriceInfo
 from litforge.llm.router import CloudApprovalRequired, ModelProfile, ModelRequest, ModelRouter, RoutingError
 from litforge.screening.llm import OllamaClient
+from litforge.storage.db import new_id, now, transaction
+from litforge.storage.recovery import repair_model_reservations
 
 LOCAL_VISION = "local_vision"  # default route for image calls: the configured local vision model
 
@@ -149,14 +151,47 @@ class ModelGateway:
         spent_run = 0.0
         if run_id is not None:
             spent_run = float(self.conn.execute(
-                "SELECT COALESCE(SUM(cost_usd),0) FROM model_calls WHERE run_id=?", (run_id,),
+                "SELECT COALESCE(SUM(cost_usd),0) FROM ("
+                "SELECT cost_usd FROM model_calls WHERE run_id=? UNION ALL "
+                "SELECT cost_usd FROM model_call_reservations WHERE run_id=?)", (run_id, run_id),
             ).fetchone()[0])
         month = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
         spent_month = float(self.conn.execute(
-            "SELECT COALESCE(SUM(cost_usd),0) FROM model_calls WHERE julianday(created_at)>=julianday(?)",
-            (month,),
+            "SELECT COALESCE(SUM(cost_usd),0) FROM ("
+            "SELECT cost_usd FROM model_calls WHERE julianday(created_at)>=julianday(?) UNION ALL "
+            "SELECT cost_usd FROM model_call_reservations)", (month,),
         ).fetchone()[0])
         return spent_run, spent_month
+
+    def _reserve(self, price: Pricing | None, estimated: int, cap: int, run_id: str | None) -> str:
+        reservation_id = new_id()
+        with transaction(self.conn, immediate=True):
+            repair_model_reservations(self.conn)
+            cost = self._guard().check(price, estimated, cap, *self._spend(run_id))
+            timestamp = now()
+            self.conn.execute(
+                "INSERT INTO model_call_reservations(id,run_id,cost_usd,created_at,owner_pid,owner_started_at) "
+                "VALUES (?,?,?,?,?,?)", (reservation_id, run_id, cost, timestamp, os.getpid(), timestamp))
+        return reservation_id
+
+    def _finish_call(self, record: ModelCallRecord, reservation_id: str | None, price: Pricing | None) -> None:
+        if reservation_id is None:
+            record_model_call(self.conn, record)
+            return
+        exceeded = None
+        with transaction(self.conn, immediate=True):
+            self.conn.execute("DELETE FROM model_call_reservations WHERE id=?", (reservation_id,))
+            repair_model_reservations(self.conn)
+            if price is not None:
+                try:
+                    self._guard().check_actual(price, record.input_tokens, record.output_tokens,
+                                               *self._spend(record.run_id))
+                except BudgetExceeded as exc:
+                    record.status, record.error = "over_budget", "actual cost over budget"
+                    exceeded = exc
+            record_model_call(self.conn, record)
+        if exceeded is not None:
+            raise exceeded
 
     @staticmethod
     def _estimate(messages: list[dict[str, Any]], max_output_tokens: int,
@@ -235,6 +270,8 @@ class ModelGateway:
             cost = None if price is None else BudgetGuard._cost(price, estimated, cap)
             if blocked is None:
                 try:
+                    with transaction(self.conn, immediate=True):
+                        repair_model_reservations(self.conn)
                     self._guard().check(price, estimated, cap, *self._spend())
                 except BudgetExceeded:
                     blocked = "missing pricing" if price is None else "over budget"
@@ -349,10 +386,11 @@ class ModelGateway:
             raise VisionUnsupported("vision is not supported by this profile")
         self._context(cfg, estimated, cap)
         guard = self._guard()
-        spent_run, spent_month = self._spend(run_id)
         price = self.price_info(cfg).pricing if chosen.remote else None
         if chosen.remote:
-            guard.check(price, estimated, cap, spent_run, spent_month)
+            # Reject invalid pricing/per-call limits before constructing a provider. The
+            # authoritative cumulative check is serialized with the reservation below.
+            guard.check(price, estimated, cap, 0, 0)
         validate_options(cfg.extra_body, cfg.headers)
         provider = self._provider(chosen.name, cfg)
         if isinstance(provider, OpenAICompatibleClient) and chosen.remote:
@@ -400,6 +438,7 @@ class ModelGateway:
                        extra_body=cfg.extra_body, headers=cfg.headers, context_tokens=cfg.context_tokens)
         if cold and cfg.server and self.config.models.servers[cfg.server].managed:
             options["request_timeout_s"] = cfg.load_timeout_s
+        reservation_id = self._reserve(price, estimated, cap, run_id) if chosen.remote else None
         try:
             if isinstance(provider, OllamaClient | OpenAICompatibleClient):
                 if images:
@@ -432,25 +471,18 @@ class ModelGateway:
                 record.input_tokens, record.output_tokens = exc.usage.input_tokens, exc.usage.output_tokens
                 if chosen.remote and price is not None:
                     record.cost_usd = BudgetGuard._cost(price, record.input_tokens, record.output_tokens)
-                    try:
-                        guard.check_actual(price, record.input_tokens, record.output_tokens, spent_run, spent_month)
-                    except BudgetExceeded:
-                        record.status, record.error = "over_budget", "actual cost over budget"
-                        record_model_call(self.conn, record)
-                        raise
-            record_model_call(self.conn, record)
+            self._finish_call(record, reservation_id,
+                              price if isinstance(exc, InvalidModelJson) and exc.usage is not None else None)
             raise error from None
+        except BaseException:
+            if reservation_id is not None:
+                self.conn.execute("DELETE FROM model_call_reservations WHERE id=?", (reservation_id,))
+            raise
         record.latency_ms = int((time.monotonic() - started) * 1000)
         record.input_tokens, record.output_tokens = reply.usage.input_tokens, reply.usage.output_tokens
         if chosen.remote and price is not None:
             record.cost_usd = BudgetGuard._cost(price, record.input_tokens, record.output_tokens)
-            try:
-                guard.check_actual(price, record.input_tokens, record.output_tokens, spent_run, spent_month)
-            except BudgetExceeded:
-                record.status, record.error = "over_budget", "actual cost over budget"
-                record_model_call(self.conn, record)
-                raise
-        record_model_call(self.conn, record)
+        self._finish_call(record, reservation_id, price)
         return reply
 
     def call_vision(self, task: str, evidence: EvidencePacket, messages: list[dict[str, Any]],
