@@ -17,6 +17,7 @@ from litforge.analysis.ledger import EvidenceSpan, get_spans, record_spans, to_p
 from litforge.analysis.prompts import CITATION_TEXT_RULE, evidence_text
 from litforge.analysis.runs import canonical_json, finish_run, input_hash, link_evidence, start_run
 from litforge.analysis.validation import EvidenceText, citations, strip_evidence_mentions
+from litforge.discovery.versions import primary_paper_ids
 from litforge.indexing.fts import SearchHit, current_runs, search
 from litforge.llm.budget import BudgetExceeded
 from litforge.llm.evidence import EvidencePacket
@@ -88,18 +89,22 @@ def claim_messages(question: str, spans: list[EvidenceSpan], packet: EvidencePac
             {"role": "user", "content": question + "\n" + evidence_text(packet or to_packet(spans), spans)}]
 
 
-def paper_runs(conn: sqlite3.Connection, project_id: str, paper_ids: list[str] | None = None
+def paper_runs(conn: sqlite3.Connection, project_id: str, paper_ids: list[str] | None = None,
+               all_versions: bool = False
                ) -> dict[str, sqlite3.Row]:
     load_criteria(conn, project_id)
     members = {r[0] for r in conn.execute("SELECT paper_id FROM project_papers WHERE project_id=?", (project_id,))}
     if paper_ids is not None and set(paper_ids) - members:
         raise ValueError("selected paper is outside project")
+    primary = None if all_versions else primary_paper_ids(conn, project_id)
     return {r["paper_id"]: r for r in sorted(current_runs(conn, project_id),
                                              key=lambda r: (r["created_at"], r["id"]))
-            if paper_ids is None or r["paper_id"] in paper_ids}
+            if (paper_ids is None or r["paper_id"] in paper_ids) and
+            (primary is None or r["paper_id"] in primary)}
 
 
-def paper_spans(conn: sqlite3.Connection, paper_id: str, parse_id: str, question: str) -> list[EvidenceSpan]:
+def paper_spans(conn: sqlite3.Connection, paper_id: str, parse_id: str, question: str,
+                all_versions: bool = False) -> list[EvidenceSpan]:
     rows = conn.execute("SELECT c.*,p.title FROM chunks c JOIN papers p ON p.id=c.paper_id "
                         "WHERE c.parse_run_id=? ORDER BY c.order_idx,c.id", (parse_id,)).fetchall()
     rows = [r for r in rows if (r["text"] or "").strip()]
@@ -113,7 +118,7 @@ def paper_spans(conn: sqlite3.Connection, paper_id: str, parse_id: str, question
             if re.search("abstract|result|finding|discussion|conclusion", r["section_path"] or "", re.I)]
     if not hits and question.strip():
         hits = search(conn, question, paper_ids=[paper_id], parse_run_id=parse_id,
-                      limit=8, max_per_paper=8, any_terms=True)
+                      limit=8, max_per_paper=8, any_terms=True, all_versions=all_versions)
     if not hits:
         content = [r for r in rows if r["section_path"] != "Front matter"]
         front = [r for r in rows if r["section_path"] == "Front matter"]
@@ -123,11 +128,11 @@ def paper_spans(conn: sqlite3.Connection, paper_id: str, parse_id: str, question
 
 
 def _work(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, paper_ids: list[str] | None,
-          profile: str | None, force: bool, no_text: set[str] | None = None
+          profile: str | None, force: bool, no_text: set[str] | None = None, all_versions: bool = False
           ) -> Iterator[tuple[str, str, list[EvidenceSpan], CallPreview]]:
     question = load_criteria(conn, project_id).question
-    for paper_id, run in sorted(paper_runs(conn, project_id, paper_ids).items()):
-        spans = paper_spans(conn, paper_id, run["id"], question)
+    for paper_id, run in sorted(paper_runs(conn, project_id, paper_ids, all_versions).items()):
+        spans = paper_spans(conn, paper_id, run["id"], question, all_versions)
         if not spans:
             if no_text is not None:
                 no_text.add(paper_id)
@@ -144,13 +149,15 @@ def _work(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, pape
 
 
 def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, paper_ids: list[str] | None = None,
-               profile: str | None = None, force: bool = False) -> list[CallPreview]:
-    return [w[3] for w in _work(conn, gateway, project_id, paper_ids, profile, force)]
+               profile: str | None = None, force: bool = False,
+               all_versions: bool = False) -> list[CallPreview]:
+    return [w[3] for w in _work(conn, gateway, project_id, paper_ids, profile, force,
+                                 all_versions=all_versions)]
 
 
 def extract_claims(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str,
                    paper_ids: list[str] | None = None, profile: str | None = None, approved: bool = False,
-                   force: bool = False) -> ClaimsResult:
+                   force: bool = False, all_versions: bool = False) -> ClaimsResult:
     run_id = start_run(conn, "claim_extract", project_id, {"paper_ids": paper_ids},
                        {"profile": profile, "force": force}, PROMPT_VERSION)
     dropped = 0
@@ -158,9 +165,9 @@ def extract_claims(conn: sqlite3.Connection, gateway: ModelGateway, project_id: 
     try:
         question = load_criteria(conn, project_id).question
         no_text: set[str] = set()
-        work = list(_work(conn, gateway, project_id, paper_ids, profile, force, no_text))
+        work = list(_work(conn, gateway, project_id, paper_ids, profile, force, no_text, all_versions))
         pending = {w[0] for w in work}
-        selected = paper_runs(conn, project_id, paper_ids)
+        selected = paper_runs(conn, project_id, paper_ids, all_versions)
         cached = sum(p not in pending and p not in no_text and conn.execute(
             "SELECT 1 FROM claim_extractions WHERE project_id=? AND paper_id=?", (project_id, p)).fetchone() is not None
             for p in selected)

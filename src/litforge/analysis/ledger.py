@@ -9,6 +9,7 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel, ConfigDict
 
+from litforge.discovery.versions import format_version_label
 from litforge.indexing.fts import SearchHit
 from litforge.llm.evidence import EvidenceItem, EvidencePacket
 from litforge.storage.db import now, transaction
@@ -34,10 +35,14 @@ class EvidenceSpan(BaseModel):
     created_at: str
     title: str | None = None
     from_image: bool = False
+    version: str | None = None
+    version_source: str | None = None
+    version_label: str | None = None
 
     @property
     def citation(self) -> str:
-        return f"{self.title or self.paper_id}, p.{self.page}"
+        label = f", {self.version_label}" if self.version_label else ""
+        return f"{self.title or self.paper_id}{label}, p.{self.page}"
 
 
 def record_spans(conn: sqlite3.Connection, hits: Sequence[SearchHit]) -> list[EvidenceSpan]:
@@ -68,14 +73,28 @@ def record_spans(conn: sqlite3.Connection, hits: Sequence[SearchHit]) -> list[Ev
 
 def get_spans(conn: sqlite3.Connection, ids: Sequence[str]) -> list[EvidenceSpan]:
     spans = []
+    artifact_columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(artifacts)")}
+    has_version_metadata = {"version", "version_source", "version_label", "source_url"} <= artifact_columns
+    version_columns = (
+        "a.version, a.version_source, a.version_label, a.source_url" if has_version_metadata else
+        "NULL AS version, NULL AS version_source, NULL AS version_label, NULL AS source_url"
+    )
     for evidence_id in ids:
         row = conn.execute(
-            """SELECT e.*, p.title FROM evidence_spans e LEFT JOIN papers p ON p.id=e.paper_id
-               WHERE e.id=?""", (evidence_id,),
+            f"""SELECT e.*, p.title, {version_columns}
+                FROM evidence_spans e LEFT JOIN papers p ON p.id=e.paper_id
+                LEFT JOIN artifacts a ON a.id=(SELECT artifact_id FROM parse_runs WHERE id=e.parse_run_id)
+                WHERE e.id=?""", (evidence_id,),
         ).fetchone()
         if row is None:
             raise KeyError(evidence_id)
-        spans.append(EvidenceSpan.model_validate(dict(row)))
+        item = dict(row)
+        if item["version"] and item["version"] != "unknown":
+            item["version_label"] = format_version_label(
+                item["version"], item["source_url"], item["version_label"])
+        else:
+            item["version"] = item["version_source"] = item["version_label"] = None
+        spans.append(EvidenceSpan.model_validate(item))
     return spans
 
 

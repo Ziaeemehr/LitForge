@@ -75,7 +75,7 @@ def test_identity_migration_supports_existing_v22_and_fresh_schema(old_v22) -> N
     conn.execute("INSERT INTO model_call_reservations(id,cost_usd,created_at,owner_pid,owner_started_at) "
                  "VALUES ('existing',1,'2026-10-18',123,'2026-10-18')")
     migrate(conn)
-    assert schema_version(conn) == 23
+    assert schema_version(conn) == 24
     for table in ("watch_runs", "console_runs", "model_call_reservations"):
         assert "owner_process_started_at" in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
     assert conn.execute("SELECT id FROM model_call_reservations").fetchone()[0] == "existing"

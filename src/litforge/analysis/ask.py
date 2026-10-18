@@ -202,8 +202,9 @@ def get_answer(conn: sqlite3.Connection, run_id: str) -> Answer:
 
 def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_id: str | None = None,
                k: int = 8, profile: str | None = None, sensitive: bool = False,
-               paper_ids: list[str] | None = None) -> list[CallPreview]:
-    hits = retrieve_for_question(conn, question, project_id, k, paper_ids=paper_ids)
+               paper_ids: list[str] | None = None, all_versions: bool = False) -> list[CallPreview]:
+    hits = retrieve_for_question(conn, question, project_id, k, paper_ids=paper_ids,
+                                 all_versions=all_versions)
     spans = _question_spans(conn, hits, question, project_id, paper_ids)
     if not spans:
         return []
@@ -214,12 +215,13 @@ def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, question: str, p
 
 def ask(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_id: str | None = None,
         k: int = 8, profile: str | None = None, approved: bool = False, sensitive: bool = False,
-        paper_ids: list[str] | None = None) -> Answer:
+        paper_ids: list[str] | None = None, all_versions: bool = False) -> Answer:
     run_id = start_run(conn, "ask", project_id, {"question": question},
                        {"question": question, "retrieval": "lexical", "k": k, "profile": profile,
                         "sensitive": sensitive, "paper_ids": paper_ids}, ASK_PROMPT_VERSION)
     try:
-        hits = retrieve_for_question(conn, question, project_id, k, paper_ids=paper_ids)
+        hits = retrieve_for_question(conn, question, project_id, k, paper_ids=paper_ids,
+                                     all_versions=all_versions)
         spans = _question_spans(conn, hits, question, project_id, paper_ids)
         link_evidence(conn, run_id, spans, [*(h.score for h in hits), *([None] * (len(spans) - len(hits)))])
         model, provider = "", ""

@@ -47,6 +47,7 @@
       <option value="visible">Visible list</option>
     </select>
     <label class="check" id="fetch-wrap" title="Slower: before exporting, download open-access PDFs (arXiv, publisher copies) of the chosen papers that have none, so their notes contain the full text"><input type="checkbox" id="export-fetch"> with PDFs</label>
+    <label class="check" title="Include non-primary versions as separate notes"><input type="checkbox" id="export-all-versions"> all versions</label>
     <select id="export-math" title="Better math: how the pages with equations, tables or broken text are rewritten before exporting. Results are kept, so raising the level later only processes what is new.">
       <option value="off" title="The text extracted from the PDF; equations often come out garbled">Math: as extracted</option>
       <option value="medium" title="Pix2Text reads every formula as LaTeX; the text stays as extracted from the PDF. About 1-5 s per page">Math: medium (fast)</option>
@@ -278,6 +279,7 @@
         <input type="text" id="library-filter" placeholder="Filter by title, author, venue, project…">
         <button class="toggle" id="library-pdf" title="Show only papers whose PDF is in the library">With PDF only</button>
         <button class="toggle" id="library-unused" aria-pressed="false">Unused only</button>
+        <button class="toggle" id="library-versions" aria-pressed="false">Show all versions</button>
         <button class="btn small ghost danger" id="library-remove-unused">Remove unused papers…</button>
       </div>
       <div class="rows" id="library-list"></div>

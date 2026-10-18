@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 
 from litforge.config import Config, Paths, load_config
+from litforge.discovery.versions import format_version_label, primary_paper_ids, versions_for_paper
 from litforge.parsing.canonical import read_canonical, to_markdown
 from litforge.parsing.display import parse_status_label, parser_install_hint
 from litforge.parsing.formulas import FORMULAS
@@ -38,6 +39,7 @@ def export_markdown(
     only: str = "all",
     paper_ids: Collection[str] | None = None,
     config: Config | None = None,
+    all_versions: bool = False,
 ) -> tuple[Path, int]:
     """Write <export folder>/markdown/{README.md, knowledge_base/*.md, assets/<slug>/...} and
     <export folder>/pdfs/<slug>.pdf; returns (root, papers) with root the markdown folder. Each paper's
@@ -53,7 +55,8 @@ def export_markdown(
     kb = root / "knowledge_base"
     pdf_dir = root.parent / "pdfs"
     rows = conn.execute(
-        f"""SELECT p.id, p.title, p.year, p.doi, p.doi_status, p.abstract, a.sha256, a.pdf_path,
+        f"""SELECT p.id, p.title, p.year, p.doi, p.doi_status, p.abstract,
+                  a.sha256, a.pdf_path, a.version, a.version_source, a.source_url, a.version_label,
                   r.parser, r.status, r.output_dir,
                   s.decision AS s_decision, s.score AS s_score, s.result_json AS s_result
            FROM project_papers pp
@@ -65,6 +68,9 @@ def export_markdown(
            WHERE pp.project_id = ?{MARK_SCOPES[only]} ORDER BY p.year, p.title""",
         (project_id,),
     ).fetchall()
+    if not all_versions:
+        primary = primary_paper_ids(conn, project_id)
+        rows = [r for r in rows if r["id"] in primary]
     if paper_ids is not None:
         wanted = set(paper_ids)
         rows = [r for r in rows if r["id"] in wanted]
@@ -78,11 +84,12 @@ def export_markdown(
     index_lines = [
         f"# {project}\n",
         "> Private export: contains full extracted text and figure crops.\n",
-        "| Paper | Year | Status | PDF |" + (" Screening |" if screened else ""),
-        "|---|---|---|---|" + ("---|" if screened else ""),
+        "| Paper | Year | Version | Status | PDF |" + (" Screening |" if screened else ""),
+        "|---|---|---|---|---|" + ("---|" if screened else ""),
     ]
     for row in rows:
         title = row["title"] or f"Untitled ({(row['sha256'] or row['id'])[:8]})"
+        version_label = format_version_label(row["version"] or "unknown", row["source_url"], row["version_label"])
         slug = f"{slugify(title)}-{row['id'][:8]}"
         written[row["id"]] = slug
         math = "raw"
@@ -100,6 +107,13 @@ def export_markdown(
             "title": title,
             "year": row["year"],
             "doi": row["doi"],
+            "version": row["version"] or "unknown",
+            "version_source": row["version_source"] or "unknown",
+            "version_label": version_label,
+            "versions": [
+                {"paper_id": member["paper_id"], "doi": member["doi"], "role": member["role"]}
+                for member in versions_for_paper(conn, row["id"]) if member["confirmed"]
+            ] or [{"paper_id": row["id"], "doi": row["doi"]}],
             "doi_status": row["doi_status"],
             "project": project,
             "parse_status": row["status"] or ("not_parsed" if row["sha256"] else "no_pdf"),
@@ -132,13 +146,14 @@ def export_markdown(
                 dest = root / "assets" / slug / "assets"
                 shutil.copytree(out_dir / "assets", dest, dirs_exist_ok=True)
             body = to_markdown(doc, title, asset_prefix=f"../assets/{slug}/", page_md=read_page_markdown(out_dir))
+        body = f"> Source version: **{version_label}**\n\n" + body
         if links:
             body += "\n## Links\n\n" + "\n".join(links) + "\n"
         header = "---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n\n"
         (kb / f"{slug}.md").write_text(header + body, encoding="utf-8")
         index_lines.append(
             f"| [{title.replace('|', '/')}](knowledge_base/{slug}.md) | {row['year'] or ''} "
-            f"| {parse_status_label(front['parse_status'])}"
+            f"| {version_label} | {parse_status_label(front['parse_status'])}"
             + (f"; {parse_hint}" if row["status"] == "needs_docling" and parse_hint else "")
             + f" | {f'[PDF](../pdfs/{slug}.pdf)' if pdf else ''} |"
             + (f" {row['s_decision'] or ''} |" if screened else "")

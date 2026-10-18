@@ -21,6 +21,7 @@ from litforge.discovery.merge import apply_record, ensure_norm_titles, upsert_re
 from litforge.discovery.rank import rank
 from litforge.discovery.records import WorkRecord, normalize_arxiv_id
 from litforge.discovery.sources import Arxiv, Crossref, OpenAlex, SearchSource
+from litforge.discovery.versions import link_versions, suggest_similar_versions
 from litforge.metadata.extract import normalize_doi, normalize_title
 from litforge.projects import add_paper
 from litforge.storage.db import dumps, new_id, now, transaction
@@ -341,6 +342,9 @@ def enrich_project(
             for col in filled:
                 result.filled[col] = result.filled.get(col, 0) + 1
     result.cost_usd = round(sources.http.cost_usd, 4)
+    if rows:
+        link_versions(conn, sources.http, sources.openalex.mailto)
+        suggest_similar_versions(conn)
     return result
 
 

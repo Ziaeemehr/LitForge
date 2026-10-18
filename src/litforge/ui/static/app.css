@@ -210,6 +210,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .badge.new { background: var(--accent-soft); color: var(--accent); }
 .badge.pdf { background: var(--good-soft); color: var(--good); }
 .badge.oa { background: var(--chip); color: var(--good); }
+.badge.warn { background: var(--chip); color: var(--warn); text-transform: none; }
 .marks { display: flex; gap: 4px; }
 .marks button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; width: 28px; height: 24px; cursor: pointer; }
 .marks button.rel.on { background: var(--good-soft); border-color: var(--good); color: var(--good); }

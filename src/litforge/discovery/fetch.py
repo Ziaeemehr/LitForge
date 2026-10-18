@@ -20,11 +20,20 @@ from dataclasses import dataclass, field
 
 from litforge.config import Config, Paths
 from litforge.discovery.http import HttpClient, HttpError
+from litforge.discovery.versions import (
+    VersionCandidate,
+    format_version_label,
+    infer_version,
+    link_versions,
+    rank_candidates,
+    suggest_similar_versions,
+)
 from litforge.indexing.fts import current_runs, index_run
 from litforge.ingest import ingest_file
+from litforge.metadata.extract import normalize_doi
 from litforge.observability import NULL_LOG, EventLog
 from litforge.parsing.run import parse_artifact
-from litforge.projects import MARK_SCOPES
+from litforge.projects import MARK_SCOPES, add_paper
 from litforge.storage.db import now, transaction
 
 MAX_PDF_BYTES = 100 * 1024 * 1024
@@ -72,48 +81,69 @@ def candidate_urls(arxiv_id: str | None, oa_url: str | None,
     return urls
 
 
-def openalex_locations(http: HttpClient, openalex_id: str | None) -> tuple[list[str], list[str]]:
-    """Open-access copies OpenAlex lists for a work: (repository URLs, publisher URLs), PDFs first.
-    Single-work lookups are free; any failure just means fewer candidates."""
+def openalex_location_records(http: HttpClient, openalex_id: str | None) -> list[dict[str, object]]:
+    """OpenAlex OA locations, retaining their explicit version labels."""
     if not openalex_id:
-        return [], []
+        return []
     try:
         work = http.get_json(f"https://api.openalex.org/works/{openalex_id}?select=locations")
     except Exception:  # noqa: BLE001 - optional extra sources
-        return [], []
+        return []
+    if not isinstance(work, dict):
+        return []
+    locations = work.get("locations")
+    if not isinstance(locations, list):
+        return []
+    return [loc for loc in locations if isinstance(loc, dict) and loc.get("is_oa") and
+            (loc.get("pdf_url") or loc.get("landing_page_url"))]
+
+
+def openalex_locations(http: HttpClient, openalex_id: str | None) -> tuple[list[str], list[str]]:
+    """Open-access copies OpenAlex lists for a work: (repository URLs, publisher URLs), PDFs first."""
     repo_pdf: list[str] = []
     repo_page: list[str] = []
     pub_pdf: list[str] = []
     pub_page: list[str] = []
-    for loc in work.get("locations") or []:
-        if not loc.get("is_oa"):
-            continue
-        is_repo = (loc.get("source") or {}).get("type") == "repository"
-        if loc.get("pdf_url"):
-            (repo_pdf if is_repo else pub_pdf).append(loc["pdf_url"])
-        elif loc.get("landing_page_url"):
-            (repo_page if is_repo else pub_page).append(loc["landing_page_url"])
+    for loc in openalex_location_records(http, openalex_id):
+        source = loc.get("source")
+        is_repo = isinstance(source, dict) and source.get("type") == "repository"
+        pdf_url, landing_url = loc.get("pdf_url"), loc.get("landing_page_url")
+        if isinstance(pdf_url, str):
+            (repo_pdf if is_repo else pub_pdf).append(pdf_url)
+        elif isinstance(landing_url, str):
+            (repo_page if is_repo else pub_page).append(landing_url)
     return repo_pdf + repo_page, pub_pdf + pub_page
 
 
-def unpaywall_locations(http: HttpClient, doi: str | None, email: str | None) -> tuple[list[str], list[str]]:
-    """Open-access copies Unpaywall knows for a DOI: (repository URLs, publisher URLs), PDFs first.
-    Unpaywall requires the user's e-mail on every request, so without one it is not asked."""
+def unpaywall_location_records(http: HttpClient, doi: str | None, email: str | None) -> list[dict[str, object]]:
+    """Unpaywall OA locations, retaining their explicit version labels."""
     if not doi or not email:
-        return [], []
+        return []
     try:
         work = http.get_json(http.url(f"https://api.unpaywall.org/v2/{doi}", {"email": email}))
     except Exception:  # noqa: BLE001 - optional extra source
-        return [], []
+        return []
+    if not isinstance(work, dict):
+        return []
+    locations = work.get("oa_locations")
+    if not isinstance(locations, list):
+        return []
+    return [loc for loc in locations if isinstance(loc, dict) and
+            (loc.get("url_for_pdf") or loc.get("url"))]
+
+
+def unpaywall_locations(http: HttpClient, doi: str | None, email: str | None) -> tuple[list[str], list[str]]:
+    """Open-access copies Unpaywall knows for a DOI: (repository URLs, publisher URLs), PDFs first."""
     repo_pdf: list[str] = []
     repo_page: list[str] = []
     pub_pdf: list[str] = []
-    for loc in work.get("oa_locations") or []:
+    for loc in unpaywall_location_records(http, doi, email):
         is_repo = loc.get("host_type") == "repository"
-        if loc.get("url_for_pdf"):
-            (repo_pdf if is_repo else pub_pdf).append(loc["url_for_pdf"])
-        elif is_repo and loc.get("url"):
-            repo_page.append(loc["url"])
+        pdf_url, landing_url = loc.get("url_for_pdf"), loc.get("url")
+        if isinstance(pdf_url, str):
+            (repo_pdf if is_repo else pub_pdf).append(pdf_url)
+        elif is_repo and isinstance(landing_url, str):
+            repo_page.append(landing_url)
     return list(dict.fromkeys(repo_pdf + repo_page)), list(dict.fromkeys(pub_pdf))
 
 
@@ -188,25 +218,86 @@ def fetch_open_access(
     for i, row in enumerate(rows, 1):
         label = (row["title"] or row["id"])[:80]
         progress(f"[{i}/{len(rows)}] {label}")
-        oa_repo, oa_pub = openalex_locations(api_http, row["openalex_id"])
-        up_repo, up_pub = unpaywall_locations(api_http, row["doi"], mailto)
-        urls = candidate_urls(row["arxiv_id"], row["oa_url"], oa_repo + up_repo, oa_pub + up_pub)
-        if not urls:
+        current_pdf = conn.execute(
+            "SELECT 1 FROM artifacts WHERE paper_id=? AND status='ok' LIMIT 1", (row["id"],)
+        ).fetchone()
+        if current_pdf:
+            report.note(row, "skipped", "already has a PDF")
+            continue
+        oa_locations = openalex_location_records(api_http, row["openalex_id"])
+        up_locations = unpaywall_location_records(api_http, row["doi"], mailto)
+        candidates = rank_candidates(row["arxiv_id"], row["oa_url"], oa_locations, up_locations)
+        if not candidates:
             report.no_source += 1
             report.note(row, "no_source", "no free copy is known")
             continue
         body, errors = None, []
-        for url in urls:
+        candidate: VersionCandidate | None = None
+        for item in candidates:
             try:
-                body = download_pdf(http, url)
+                body = download_pdf(http, item.url)
+                candidate = item
                 break
             except Exception as exc:  # noqa: BLE001 - one bad host must not stop the batch
-                errors.append(f"{urllib.parse.urlsplit(url).netloc}: {_short(exc)}")
+                errors.append(f"{urllib.parse.urlsplit(item.url).netloc}: {_short(exc)}")
         if body is None:
-            link = f"https://doi.org/{row['doi']}" if row["doi"] else urls[0]
+            link = f"https://doi.org/{row['doi']}" if row["doi"] else candidates[0].url
             report.failed.append(f"{label}: {'; '.join(errors)} (open in a browser: {link})")
-            report.note(row, "failed", plain_reason(errors), urls)
+            report.note(row, "failed", plain_reason(errors), [c.url for c in candidates])
             log.emit("fetch.failed", paper_id=row["id"], errors=errors)
+            continue
+        assert candidate is not None
+        import pymupdf
+
+        from litforge.metadata.extract import extract_metadata
+
+        pdf = pymupdf.open(stream=body, filetype="pdf")
+        try:
+            pdf_meta = extract_metadata(pdf)
+            first_page_text = pdf[0].get_text() if pdf.page_count else ""
+        finally:
+            pdf.close()
+        pdf_doi = normalize_doi(str(pdf_meta.doi.value)) if pdf_meta.doi.value else None
+        paper_doi = normalize_doi(str(row["doi"])) if row["doi"] else None
+        if paper_doi and pdf_doi and paper_doi != pdf_doi:
+            # Do not silently attach a repository preprint with its own DOI to a published record.
+            known = conn.execute(
+                "SELECT id FROM papers WHERE lower(doi)=lower(?) ORDER BY id LIMIT 1", (pdf_doi,)
+            ).fetchone()
+            if known and conn.execute(
+                "SELECT 1 FROM artifacts WHERE paper_id=? AND status='ok' LIMIT 1", (known["id"],)
+            ).fetchone():
+                report.note(row, "skipped", f"PDF identifies as DOI {pdf_doi}; its known record already has a PDF")
+                continue
+            tmp = tmp_dir / f"{row['id']}.pdf"
+            tmp.write_bytes(body)
+            try:
+                result = ingest_file(conn, paths, tmp, None, log=log, paper_id=str(known["id"]) if known else None)
+            finally:
+                tmp.unlink(missing_ok=True)
+            if result.artifact_id:
+                version, version_source = infer_version(candidate.url, candidate.version, candidate.version_source,
+                                                        first_page_text)
+                version_label = format_version_label(version, candidate.url)
+                if version == "submitted" and candidate.version == "accepted":
+                    version_label = f"{version_label} (author-updated)" if version_label else version_label
+                conn.execute("UPDATE artifacts SET version=?,version_source=?,source_url=?,version_label=? WHERE id=?",
+                             (version, version_source, candidate.url,
+                              version_label, result.artifact_id))
+                if result.paper_id and result.paper_id != row["id"]:
+                    stored = conn.execute("SELECT doi FROM papers WHERE id=?", (result.paper_id,)).fetchone()
+                    if stored and stored["doi"] and stored["doi"].lower() == pdf_doi.lower():
+                        add_paper(conn, project_id, result.paper_id, "discovery")
+                        artifact = conn.execute("SELECT * FROM artifacts WHERE id=?", (result.artifact_id,)).fetchone()
+                        parse_artifact(conn, paths, config, artifact, log=log)
+                        new_artifacts.add(result.artifact_id)
+                        report.downloaded += 1
+            report.failed.append(
+                f"{label}: found a different work (PDF DOI {pdf_doi}); it was not attached to this record")
+            report.note(row, "failed", f"PDF identifies as DOI {pdf_doi}; selected record was left unchanged",
+                        [c.url for c in candidates])
+            report.items[-1]["version"] = version
+            report.items[-1]["version_source"] = version_source
             continue
         tmp = tmp_dir / f"{row['id']}.pdf"
         tmp.write_bytes(body)
@@ -228,22 +319,37 @@ def fetch_open_access(
             report.failed.append(f"{label}: {res.message or res.status}")
             report.note(row, "failed", res.message or res.status)
             continue
+        version, version_source = infer_version(candidate.url, candidate.version, candidate.version_source,
+                                                first_page_text)
+        label_text = "preprint downloaded" if version == "submitted" else f"{version} version downloaded"
+        if version == "submitted":
+            label_text += "; the published version is not openly available"
+        version_label = format_version_label(version, candidate.url)
+        if version == "submitted" and candidate.version == "accepted":
+            version_label = f"{version_label} (author-updated)" if version_label else version_label
+        conn.execute("UPDATE artifacts SET version=?,version_source=?,source_url=?,version_label=? WHERE id=?",
+                     (version, version_source, candidate.url, version_label, res.artifact_id))
         report.downloaded += 1
-        log.emit("fetch.downloaded", paper_id=row["id"], url=url, bytes=len(body))
+        log.emit("fetch.downloaded", paper_id=row["id"], url=candidate.url, bytes=len(body), version=version)
         artifact = conn.execute("SELECT * FROM artifacts WHERE id=?", (res.artifact_id,)).fetchone()
         parsed = parse_artifact(conn, paths, config, artifact, log=log)
         new_artifacts.add(res.artifact_id)
         if parsed.status != "failed":
             report.parsed += 1
-            report.note(row, "downloaded", f"full text extracted from {urllib.parse.urlsplit(url).netloc}")
+            report.note(row, "downloaded",
+                        f"{label_text}; full text extracted from {urllib.parse.urlsplit(candidate.url).netloc}")
+            report.items[-1]["version"] = version
+            report.items[-1]["version_source"] = version_source
         else:
             report.failed.append(f"{label}: downloaded but text extraction failed")
-            report.note(row, "downloaded", "downloaded, but its text could not be extracted")
+            report.note(row, "downloaded", f"{label_text}, but its text could not be extracted")
+            report.items[-1]["version"] = version
+            report.items[-1]["version_source"] = version_source
     if new_artifacts:
         progress("indexing the new text")
         for run in current_runs(conn, project_id):
             if run["artifact_id"] in new_artifacts:
                 index_run(conn, paths, config, run)
+        link_versions(conn, api_http, mailto)
+        suggest_similar_versions(conn)
     return report
-
-

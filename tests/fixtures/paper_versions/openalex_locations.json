@@ -1,0 +1,16 @@
+{
+  "locations": [
+    {
+      "is_oa": true,
+      "version": "submittedVersion",
+      "pdf_url": "https://biorxiv.org/content/10.1101/2024.01.01.123456v1.full.pdf",
+      "source": {"type": "repository"}
+    },
+    {
+      "is_oa": true,
+      "version": "publishedVersion",
+      "pdf_url": "https://publisher.example/article.pdf",
+      "source": {"type": "journal"}
+    }
+  ]
+}

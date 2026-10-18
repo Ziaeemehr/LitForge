@@ -6,9 +6,12 @@ const app = fs.readFileSync('src/litforge/ui/static/app.js', 'utf8');
 const html = fs.readFileSync('src/litforge/ui/static/index.html', 'utf8');
 function setup(confirm = true) {
   const elements = {}, calls = [], messages = [];
-  const $ = id => elements[id] ||= { value: '', innerHTML: '', textContent: '', querySelectorAll: () => [] };
+  const $ = id => elements[id] ||= { value: '', innerHTML: '', textContent: '', querySelectorAll: () => [],
+    appendChild() {}, replaceChildren() {}, classList: { add() {}, remove() {}, toggle() {} },
+    setAttribute() {}, getAttribute() { return ''; } };
   const ctx = vm.createContext({ $, state: { library: [
-    { id: 'p', title: '<bad>', authors: [], projects: [], has_pdf: true, unused: true },
+    { id: 'p', title: '<bad>', authors: [], projects: [], has_pdf: true, unused: true,
+      version: 'bioRxiv preprint, v1' },
     { id: 'q', title: 'Used', authors: [], projects: ['Demo'], unused: false }
   ] }, esc: s => String(s).replaceAll('<', '&lt;'),
     api: async url => { calls.push(['GET', url]); return url === '/api/library' ? [] : {
@@ -17,7 +20,10 @@ function setup(confirm = true) {
     post: async (url, body) => { calls.push(['POST', url, JSON.parse(JSON.stringify(body))]);
       return { removed: ['p'], refused: [], file_errors: [], bytes_freed: 2000000 }; },
     window: { confirm: msg => { messages.push(msg); return confirm; } }, closeDrawer() {},
-    toast: msg => messages.push(msg)
+    toast: msg => messages.push(msg),
+    document: { createElement: () => ({ textContent: '', appendChild() {}, setAttribute() {} }) },
+    lensNode: (tag, text, cls) => ({ tag, textContent: text, className: cls, appendChild() {} }),
+    lensButton: (text, onclick, cls) => ({ textContent: text, onclick, className: cls })
   });
   vm.runInContext(app.slice(app.indexOf('  function loadLibrary()'), app.indexOf('  // "+ New"')), ctx);
   return { ctx, $, calls, messages };
@@ -27,6 +33,7 @@ test('Library chip, unused filter, and bulk removal control', () => {
   ctx.renderLibrary();
   assert.match($('library-list').innerHTML, /Not in a project/);
   assert.match($('library-list').innerHTML, /&lt;bad>/);
+  assert.match($('library-list').innerHTML, /bioRxiv preprint, v1/);
   ctx.state.libraryUnused = true;
   ctx.renderLibrary();
   assert.doesNotMatch($('library-list').innerHTML, />Used</);
@@ -34,6 +41,28 @@ test('Library chip, unused filter, and bulk removal control', () => {
   assert.match(html, /id="library-remove-unused"[^>]*>Remove unused papers…/);
   assert.match(app, /d.unused[\s\S]*Remove from library/);
   assert.match(app, /btn-remove-paper[^\n]*onclick[^\n]*removeLibraryPapers\(\[d.id\]\)/);
+});
+test('Version drawer provides primary and suggestion actions without HTML interpolation', async () => {
+  const { ctx, $ } = setup();
+  ctx.drawerRequest = 0;
+  $('drawer').classList = { add() {} };
+  $('drawer').setAttribute = () => {};
+  ctx.paperLinks = () => '';
+  ctx.renderPaperAssets = ctx.lensScreeningDetail = ctx.attachReproTabs = () => {};
+  ctx.window.renderMarkdown = () => {};
+  ctx.api = async () => ({ id: 'p', title: 'Published', version: 'published', version_role: 'published',
+    primary: true, authors: [], assets: [], versions: [
+      { paper_id: 'p', role: 'published', confirmed: true, is_primary: true },
+      { paper_id: 'q', role: 'preprint', title: '<Draft>', confirmed: false }
+    ] });
+  vm.runInContext(app.slice(app.indexOf('  function openDrawer('), app.indexOf('  function closeDrawer(')), ctx);
+  ctx.openDrawer({ id: 'p', title: 'Published' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match($('dhead').innerHTML, /published/);
+  assert.match($('dbody').innerHTML, /paper-versions/);
+  assert.match(app, /Confirm link/);
+  assert.match(app, /Reject/);
+  assert.match(app, /\/api\/versions\/set-primary/);
 });
 test('Removal dialog shows preview counts, irreversible warning, posts preview IDs and refreshes', async () => {
   const { ctx, calls, messages } = setup();

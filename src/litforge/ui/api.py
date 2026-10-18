@@ -25,6 +25,14 @@ from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.ledger import get_spans
 from litforge.analysis.review import review_queue
 from litforge.config import TASK_NAMES, Config, Paths, contact_email, load_config, load_settings
+from litforge.discovery.versions import (
+    pdf_warning,
+    primary_paper_ids,
+    role_for_paper,
+    set_artifact_version,
+    version_display,
+    versions_for_paper,
+)
 from litforge.export.markdown import default_export_dir
 from litforge.library_cleanup import plan_removal, remove_papers
 from litforge.llm.hardware import Hardware, detect_hardware
@@ -87,7 +95,7 @@ def list_runs(conn: sqlite3.Connection, project_id: str | None, limit: int = 50)
     return out
 
 
-def library(conn: sqlite3.Connection, limit: int = 5000) -> list[dict[str, Any]]:
+def library(conn: sqlite3.Connection, limit: int = 5000, include_versions: bool = False) -> list[dict[str, Any]]:
     """Every paper in the library with its PDF status and the projects it belongs to."""
     rows = conn.execute(
         """SELECT p.id, p.title, p.year, p.venue, p.doi, p.arxiv_id, p.oa_url, p.authors_json, p.cited_by_count,
@@ -98,13 +106,17 @@ def library(conn: sqlite3.Connection, limit: int = 5000) -> list[dict[str, Any]]
            FROM papers p ORDER BY has_pdf DESC, p.year DESC, p.title LIMIT ?""",
         (limit,),
     ).fetchall()
+    primary = primary_paper_ids(conn)
     return [{
         "id": r["id"], "title": r["title"], "year": r["year"], "venue": r["venue"], "doi": r["doi"],
         "arxiv_id": r["arxiv_id"], "oa_url": r["oa_url"], "cited_by_count": r["cited_by_count"],
         "authors": (json.loads(r["authors_json"]) if r["authors_json"] else [])[:4], "has_pdf": bool(r["has_pdf"]),
         "projects": sorted(r["projects"].split("|")) if r["projects"] else [],
         "unused": bool(r["unused"]),
-    } for r in rows]
+        "primary": r["id"] in primary, "version": version_display(conn, r["id"]) or role_for_paper(conn, r["id"]),
+        "pdf_version": version_display(conn, r["id"]), "version_role": role_for_paper(conn, r["id"]),
+        "versions": versions_for_paper(conn, r["id"]), "pdf_warning": pdf_warning(conn, r["id"]),
+    } for r in rows if include_versions or r["id"] in primary]
 
 
 def _removal_ids(paper_ids: object) -> list[str] | None:
@@ -174,7 +186,7 @@ def _run_label(conn: sqlite3.Connection, kind: str, params: dict[str, Any]) -> s
     return str(params.get("title") or params.get("abstract") or ", ".join(params.get("queries") or []) or kind)
 
 
-def run_results(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
+def run_results(conn: sqlite3.Connection, run_id: str, all_versions: bool = False) -> dict[str, Any]:
     run = conn.execute("SELECT r.*, p.name AS project FROM discovery_runs r JOIN projects p ON p.id = r.project_id"
                        " WHERE r.id=?", (run_id,)).fetchone()
     if run is None:
@@ -194,6 +206,9 @@ def run_results(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
            WHERE d.run_id = ? ORDER BY priority DESC, d.score DESC, p.title""",
         (run["project_id"], run["project_id"], run_id),
     ).fetchall()
+    if not all_versions:
+        primary = primary_paper_ids(conn, run["project_id"])
+        rows = [r for r in rows if r["paper_id"] in primary]
     current = criteria_hash(load_criteria(conn, run["project_id"]))
     channels: dict[str, set[str]] = {}
     sources: dict[str, set[str]] = {}
@@ -210,6 +225,8 @@ def run_results(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
             "retracted": bool(r["is_retracted"]), "citation_percentile": r["citation_percentile"],
             "title": r["title"], "year": r["year"], "venue": r["venue"],
             "doi": r["doi"], "arxiv_id": r["arxiv_id"], "openalex_id": r["openalex_id"], "oa_url": r["oa_url"],
+            "version": version_display(conn, r["paper_id"]) or role_for_paper(conn, r["paper_id"]),
+            "version_role": role_for_paper(conn, r["paper_id"]),
             "cited_by_count": r["cited_by_count"], "has_pdf": bool(r["has_pdf"]), "mark": r["mark"],
             "new_to_project": bool(r["new_to_project"]), "reasons": json.loads(r["reasons_json"]),
             "components": components, "channels": sorted(channels.get(r["paper_id"], [])),
@@ -332,6 +349,11 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
         "oa_url": row["oa_url"], "cited_by_count": row["cited_by_count"], "abstract": row["abstract"],
         "authors": json.loads(row["authors_json"]) if row["authors_json"] else [],
         "has_pdf": pdf is not None, "page_count": page_count, "markdown": markdown, "mark": mark,
+        "version": version_display(conn, paper_id) or role_for_paper(conn, paper_id),
+        "pdf_version": version_display(conn, paper_id), "versions": versions_for_paper(conn, paper_id),
+        "pdf_warning": pdf_warning(conn, paper_id),
+        "version_role": role_for_paper(conn, paper_id),
+        "primary": paper_id in primary_paper_ids(conn, project_id),
         "parse_status_label": parse_status_label(run["status"]) if run else None,
         "parse_status_hint": parser_install_hint([run["status"]], paths, config or load_config(data_root=paths.root))
         if run and run["status"] == "needs_docling" else "",
@@ -347,6 +369,12 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
             "SELECT * FROM screening_history WHERE project_id=? AND paper_id=? ORDER BY rowid",
             (project_id, paper_id))] if project_id else [],
     }
+
+
+def set_paper_version(conn: sqlite3.Connection, paper_id: str, version: object) -> None:
+    if not isinstance(version, str):
+        raise ValueError("version must be a string")
+    set_artifact_version(conn, paper_id, version)
 
 
 def _pdf_path(conn: sqlite3.Connection, paths: Paths, paper_id: str) -> Path | None:
@@ -473,6 +501,7 @@ class LensRequest(BaseModel):
     sensitive: bool = False
     force: bool = False
     paper_ids: list[str] | None = None
+    all_versions: bool = False
     max_pairs: int = Field(default=200, ge=1)
     top: int | None = Field(default=None, ge=1)
 
@@ -483,7 +512,7 @@ def lens_plan(conn: sqlite3.Connection, gateway: ModelGateway, request: LensRequ
             raise ValueError('give a question')
         pid = get_project_id(conn, request.project) if request.project else None
         calls = answers.plan_calls(conn, gateway, request.question, pid, request.k,
-                                   request.profile, request.sensitive)
+                                   request.profile, request.sensitive, all_versions=request.all_versions)
     elif request.task == 'audit':
         calls = audits.plan_calls(conn, gateway, request.run_id, request.profile)
     elif request.task in ("claim_extract", "claim_relation", "screen_fulltext"):
@@ -491,15 +520,16 @@ def lens_plan(conn: sqlite3.Connection, gateway: ModelGateway, request: LensRequ
             raise ValueError("choose a project")
         pid = get_project_id(conn, request.project)
         if request.task == "claim_extract":
-            calls = claims.plan_calls(conn, gateway, pid, request.paper_ids, request.profile, request.force)
+            calls = claims.plan_calls(conn, gateway, pid, request.paper_ids, request.profile, request.force,
+                                      request.all_versions)
         elif request.task == "claim_relation":
             calls = claim_graph.plan_calls(conn, gateway, pid, request.max_pairs, request.profile, request.force)
         else:
             calls = fulltext.plan_calls(conn, gateway, pid, request.top, request.profile,
-                                        request.force, request.paper_ids)
+                                        request.force, request.paper_ids, request.all_versions)
     else:
         calls = matrices.plan_calls(conn, gateway, request.matrix_id, request.paper_ids,
-                                    request.profile, request.force)
+                                    request.profile, request.force, request.all_versions)
     return {
         'profiles': sorted({p.profile for p in calls}), 'providers': sorted({p.provider for p in calls}),
         'models': sorted({p.model for p in calls}), 'remote': any(p.remote for p in calls),
@@ -524,15 +554,22 @@ def lens_answer(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
     return data
 
 
-def lens_matrix(conn: sqlite3.Connection, matrix_id: str) -> dict[str, Any]:
+def lens_matrix(conn: sqlite3.Connection, matrix_id: str, all_versions: bool = False) -> dict[str, Any]:
     matrix = matrices.get_matrix(conn, matrix_id)
-    data = matrix.model_dump()
-    data['warnings'] = matrices.matrix_warnings(matrices.MatrixResult(run_id="", matrix=matrix, cells=matrix.cells))
+    project_id = matrix.project_id
+    if not all_versions:
+        primary = primary_paper_ids(conn, project_id)
+        matrix = matrix.model_copy(update={"cells": [c for c in matrix.cells if c.paper_id in primary]})
+    result = matrices.MatrixResult(run_id="", matrix=matrix, cells=matrix.cells)
+    data = result.model_dump()
+    data['warnings'] = matrices.matrix_warnings(result)
     data['evidence'] = [s.model_dump() for s in matrices.matrix_spans(conn, matrix)]
     data['papers'] = [dict(r) for r in conn.execute(
         'SELECT p.id,p.title FROM papers p WHERE (? IS NULL OR p.id IN '
         '(SELECT paper_id FROM project_papers WHERE project_id=?)) ORDER BY p.title',
-        (matrix.project_id, matrix.project_id))]
+        (project_id, project_id))]
+    if not all_versions:
+        data['papers'] = [p for p in data['papers'] if p["id"] in primary]
     return data
 
 
@@ -587,11 +624,15 @@ def fulltext_result(conn: sqlite3.Connection, project_id: str, paper_id: str) ->
     return data
 
 
-def lens_claims(conn: sqlite3.Connection, project_id: str, cluster_id: str | None = None) -> dict[str, Any]:
+def lens_claims(conn: sqlite3.Connection, project_id: str, cluster_id: str | None = None,
+                all_versions: bool = False) -> dict[str, Any]:
     if cluster_id and not conn.execute("SELECT 1 FROM claim_clusters WHERE id=? AND project_id=?",
                                        (cluster_id, project_id)).fetchone():
         raise KeyError(cluster_id)
     members = claims.list_claims(conn, project_id, cluster_id)
+    if not all_versions:
+        primary = primary_paper_ids(conn, project_id)
+        members = [claim for claim in members if claim.paper_id in primary]
     ids = {c.id for c in members}
     clusters = claim_graph.claim_landscape(conn, project_id)
     paper_ids = {c.paper_id for c in members}

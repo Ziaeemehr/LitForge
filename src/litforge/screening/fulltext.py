@@ -15,6 +15,7 @@ from litforge.analysis.gateway import CallPreview, ModelGateway
 from litforge.analysis.ledger import EvidenceSpan, record_spans, to_packet
 from litforge.analysis.prompts import evidence_text
 from litforge.analysis.runs import canonical_json, finish_run, input_hash, link_evidence, start_run
+from litforge.discovery.versions import primary_paper_ids
 from litforge.indexing.fts import search
 from litforge.llm.budget import BudgetExceeded
 from litforge.llm.evidence import EvidencePacket
@@ -92,19 +93,20 @@ type ScreeningWork = tuple[str, str, list[EvidenceSpan], list[dict[str, str]], C
 
 
 def _work(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, top: int | None,
-          profile: str | None, force: bool, paper_ids: list[str] | None
+          profile: str | None, force: bool, paper_ids: list[str] | None, all_versions: bool = False
           ) -> tuple[list[str], list[ScreeningWork], int]:
     if top is not None and top < 1:
         raise ValueError("top must be positive")
     c = load_criteria(conn, project_id)
     if c.is_empty():
         raise ValueError("no screening criteria: fill in the research question first")
-    runs = paper_runs(conn, project_id, paper_ids)
+    runs = paper_runs(conn, project_id, paper_ids, all_versions)
+    primary = None if all_versions else primary_paper_ids(conn, project_id)
     papers = [r[0] for r in conn.execute("SELECT pp.paper_id FROM project_papers pp JOIN papers p ON p.id=pp.paper_id "
               "WHERE pp.project_id=? ORDER BY COALESCE((SELECT MAX(COALESCE(d.priority,d.score)) "
               "FROM discovery_results d JOIN discovery_runs r ON r.id=d.run_id "
               "WHERE r.project_id=pp.project_id AND d.paper_id=p.id),0) DESC,p.title,p.id", (project_id,))
-              if paper_ids is None or r[0] in paper_ids]
+              if (paper_ids is None or r[0] in paper_ids) and (primary is None or r[0] in primary)]
     if top is not None:
         papers = papers[:top]
     needs_pdf = [p for p in papers if p not in runs]
@@ -115,7 +117,7 @@ def _work(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, top:
             continue
         hits = {h.chunk_id: h for criterion in (c.include + c.exclude or [c.question]) for h in search(
             conn, criterion + " " + c.question, paper_ids=[paper], parse_run_id=runs[paper]["id"],
-            limit=3, max_per_paper=3, any_terms=True)}
+            limit=3, max_per_paper=3, any_terms=True, all_versions=all_versions)}
         spans = [s.model_copy(update={"page": h.page}) for s, h in
                  zip(record_spans(conn, list(hits.values())), hits.values(), strict=True)]
         packet = to_packet(spans) if spans else None
@@ -139,19 +141,22 @@ def _work(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, top:
 
 def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, top: int | None = None,
                profile: str | None = None, force: bool = False, paper_ids: list[str] | None = None
+               , all_versions: bool = False
                ) -> list[CallPreview]:
-    return [w[4] for w in _work(conn, gateway, project_id, top, profile, force, paper_ids)[1] if w[4] is not None]
+    return [w[4] for w in _work(conn, gateway, project_id, top, profile, force, paper_ids,
+                                all_versions)[1] if w[4] is not None]
 
 
 def screen_fulltext(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, top: int | None = None,
                     profile: str | None = None, approved: bool = False, force: bool = False,
-                    paper_ids: list[str] | None = None) -> FulltextReport:
+                    paper_ids: list[str] | None = None, all_versions: bool = False) -> FulltextReport:
     run_id = start_run(conn, "screen_fulltext", project_id, {"top": top, "paper_ids": paper_ids},
                        {"profile": profile, "force": force}, PROMPT_VERSION)
     report = FulltextReport(run_id=run_id, project_id=project_id)
     try:
         c = load_criteria(conn, project_id)
-        report.needs_pdf, work, report.cached = _work(conn, gateway, project_id, top, profile, force, paper_ids)
+        report.needs_pdf, work, report.cached = _work(
+            conn, gateway, project_id, top, profile, force, paper_ids, all_versions)
         counts: Counter[str] = Counter()
         for paper, fp, spans, messages, preview in work:
             packet = None

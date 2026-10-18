@@ -149,7 +149,13 @@ def search(
     any_terms: bool = False,
     paper_ids: list[str] | None = None,
     parse_run_id: str | None = None,
+    all_versions: bool = False,
 ) -> list[SearchHit]:
+    if not all_versions:
+        from litforge.discovery.versions import primary_paper_ids
+
+        primary = primary_paper_ids(conn, project_id)
+        paper_ids = list(primary if paper_ids is None else primary.intersection(paper_ids))
     if paper_ids == [] or limit <= 0 or max_per_paper <= 0:
         return []
     builder = build_any_match if any_terms else build_match

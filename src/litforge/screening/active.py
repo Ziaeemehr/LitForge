@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from litforge.analysis.claims import paper_runs
 from litforge.discovery.textsim import tfidf_similarity
+from litforge.discovery.versions import primary_paper_ids
 from litforge.screening.criteria import load_criteria
 
 
@@ -25,7 +26,8 @@ class QueueItem(BaseModel):
     reason: str
 
 
-def review_queue(conn: sqlite3.Connection, project_id: str, limit: int = 20) -> list[QueueItem]:
+def review_queue(conn: sqlite3.Connection, project_id: str, limit: int = 20,
+                 all_versions: bool = False) -> list[QueueItem]:
     load_criteria(conn, project_id)
     if limit < 1:
         raise ValueError("limit must be positive")
@@ -35,6 +37,8 @@ def review_queue(conn: sqlite3.Connection, project_id: str, limit: int = 20) -> 
                         "LEFT JOIN screening_results s ON s.project_id=pp.project_id AND s.paper_id=p.id "
                         "LEFT JOIN fulltext_screening f ON f.project_id=pp.project_id AND f.paper_id=p.id "
                         "WHERE pp.project_id=? ORDER BY p.id", (project_id,)).fetchall()
+    primary = None if all_versions else primary_paper_ids(conn, project_id)
+    rows = [r for r in rows if primary is None or r["id"] in primary]
     marked = [r for r in rows if r["mark"] in ("relevant", "irrelevant")]
     texts = [f"{r['title'] or ''} {r['abstract'] or ''}" for r in marked]
     runs = paper_runs(conn, project_id)

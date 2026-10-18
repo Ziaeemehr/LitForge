@@ -44,6 +44,13 @@ from litforge.discovery.http import HttpClient
 from litforge.discovery.run import Sources, run_import, run_search
 from litforge.discovery.similar import run_similar
 from litforge.discovery.textsim import Embedder, load_embedder
+from litforge.discovery.versions import (
+    confirm_version_link,
+    link_versions,
+    reject_version_link,
+    set_primary,
+    suggest_similar_versions,
+)
 from litforge.export.markdown import default_export_dir, export_markdown
 from litforge.ingest import IngestResult
 from litforge.jobs import JobCancelled, JobControl, check_cancelled, job_scope
@@ -420,7 +427,7 @@ class App:
                 if request.task == 'ask':
                     pid = get_project_id(conn, request.project) if request.project else None
                     answer = answers.ask(conn, gateway, request.question, pid, request.k, request.profile,
-                                         request.approved, request.sensitive)
+                                         request.approved, request.sensitive, all_versions=request.all_versions)
                     job.report = api.lens_answer(conn, answer.run_id)
                     return answer.run_id
                 if request.task == 'audit':
@@ -434,17 +441,19 @@ class App:
                     phase2: claims.ClaimsResult | claim_graph.RelationsResult | fulltext.FulltextReport
                     if request.task == "claim_extract":
                         phase2 = claims.extract_claims(conn, gateway, pid, request.paper_ids, request.profile,
-                                                       request.approved, request.force)
+                                                       request.approved, request.force, request.all_versions)
                     elif request.task == "claim_relation":
                         phase2 = claim_graph.classify_relations(conn, gateway, pid, request.max_pairs, request.profile,
                                                                request.approved, request.force)
                     else:
                         phase2 = fulltext.screen_fulltext(conn, gateway, pid, request.top, request.profile,
-                                                        request.approved, request.force, request.paper_ids)
+                                                        request.approved, request.force, request.paper_ids,
+                                                        request.all_versions)
                     job.report = phase2.model_dump()
                     return phase2.run_id
                 result = matrices.extract_matrix(conn, gateway, request.matrix_id, request.paper_ids,
-                                                  request.profile, request.approved, request.force)
+                                                  request.profile, request.approved, request.force,
+                                                  request.all_versions)
                 job.report = api.lens_matrix(conn, request.matrix_id)
                 job.report['stats'] = {
                     'extracted': sum(c.run_id == result.run_id for c in result.cells),
@@ -812,7 +821,7 @@ class App:
                                                                  if vis.pages_rejected else ""))
                 if export:
                     out, count = export_markdown(c, self.paths, project, pid, only=only, paper_ids=paper_ids,
-                                                 config=self.config)
+                                                 config=self.config, all_versions=body.get("all_versions") is True)
                     job.messages.append(f"done: exported {count} papers to {out}")
             finally:
                 c.close()
@@ -966,7 +975,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     pid = get_project_id(conn, query["project"]) if query.get("project") else None
                     return self._json(api.list_runs(conn, pid, int(query.get("limit", 50))))
                 if path == "/api/library":
-                    return self._json(api.library(conn))
+                    return self._json(api.library(conn, include_versions=query.get("all_versions") == "1"))
                 if path == "/api/library/removal-preview":
                     raw_ids = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get('paper_ids')
                     ids = [p for value in raw_ids for p in value.split(',') if p] if raw_ids is not None else None
@@ -980,7 +989,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 if path == "/api/criteria":
                     return self._json({**api.get_criteria(conn, query["project"]), **self._screen_info()})
                 if m := re.fullmatch(r"/api/runs/([\w-]+)", path):
-                    return self._json(api.run_results(conn, m.group(1)))
+                    return self._json(api.run_results(conn, m.group(1), query.get("all_versions") == "1"))
                 if m := re.fullmatch(r"/api/jobs/(\w+)", path):
                     job = app.jobs.get(m.group(1))
                     if job is None:
@@ -1050,6 +1059,39 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     try:
                         return self._json(api.library_remove(conn, app.paths, body.get('paper_ids'),
                                                              all_unused=body.get('all_unused', False)))
+                    finally:
+                        conn.close()
+                if url.path == "/api/versions/set-primary":
+                    conn = app.db()
+                    try:
+                        set_primary(conn, str(body.get("paper_id") or ""))
+                        return self._json({"ok": True})
+                    finally:
+                        conn.close()
+                if url.path in ("/api/versions/confirm", "/api/versions/reject"):
+                    conn = app.db()
+                    try:
+                        a, b = str(body.get("a") or ""), str(body.get("b") or "")
+                        if url.path.endswith("/confirm"):
+                            confirm_version_link(conn, a, b)
+                        elif not reject_version_link(conn, a, b):
+                            raise ValueError("no pending suggestion links these papers")
+                        return self._json({"ok": True})
+                    finally:
+                        conn.close()
+                if url.path == "/api/versions/set":
+                    conn = app.db()
+                    try:
+                        api.set_paper_version(conn, str(body.get("paper_id") or ""), body.get("version"))
+                        return self._json({"ok": True})
+                    finally:
+                        conn.close()
+                if url.path == "/api/versions/link":
+                    conn = app.db()
+                    try:
+                        linked = link_versions(conn, app.make_http(), contact_email(app.paths, app.config))
+                        suggested = suggest_similar_versions(conn)
+                        return self._json({"linked": linked, "suggested": suggested})
                     finally:
                         conn.close()
                 if url.path == "/api/keys":
@@ -1236,14 +1278,18 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     if path.startswith("/api/claims") or path == "/api/queue":
                         phase2_pid = get_project_id(conn, query.get("project", ""))
                         if path == "/api/queue":
-                            return self._json([i.model_dump() for i in active.review_queue(
-                                conn, phase2_pid, int(query.get("limit", "20")))])
+                            items = active.review_queue(
+                                conn, phase2_pid, int(query.get("limit", "20")),
+                                all_versions=query.get("all_versions") == "1")
+                            return self._json([i.model_dump() for i in items])
                         if path == "/api/claims/landscape":
                             return self._json([i.model_dump() for i in claim_graph.claim_landscape(conn, phase2_pid)])
                         if path == "/api/claims":
-                            return self._json(api.lens_claims(conn, phase2_pid, query.get("cluster")))
+                            return self._json(api.lens_claims(
+                                conn, phase2_pid, query.get("cluster"), query.get("all_versions") == "1"))
                         if match := re.fullmatch(r"/api/claims/clusters/([\w-]+)", path):
-                            return self._json(api.lens_claims(conn, phase2_pid, match[1]))
+                            return self._json(api.lens_claims(
+                                conn, phase2_pid, match[1], query.get("all_versions") == "1"))
                     if path == '/api/review':
                         review_pid = get_project_id(conn, query['project']) if query.get('project') else None
                         return self._json(api.lens_reviews(conn, review_pid))
@@ -1262,7 +1308,7 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                             content = matrices.export_matrix(conn, match[1], fmt)
                             headers = {'Content-Disposition': f'attachment; filename="matrix-{match[1]}.{fmt}"'}
                             return self._send(200, content.encode(), types[fmt] + '; charset=utf-8', headers)
-                        return self._json(api.lens_matrix(conn, match[1]))
+                        return self._json(api.lens_matrix(conn, match[1], query.get("all_versions") == "1"))
                 else:
                     if path == "/api/console/plan":
                         request_text = str(body.get("request") or "")

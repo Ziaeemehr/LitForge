@@ -1,0 +1,14 @@
+{
+  "oa_locations": [
+    {
+      "host_type": "repository",
+      "version": "submittedVersion",
+      "url_for_pdf": "https://repository.example/preprint.pdf"
+    },
+    {
+      "host_type": "publisher",
+      "version": "publishedVersion",
+      "url_for_pdf": "https://publisher.example/version-of-record.pdf"
+    }
+  ]
+}

@@ -28,6 +28,17 @@ from litforge.discovery.http import HttpClient
 from litforge.discovery.run import DiscoveryReport, Sources, enrich_project, run_citations, run_import, run_search
 from litforge.discovery.similar import run_similar
 from litforge.discovery.textsim import load_embedder
+from litforge.discovery.versions import (
+    backfill_unknown_versions,
+    confirm_version_link,
+    link_versions,
+    pdf_warning,
+    primary_paper_ids,
+    reject_version_link,
+    set_artifact_version,
+    set_primary,
+    suggest_similar_versions,
+)
 from litforge.doctor import run_checks
 from litforge.export.markdown import export_markdown
 from litforge.indexing.fts import current_runs, index_run, search
@@ -63,6 +74,8 @@ library_app = typer.Typer(help="Manage papers in the shared library.", no_args_i
 app.add_typer(library_app, name="library")
 eval_app = typer.Typer(help="Evaluate retrieval quality.", no_args_is_help=True)
 app.add_typer(eval_app, name="eval")
+versions_app = typer.Typer(help="Inspect and manage preprint, accepted and published versions.")
+app.add_typer(versions_app, name="versions")
 register_models(app)
 
 
@@ -500,10 +513,12 @@ def ask(
     audit: Annotated[bool, typer.Option("--audit/--no-audit")] = True,
     audit_profile: Annotated[str | None, typer.Option("--audit-profile")] = None,
     sensitive: Annotated[bool, typer.Option("--sensitive")] = False,
+    all_versions: Annotated[bool, typer.Option("--all-versions", help="Use non-primary versions too")] = False,
 ) -> None:
     """Answer a research question with evidence citations and an optional audit."""
     if not evidence_only:
-        run_ask(ctx, question, project, k, profile, approve, preview, audit, audit_profile, sensitive, as_json)
+        run_ask(ctx, question, project, k, profile, approve, preview, audit, audit_profile, sensitive, as_json,
+                all_versions)
         return
     st = _state(ctx)
     with st.db() as conn:
@@ -511,7 +526,7 @@ def ask(
         run_id = start_run(conn, "ask_evidence", pid, {"question": question},
                            {**st.config.model_dump(), "k": k}, "ask_evidence_v1")
         try:
-            hits = retrieve_for_question(conn, question, pid, k)
+            hits = retrieve_for_question(conn, question, pid, k, all_versions=all_versions)
             spans = record_spans(conn, hits)
             link_evidence(conn, run_id, spans, [h.score for h in hits], pages=[h.page for h in hits])
             result = {"run_id": run_id, "spans": [{**s.model_dump(), "page": h.page}
@@ -634,6 +649,7 @@ def export(
     with_pdfs: Annotated[
         bool, typer.Option("--fetch", help="First download open-access PDFs of these papers (full-text notes)")
     ] = False,
+    all_versions: Annotated[bool, typer.Option("--all-versions", help="Export non-primary versions too")] = False,
 ) -> None:
     """Export a project's papers as Markdown with relative asset links."""
     st = _state(ctx)
@@ -648,7 +664,8 @@ def export(
         raise typer.Exit(2)
     if with_pdfs:
         _fetch(st, conn, pid, only)
-    out, count = export_markdown(conn, st.paths, name, pid, only=only, config=st.config)
+    out, count = export_markdown(conn, st.paths, name, pid, only=only, config=st.config,
+                                 all_versions=all_versions)
     typer.echo(f"exported {count} papers to {out}")
 
 
@@ -879,12 +896,130 @@ def fetch(
 
 
 def _fetch(st: State, conn: sqlite3.Connection, pid: str, only: str) -> None:
-    report = fetch_open_access(conn, st.paths, st.config, HttpClient(), pid, only, log=st.log,
+    http = HttpClient(cache_dir=st.paths.http_cache,
+                      cache_ttl_s=st.config.discovery.cache_ttl_days * 86400)
+    report = fetch_open_access(conn, st.paths, st.config, http, pid, only, log=st.log,
                                progress=typer.echo, mailto=contact_email(st.paths, st.config))
     typer.echo(f"downloaded {report.downloaded} of {report.candidates} papers without a PDF, "
                f"{report.parsed} with full text; {report.no_source} have no open-access copy")
     for err in report.failed:
         typer.secho(f"  failed: {err}", fg="yellow")
+
+
+def _show_versions(conn: sqlite3.Connection, project_id: str | None) -> None:
+    selected = primary_paper_ids(conn, project_id)
+    sql = """SELECT p.id,p.title,p.doi FROM papers p"""
+    params: tuple[object, ...] = ()
+    if project_id:
+        sql += " JOIN project_papers pp ON pp.paper_id=p.id WHERE pp.project_id=?"
+        params = (project_id,)
+    sql += " ORDER BY p.title"
+    for paper in conn.execute(sql, params):
+        versions = conn.execute(
+            """SELECT pv.group_id,pv.role,pv.confirmed,pv.rejected,pv.is_primary,
+                      p.id,p.title,p.doi,a.version,a.version_source
+               FROM paper_versions pv JOIN papers p ON p.id=pv.paper_id
+               LEFT JOIN artifacts a ON a.id=(SELECT id FROM artifacts WHERE paper_id=p.id AND status='ok'
+                                              ORDER BY created_at DESC LIMIT 1)
+               WHERE pv.paper_id=? ORDER BY pv.confirmed DESC,pv.role""", (paper["id"],),
+        ).fetchall()
+        role = versions[0]["role"] if versions else "unknown"
+        pdf = conn.execute("SELECT version,version_source FROM artifacts WHERE paper_id=? AND status='ok' "
+                           "ORDER BY created_at DESC LIMIT 1", (paper["id"],)).fetchone()
+        primary = "primary" if paper["id"] in selected else "non-primary"
+        pdf_label = f"{pdf['version']} ({pdf['version_source']})" if pdf else "no PDF"
+        typer.echo(f"{paper['id']}  [{role}; {primary}; PDF: {pdf_label}]  {paper['title'] or '(untitled)'}"
+                   + (f"  DOI {paper['doi']}" if paper["doi"] else ""))
+        if warning := pdf_warning(conn, paper["id"]):
+            typer.secho(f"    WARNING: {warning}", fg="yellow")
+        for member in versions:
+            if member["id"] != paper["id"]:
+                typer.echo(f"  -> {member['id']} [{member['role']}; "
+                           f"{'confirmed' if member['confirmed'] else 'suggested'}] "
+                           f"{member['title'] or '(untitled)'}")
+
+
+@versions_app.callback(invoke_without_command=True)
+def versions_list(ctx: typer.Context, project: ProjectOpt = None) -> None:
+    """List version groups and PDF version labels."""
+    if ctx.invoked_subcommand is not None:
+        return
+    st = _state(ctx)
+    conn = st.db(read_only=True)
+    try:
+        _, pid = _project(st, conn, project)
+        _show_versions(conn, pid)
+    finally:
+        conn.close()
+
+
+@versions_app.command("link")
+def versions_link(ctx: typer.Context, project: ProjectOpt = None) -> None:
+    """Link explicit registry versions and record title-based suggestions."""
+    st = _state(ctx)
+    conn = st.db()
+    try:
+        _project(st, conn, project)
+        http = HttpClient(cache_dir=st.paths.http_cache,
+                          cache_ttl_s=st.config.discovery.cache_ttl_days * 86400)
+        linked = link_versions(conn, http, contact_email(st.paths, st.config))
+        suggested = suggest_similar_versions(conn)
+        # PDFs attached before versions were tracked: read their first page (offline, never moves a PDF).
+        checked = backfill_unknown_versions(conn, st.paths)
+        typer.echo(f"linked {linked} explicit version relationships; added {suggested} suggestions; "
+                   f"labelled {checked} earlier PDFs from their first page")
+    finally:
+        conn.close()
+
+
+@versions_app.command("set-primary")
+def versions_set_primary(ctx: typer.Context, paper: str) -> None:
+    """Choose a paper as the primary version used by project analysis."""
+    conn = _state(ctx).db()
+    try:
+        set_primary(conn, paper)
+        typer.echo(f"primary version: {paper}")
+    finally:
+        conn.close()
+
+
+@versions_app.command("confirm")
+def versions_confirm(ctx: typer.Context, a: str, b: str) -> None:
+    """Confirm that two paper records are versions of one work."""
+    conn = _state(ctx).db()
+    try:
+        if not conn.execute("SELECT 1 FROM papers WHERE id=?", (a,)).fetchone() or not conn.execute(
+            "SELECT 1 FROM papers WHERE id=?", (b,)
+        ).fetchone():
+            raise typer.BadParameter("both paper IDs must exist")
+        confirm_version_link(conn, a, b)
+        typer.echo(f"linked versions: {a} {b}")
+    finally:
+        conn.close()
+
+
+@versions_app.command("reject")
+def versions_reject(ctx: typer.Context, a: str, b: str) -> None:
+    """Reject and remember a suggested version link."""
+    conn = _state(ctx).db()
+    try:
+        if not reject_version_link(conn, a, b):
+            raise typer.BadParameter("no pending suggestion links these papers")
+        typer.echo(f"rejected version suggestion: {a} {b}")
+    finally:
+        conn.close()
+
+
+@versions_app.command("set")
+def versions_set(ctx: typer.Context, paper: str,
+                 version: Annotated[str, typer.Option("--version")]) -> None:
+    """Override the version label on a paper's current PDF."""
+    conn = _state(ctx).db()
+    try:
+        set_artifact_version(conn, paper, version)
+        typer.echo(f"{paper}: PDF version set to {version}")
+    finally:
+        conn.close()
 
 
 @app.command()

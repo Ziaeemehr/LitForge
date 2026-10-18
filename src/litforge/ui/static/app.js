@@ -13,7 +13,8 @@
     filter: '', oa: false, onlyNew: false, hide: false, channel: null, sort: store.get('sort', 'score'),
     screenFilter: '', criteria: null, criteriaFor: null, criteriaLoading: null,
     sel: -1, view: [], page: 'new', pdf: null, list: null, pdfs: [], missing: [], fetchReasons: {}, job: null,
-    anchor: -1, exportsRoot: '', dirEdited: false, consolePlan: null, consoleRunId: null
+    anchor: -1, exportsRoot: '', dirEdited: false, consolePlan: null, consoleRunId: null,
+    libraryAllVersions: store.get('library-all-versions', false)
   };
 
   var CHANNEL_LABEL = {
@@ -408,7 +409,8 @@
   }
 
   function loadLibrary() {
-    return api('/api/library').then(function (papers) { state.library = papers; renderLibrary(); })
+    return api('/api/library' + (state.libraryAllVersions ? '?all_versions=1' : ''))
+      .then(function (papers) { state.library = papers; renderLibrary(); })
       .catch(function (e) { toast(e.message); });
   }
 
@@ -426,10 +428,12 @@
     if (!list.length) { el.innerHTML = '<div class="empty">' + (all.length ? 'No papers match.' : 'The library is empty.') + '</div>'; return; }
     el.innerHTML = list.slice(0, 1000).map(function (p, i) {
       var meta = [p.year, p.venue, p.authors.join(', ')].filter(Boolean).map(esc).join(' · ');
+      var version = p.version ? '<span class="badge version">' + esc(p.version) + '</span>' : '';
+      if (p.pdf_warning) version += '<span class="badge warn" title="' + esc(p.pdf_warning) + '">PDF is another version</span>';
       var chips = p.projects.map(function (n) { return '<span class="chip">' + esc(n) + '</span>'; }).join('');
       if (p.unused) chips += '<span class="chip">Not in a project</span>';
       return '<div class="row" data-i="' + i + '"><div><div class="title">' + esc(p.title || '(no title)') + '</div>' +
-        '<div class="meta">' + meta + '</div>' + (chips ? '<div class="chips">' + chips + '</div>' : '') + '</div>' +
+        '<div class="meta">' + meta + '</div>' + version + (chips ? '<div class="chips">' + chips + '</div>' : '') + '</div>' +
         '<div class="badges">' + (p.has_pdf ? '<a class="btn small" target="_blank" rel="noopener" href="/api/papers/' +
           esc(p.id) + '/pdf">PDF</a>' : (p.oa_url ? '<span class="badge oa">open</span>' : '')) + '</div></div>';
     }).join('');
@@ -500,7 +504,7 @@
 
   function loadRun(id) {
     state.runId = id;
-    return api('/api/runs/' + id).then(function (data) {
+    return api('/api/runs/' + id + (state.libraryAllVersions ? '?all_versions=1' : '')).then(function (data) {
       state.data = data;
       state.channel = null;
       state.anchor = -1;
@@ -819,6 +823,8 @@
         .filter(Boolean).map(esc).join(' · ');
       var authors = d.authors.length ? esc(d.authors.slice(0, 12).join(', ') + (d.authors.length > 12 ? ', et al.' : '')) : '';
       $('dhead').innerHTML = '<h2>' + esc(d.title || '(no title)') + '</h2>' +
+        (d.version ? '<div class="badge version">' + esc(d.version) + '</div>' : '') +
+        (d.pdf_warning ? '<div class="badge warn">' + esc(d.pdf_warning) + '</div>' : '') +
         '<div class="meta">' + authors + '</div><div class="meta">' + meta + '</div>' +
         '<div class="links">' + paperLinks(d) + '</div>' +
         '<div class="dactions">' + (state.page === 'results' ? '<span class="marks">' +
@@ -874,9 +880,11 @@
       if ((p.reasons || []).length) {
         html += '<h3>Found because</h3><ul class="reasons">' + p.reasons.map(function (r) { return '<li>' + esc(r) + '</li>'; }).join('') + '</ul>';
       }
+      html += '<h3>Versions</h3><div id="paper-versions"></div>';
       html += '<h3>Abstract</h3><div class="md" id="abstract-md"></div>';
       if (d.markdown) html += '<div id="full" hidden><h3>Full text</h3><div class="md" id="full-md"></div></div>';
       $('dbody').innerHTML = html;
+      renderPaperVersions($('paper-versions'), d, p, request);
       renderPaperAssets($('dbody'), d.assets || [], request);
       lensScreeningDetail($('dbody'), d);
       window.renderMarkdown($('abstract-md'), d.abstract || '_No abstract available._');
@@ -899,6 +907,53 @@
       }
       attachReproTabs(d, request);
     }).catch(function (e) { if (request === drawerRequest) $('dbody').textContent = e.message; });
+  }
+
+  function renderPaperVersions(parent, d, paper, request) {
+    parent.replaceChildren();
+    var peers = d.versions || [];
+    if (!peers.length) parent.appendChild(lensNode('p', d.version || 'No linked versions.', 'hint'));
+    if (d.versions && d.versions.some(function (v) { return v.confirmed; }) && !d.primary) {
+      parent.appendChild(lensButton('Set this version as primary', function () {
+        post('/api/versions/set-primary', { paper_id: d.id }).then(function () {
+          return loadLibrary().then(function () { openDrawer(paper); });
+        }).catch(function (e) { toast(e.message); });
+      }, 'btn small'));
+    }
+    peers.forEach(function (v) {
+      if (v.paper_id === d.id) return;
+      var row = lensNode('div', null, 'version-row');
+      row.appendChild(lensNode('span', (v.role || 'unknown') + ' · ' + (v.title || v.paper_id) +
+        (v.version ? ' · PDF: ' + v.version : ' · no PDF'), 'meta'));
+      if (v.confirmed && !v.is_primary) row.appendChild(lensButton('Set primary', function () {
+        post('/api/versions/set-primary', { paper_id: v.paper_id }).then(function () {
+          return loadLibrary().then(function () { openDrawer(paper); });
+        }).catch(function (e) { toast(e.message); });
+      }, 'btn small'));
+      if (!v.confirmed) {
+        row.appendChild(lensButton('Confirm link', function () {
+          post('/api/versions/confirm', { a: d.id, b: v.paper_id }).then(function () {
+            return loadLibrary().then(function () { openDrawer(paper); });
+          }).catch(function (e) { toast(e.message); });
+        }, 'btn small'));
+        row.appendChild(lensButton('Reject', function () {
+          post('/api/versions/reject', { a: d.id, b: v.paper_id }).then(function () {
+            return loadLibrary().then(function () { openDrawer(paper); });
+          }).catch(function (e) { toast(e.message); });
+        }, 'btn small'));
+      }
+      parent.appendChild(row);
+    });
+    var discover = lensButton('Find version links', function () {
+      discover.disabled = true;
+      post('/api/versions/link', {}).then(function () {
+        return api('/api/papers/' + encodeURIComponent(d.id) + '?project=' +
+          encodeURIComponent(state.project || '')).then(function (fresh) {
+          if (request === drawerRequest) renderPaperVersions(parent, fresh, paper, request);
+        });
+      }).catch(function (e) { toast(e.message); }).finally(function () { discover.disabled = false; });
+    }, 'btn small');
+    parent.appendChild(discover);
   }
 
   function closeDrawer() {
@@ -2272,6 +2327,9 @@
     spans.forEach(function (s) {
       var card = lensNode('article', null, 'lens-evidence');
       card.appendChild(lensNode('h3', s.title || s.paper_id));
+      if (s.version_label && s.version === 'submitted') {
+        card.appendChild(lensNode('span', s.version_label, 'badge version'));
+      }
       card.appendChild(lensNode('p', [s.section || s.kind, 'p.' + s.page].join(' · '), 'meta'));
       var fullText = String(s.text || ''), quote = lensEvidenceQuote(fullText);
       var ranges = lensQuoteRanges(fullText, (highlights || []).filter(function (r) { return r.evidence_id === s.id; }));
@@ -2485,6 +2543,7 @@
     if (lens.busy || !state.project) return;
     var project = state.project, statusNode = $(statusId);
     var body = Object.assign({ task: task, project: project }, extra);
+    body.all_versions = state.libraryAllVersions;
     lensBusy(true);
     $('lens-ask-status').textContent = ''; $('lens-matrix-status').textContent = '';
     $('lens-run-audit').disabled = true;
@@ -2583,7 +2642,8 @@
 
   function loadLensMatrix(id) {
     var project = state.project, request = ++lens.matrixRequest;
-    return api('/api/matrices/' + encodeURIComponent(id)).then(function (m) {
+    return api('/api/matrices/' + encodeURIComponent(id) +
+      (state.libraryAllVersions ? '?all_versions=1' : '')).then(function (m) {
       if (project !== state.project || request !== lens.matrixRequest) return m;
       lens.matrix = m; $('lens-matrices').value = m.id; $('lens-matrix-detail').hidden = false;
       $('lens-matrix-title').textContent = m.name; $('lens-matrix-description').textContent = m.question;
@@ -2669,7 +2729,8 @@
     var project = state.project, request = ++lens.claimRequest;
     if (!project) return Promise.resolve();
     return api('/api/claims?project=' + encodeURIComponent(project) +
-      (cluster ? '&cluster=' + encodeURIComponent(cluster) : '')).then(function (data) {
+      (cluster ? '&cluster=' + encodeURIComponent(cluster) : '') +
+      (state.libraryAllVersions ? '&all_versions=1' : '')).then(function (data) {
       if (project !== state.project || request !== lens.claimRequest) return;
       function paperLabel(id) {
         var paper = (data.papers || {})[id];
@@ -3075,6 +3136,18 @@
       this.setAttribute('aria-pressed', String(!!state.libraryUnused));
       renderLibrary();
     };
+    $('library-versions').classList.toggle('on', state.libraryAllVersions);
+    $('library-versions').setAttribute('aria-pressed', String(!!state.libraryAllVersions));
+    $('library-versions').onclick = function () {
+      state.libraryAllVersions = !state.libraryAllVersions;
+      store.set('library-all-versions', state.libraryAllVersions);
+      this.classList.toggle('on', state.libraryAllVersions);
+      this.setAttribute('aria-pressed', String(!!state.libraryAllVersions));
+      loadLibrary();
+      if (state.runId) loadRun(state.runId);
+      if (lens.matrix) loadLensMatrix(lens.matrix.id);
+      if (state.project) loadLensClaims();
+    };
     $('library-remove-unused').onclick = function () { removeLibraryPapers(); };
     $('btn-missing').onclick = function () {
       var scope = $('export-scope').value;  // start from what export would cover
@@ -3125,11 +3198,14 @@
     $('export-scope').onchange = function () { store.set('export-scope', this.value); $('pdfs-export-scope').textContent = scopeWords(); };
     $('export-fetch').checked = store.get('export-fetch', false);
     $('export-fetch').onchange = function () { store.set('export-fetch', this.checked); };
+    $('export-all-versions').checked = store.get('export-all-versions', false);
+    $('export-all-versions').onchange = function () { store.set('export-all-versions', this.checked); };
     $('export-math').value = store.get('export-math', store.get('export-vision', false) ? 'high' : 'off');
     $('export-math').onchange = function () { store.set('export-math', this.value); };
     $('btn-export').onclick = function () {
       if (!state.project) { toast('No project yet'); return; }
       var scope = $('export-scope').value, body = { project: state.project };
+      body.all_versions = $('export-all-versions').checked;
       if ($('project-name').value.trim() === state.project) body.export_dir = $('export-dir').value.trim();
       if (scope === 'visible' && !state.data) { toast('Open a run first'); return; }
       Object.assign(body, exportSelection());

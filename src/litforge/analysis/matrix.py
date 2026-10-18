@@ -23,6 +23,7 @@ from litforge.analysis.markdown_safe import excerpt, inert
 from litforge.analysis.prompts import MATRIX_PROMPT_VERSION, matrix_messages
 from litforge.analysis.runs import canonical_json, finish_run, input_hash, link_evidence, start_run
 from litforge.analysis.validation import EvidenceText, citations, image_only_numbers, missing_numbers, number
+from litforge.discovery.versions import primary_paper_ids
 from litforge.indexing.fts import current_runs, search
 from litforge.llm.base import LlmError, LlmUnavailable
 from litforge.llm.budget import BudgetExceeded
@@ -213,11 +214,13 @@ class _Work(BaseModel):
 
 
 def _work(conn: sqlite3.Connection, gateway: ModelGateway, matrix: Matrix, paper_ids: list[str] | None,
-          profile: str | None, force: bool) -> Iterator[_Work]:
+          profile: str | None, force: bool, all_versions: bool = False) -> Iterator[_Work]:
     existing = {(c.paper_id, c.column_key): c for c in matrix.cells}
+    primary = None if all_versions else primary_paper_ids(conn, matrix.project_id)
     # One current parse per paper; deterministic when a paper has multiple artifacts.
     runs = {r["paper_id"]: r for r in sorted(current_runs(conn, matrix.project_id),
-                                             key=lambda r: (r["created_at"], r["id"]))}
+                                             key=lambda r: (r["created_at"], r["id"]))
+            if primary is None or r["paper_id"] in primary}
     if paper_ids is not None and set(paper_ids) - runs.keys():
         raise ValueError("selected paper is outside the matrix project or has no current parse")
     selected = {p: r for p, r in runs.items() if paper_ids is None or p in paper_ids}
@@ -225,7 +228,8 @@ def _work(conn: sqlite3.Connection, gateway: ModelGateway, matrix: Matrix, paper
     for paper, run in sorted(selected.items()):
         for column in matrix.columns:
             hits = search(conn, f"{column.label} {column.instruction} {matrix.question}",
-                          limit=4, max_per_paper=4, any_terms=True, paper_ids=[paper], parse_run_id=run["id"])
+                          limit=4, max_per_paper=4, any_terms=True, paper_ids=[paper], parse_run_id=run["id"],
+                          all_versions=all_versions)
             spans = [s.model_copy(update={"page": h.page}) for s, h in
                      zip(record_spans(conn, hits), hits, strict=True)]
             image_spans = relevant_asset_spans(
@@ -250,8 +254,11 @@ def _work(conn: sqlite3.Connection, gateway: ModelGateway, matrix: Matrix, paper
 
 
 def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, matrix_id: str, paper_ids: list[str] | None = None,
-               profile: str | None = None, force: bool = False) -> list[CallPreview]:
-    return [w.preview for w in _work(conn, gateway, get_matrix(conn, matrix_id), paper_ids, profile, force)
+               profile: str | None = None, force: bool = False,
+               all_versions: bool = False) -> list[CallPreview]:
+    return [w.preview for w in _work(
+        conn, gateway, get_matrix(conn, matrix_id), paper_ids, profile, force, all_versions,
+    )
             if w.preview is not None]
 
 
@@ -274,13 +281,14 @@ def _save_cell(conn: sqlite3.Connection, cell: MatrixCell) -> None:
 
 
 def extract_matrix(conn: sqlite3.Connection, gateway: ModelGateway, matrix_id: str, paper_ids: list[str] | None = None,
-                   profile: str | None = None, approved: bool = False, force: bool = False) -> MatrixResult:
+                   profile: str | None = None, approved: bool = False, force: bool = False,
+                   all_versions: bool = False) -> MatrixResult:
     matrix = get_matrix(conn, matrix_id)
     run_id = start_run(conn, "matrix_extract", matrix.project_id, {"matrix_id": matrix_id, "paper_ids": paper_ids},
                        {"matrix_id": matrix_id, "profile": profile, "force": force}, MATRIX_PROMPT_VERSION)
     try:
         budget = False
-        for work in _work(conn, gateway, matrix, paper_ids, profile, force):
+        for work in _work(conn, gateway, matrix, paper_ids, profile, force, all_versions):
             data = ValidatedCell(status="not_found", note="No evidence retrieved.")
             flags: list[str] = []
             if work.spans:

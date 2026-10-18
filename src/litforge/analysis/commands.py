@@ -94,14 +94,16 @@ def check_plan(gateway: ModelGateway, previews: list[CallPreview], approved: boo
 
 def run_ask(ctx: typer.Context, question: str, project: str | None, k: int, profile: str | None,
             approved: bool, preview: bool, audit: bool, audit_profile: str | None,
-            sensitive: bool, as_json: bool) -> None:
+            sensitive: bool, as_json: bool, all_versions: bool = False) -> None:
     with _context(ctx, project) as (st, conn, pid):
         gateway = ModelGateway(conn, st.config)
-        plan = answers.plan_calls(conn, gateway, question, pid, k, profile, sensitive)
+        plan = answers.plan_calls(conn, gateway, question, pid, k, profile, sensitive,
+                                  all_versions=all_versions)
         if audit and plan:
             plan += audits.plan_automatic(conn, gateway, question, pid, k, audit_profile, sensitive)
         check_plan(gateway, plan, approved, preview)
-        answer = answers.ask(conn, gateway, question, pid, k, profile, approved, sensitive)
+        answer = answers.ask(conn, gateway, question, pid, k, profile, approved, sensitive,
+                             all_versions=all_versions)
         if audit:
             audits.audit_answer(conn, gateway, answer.run_id, audit_profile, approved)
             answer = answers.get_answer(conn, answer.run_id)

@@ -1,0 +1,10 @@
+{
+  "locations": [
+    {
+      "is_oa": true,
+      "version": "submittedVersion",
+      "pdf_url": "https://repository.example/preprint.pdf",
+      "source": {"type": "repository"}
+    }
+  ]
+}

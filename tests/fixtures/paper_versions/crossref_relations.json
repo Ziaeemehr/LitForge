@@ -1,0 +1,9 @@
+{
+  "message": {
+    "relation": {
+      "is-version-of": [
+        {"id-type": "doi", "id": "10.1101/2024.01.01.123456", "relation": "is-version-of"}
+      ]
+    }
+  }
+}

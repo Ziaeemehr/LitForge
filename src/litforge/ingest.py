@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from litforge.config import Paths
 from litforge.discovery.merge import apply_record, ensure_norm_titles, find_match
 from litforge.discovery.records import WorkRecord
+from litforge.discovery.versions import infer_version
 from litforge.metadata.extract import ExtractedMetadata, extract_metadata, normalize_title
 from litforge.observability import NULL_LOG, EventLog
 from litforge.projects import add_paper
@@ -132,8 +133,10 @@ def ingest_file(
     try:
         meta = extract_metadata(doc)
         page_count = doc.page_count
+        first_page_text = doc[0].get_text() if page_count else ""
     finally:
         doc.close()
+    version, version_source = infer_version(None, pdf_text=first_page_text)
     pdf_rec = WorkRecord(
         source="pdf", source_id=sha, title=meta.title.value, year=meta.year.value, doi=meta.doi.value,
         arxiv_id=meta.arxiv_id.value, abstract=meta.abstract.value, authors=meta.authors.value or [],
@@ -150,9 +153,10 @@ def ingest_file(
         # A paper found by discovery (or imported from a reference list) now gets its PDF.
         with transaction(conn):
             conn.execute(
-                "INSERT INTO artifacts(id, paper_id, sha256, pdf_path, size_bytes, page_count, status, created_at)"
-                " VALUES (?,?,?,?,?,?,?,?)",
-                (artifact_id, match, sha, relative_to_root(paths, stored), path.stat().st_size, page_count, "ok", ts),
+                "INSERT INTO artifacts(id, paper_id, sha256, pdf_path, size_bytes, page_count, version,"
+                " version_source, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (artifact_id, match, sha, relative_to_root(paths, stored), path.stat().st_size, page_count,
+                 version, version_source, "ok", ts),
             )
             _add_alias(conn, artifact_id, path)
             apply_record(conn, match, pdf_rec, ts)
@@ -184,10 +188,10 @@ def ingest_file(
             ),
         )
         conn.execute(
-            "INSERT INTO artifacts(id, paper_id, sha256, pdf_path, size_bytes, page_count, status, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO artifacts(id, paper_id, sha256, pdf_path, size_bytes, page_count, version, version_source,"
+            " status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (artifact_id, paper_id, sha, relative_to_root(paths, stored), path.stat().st_size,
-             page_count, "ok", ts),
+             page_count, version, version_source, "ok", ts),
         )
         _add_alias(conn, artifact_id, path)
         for other_id, why in dupes:
