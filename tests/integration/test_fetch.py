@@ -207,7 +207,8 @@ def test_fetch_skips_preprint_already_attached_by_earlier_doi_mismatch(
     assert conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 2
     assert report.downloaded == 1
     assert any(item["reason"] == "already has a PDF" for item in report.items)
-    assert not any("biorxiv.org/second.pdf" in call for call in transport.calls)
+    # The eLife record's other copies are still tried after a PDF of another record turns up; the second
+    # bioRxiv copy is recognised as the same preprint and is not stored again (one artifact above).
 
 
 def test_preprint_host_overrides_accepted_openalex_label(

@@ -111,11 +111,46 @@ def test_fetch_gives_a_version_pdf_to_the_record_it_names_more_exactly(
     paper(conn, 'selected', published)
     paper(conn, 'other', preprint)
     conn.execute("UPDATE papers SET oa_url='https://pub.example/selected.pdf' WHERE id='selected'")
+    versions.confirm_version_link(conn, 'selected', 'other')
     body = pdf_bytes(preprint + '\nAbstract\nhttps://doi.org/10.5555/other')
     report = fetch_open_access(conn, paths, config, http(FakeTransport([('selected.pdf', ok(body))])),
                                'proj', only='all', paper_ids=['selected'])
     assert [r[0] for r in conn.execute("SELECT paper_id FROM artifacts WHERE status='ok'")] == ['other']
     assert report.downloaded == 1
+
+
+def test_similar_title_of_a_cited_paper_never_takes_the_pdf(
+    conn: sqlite3.Connection, paths: Paths, config: Config,
+) -> None:
+    # The selected PDF omits its DOI, prints its own arXiv id and cites a library paper whose title is
+    # closer to the PDF's than the registry title is: the PDF must stay with the selected record.
+    paper(conn, 'selected', 'Amortised inference of neural mass models with normalising flows')  # 0.95 vs 1.0
+    paper(conn, 'cited', 'Amortized inference for neural mass models with normalizing flows')
+    conn.execute("UPDATE papers SET doi=NULL, arxiv_id='2401.01234',"
+                 " oa_url='https://pub.example/selected.pdf' WHERE id='selected'")
+    body = pdf_bytes('Amortized inference for neural mass models with normalizing flows\n'
+                     'arXiv:2401.01234v2 [q-bio.NC]\nWe build on doi:10.5555/cited.')
+    fetch_open_access(conn, paths, config, http(FakeTransport([('arxiv.org/pdf/2401.01234', ok(body))])),
+                      'proj', only='all', paper_ids=['selected'])
+    assert [r[0] for r in conn.execute("SELECT paper_id FROM artifacts WHERE status='ok'")] == ['selected']
+
+
+def test_another_records_pdf_is_attached_there_and_the_next_candidate_is_tried(
+    conn: sqlite3.Connection, paths: Paths, config: Config,
+) -> None:
+    paper(conn, 'selected', 'Published neural population dynamics')
+    paper(conn, 'other', 'A distinct investigation of bird migration')
+    conn.execute("DELETE FROM project_papers WHERE paper_id='other'")  # library only
+    conn.execute("UPDATE papers SET oa_url='https://pub.example/first.pdf',"
+                 " arxiv_id='2401.05555' WHERE id='selected'")
+    wrong = pdf_bytes('A distinct investigation of bird migration\nDOI: 10.5555/other', doi='10.5555/other')
+    right = pdf_bytes('Published neural population dynamics\nDOI: 10.5555/selected')
+    transport = FakeTransport([('arxiv.org/pdf/2401.05555', ok(wrong)), ('pub.example/first.pdf', ok(right))])
+    report = fetch_open_access(conn, paths, config, http(transport), 'proj', only='all', paper_ids=['selected'])
+    owners = sorted(r[0] for r in conn.execute("SELECT paper_id FROM artifacts WHERE status='ok'"))
+    assert owners == ['other', 'selected']
+    assert conn.execute("SELECT COUNT(*) FROM project_papers WHERE paper_id='other'").fetchone()[0] == 0
+    assert report.downloaded == 2
 
 
 @pytest.mark.parametrize('via', ['landing', 'redirect'])

@@ -19,6 +19,7 @@ import urllib.parse
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
+from pathlib import Path
 
 from litforge.config import Config, Paths
 from litforge.discovery.http import HttpClient, HttpError
@@ -36,7 +37,7 @@ from litforge.ingest import ingest_file
 from litforge.metadata.extract import extract_metadata, normalize_doi, normalize_title
 from litforge.observability import NULL_LOG, EventLog
 from litforge.parsing.run import parse_artifact
-from litforge.projects import MARK_SCOPES, add_paper
+from litforge.projects import MARK_SCOPES
 from litforge.storage.db import now, transaction
 
 MAX_PDF_BYTES = 100 * 1024 * 1024
@@ -206,6 +207,14 @@ def _title_score(title: str | None, extracted: str | None, first_page: str) -> f
     return max((SequenceMatcher(None, wanted, normalize_title(t)).ratio() for t in titles if t), default=0.0)
 
 
+def _same_work(conn: sqlite3.Connection, a: str, b: str) -> bool:
+    """Both records are confirmed versions of one work."""
+    return conn.execute(
+        """SELECT 1 FROM paper_versions x JOIN paper_versions y ON x.group_id=y.group_id
+           WHERE x.paper_id=? AND y.paper_id=? AND x.confirmed=1 AND y.confirmed=1
+             AND x.rejected=0 AND y.rejected=0""", (a, b)).fetchone() is not None
+
+
 def _pdf_identity(conn: sqlite3.Connection, row: sqlite3.Row, body: bytes
                   ) -> tuple[str, tuple[str, str] | None]:
     """Validate identity before accepting a candidate; a citation alone cannot identify its PDF."""
@@ -230,6 +239,9 @@ def _pdf_identity(conn: sqlite3.Connection, row: sqlite3.Row, body: bytes
         other_record_doi(conn, str(row["id"]), None, [doi]) for doi in dois
     )):
         return first_page, None
+    arxiv = str(row["arxiv_id"] or "").strip()
+    if arxiv and re.search(r"(?i)arxiv:\s*" + re.escape(re.sub(r"v\d+$", "", arxiv)), first_page):
+        return first_page, None  # the PDF prints the selected record's own arXiv id
     own_score = _title_score(row["title"], meta.title.value, first_page)
     own_title = own_score >= 0.92
     for doi in dois:
@@ -243,7 +255,9 @@ def _pdf_identity(conn: sqlite3.Connection, row: sqlite3.Row, body: bytes
         # Versions of one work share near-identical titles: the PDF belongs to whichever record it
         # names more exactly (eLife "..., a flexible ..." vs its bioRxiv preprint "...: A flexible ...").
         other_score = _title_score(other_title, meta.title.value, first_page)
-        if metadata_doi == doi or stamp or (other_score >= 0.92 and other_score > own_score + 0.02):
+        closer_version = other_score >= 0.92 and other_score > own_score + 0.02 and _same_work(
+            conn, str(row["id"]), str(other[0]))  # never for a merely cited paper with a similar title
+        if metadata_doi == doi or stamp or (not own_title and other_score >= 0.92) or closer_version:
             return first_page, other
     if own_title:
         return first_page, None
@@ -251,6 +265,39 @@ def _pdf_identity(conn: sqlite3.Connection, row: sqlite3.Row, body: bytes
     reason = "which is not in the library" if outside else "without matching title or metadata evidence"
     raise ValueError(f"found a different work (PDF DOI {dois[0]}), {reason}; "
                      "selected record was left unchanged")
+
+
+def _attach_elsewhere(conn: sqlite3.Connection, paths: Paths, config: Config, log: EventLog, tmp_dir: Path,
+                      row: sqlite3.Row, identity: tuple[str, str], candidate: VersionCandidate, body: bytes,
+                      first_page: str, report: FetchReport, new_artifacts: set[str]) -> str:
+    """Give a PDF that positively identifies another library record to that record (library only: the
+    record is not added to this project). Returns a note for the selected paper's report line."""
+    known_id, pdf_doi = identity
+    title = (conn.execute("SELECT title FROM papers WHERE id=?", (known_id,)).fetchone() or [None])[0]
+    name = f"'{(title or known_id)[:60]}' (DOI {pdf_doi})"
+    if conn.execute("SELECT 1 FROM artifacts WHERE paper_id=? AND status='ok' LIMIT 1", (known_id,)).fetchone():
+        return f"a PDF of {name} was found; that record already has one"
+    tmp = tmp_dir / f"{row['id']}.pdf"
+    tmp.write_bytes(body)
+    try:
+        result = ingest_file(conn, paths, tmp, None, log=log, paper_id=known_id)
+    finally:
+        tmp.unlink(missing_ok=True)
+    # Only a PDF this fetch attached gets its labels: never overwrite an existing artifact's.
+    if result.status != "new" or not result.artifact_id or result.paper_id != known_id:
+        return f"a PDF of {name} was found; it was already in the library"
+    version, version_source = infer_version(candidate.url, candidate.version, candidate.version_source, first_page)
+    version_label = format_version_label(version, candidate.url)
+    if version == "submitted" and candidate.declared_version == "accepted":
+        version_label = f"{version_label} (author-updated)" if version_label else version_label
+    conn.execute("UPDATE artifacts SET version=?,version_source=?,source_url=?,version_label=? WHERE id=?",
+                 (version, version_source, candidate.url, version_label, result.artifact_id))
+    artifact = conn.execute("SELECT * FROM artifacts WHERE id=?", (result.artifact_id,)).fetchone()
+    moved = parse_artifact(conn, paths, config, artifact, log=log)
+    new_artifacts.add(result.artifact_id)
+    report.downloaded += 1
+    report.parsed += moved.status != "failed"
+    return f"a PDF of {name} was found and attached to that library record"
 
 
 def fetch_open_access(
@@ -309,59 +356,30 @@ def fetch_open_access(
         body, errors = None, []
         candidate: VersionCandidate | None = None
         first_page_text = ""
-        other: tuple[str, str] | None = None
+        elsewhere: list[str] = []  # PDFs of other known records found on the way
         for item in candidates:
             try:
                 downloaded, final_url = _download_pdf(http, item.url)
                 text, identity = _pdf_identity(conn, row, downloaded)
                 resolved = dataclasses.replace(item, url=final_url)
-                body, candidate, first_page_text, other = downloaded, resolved, text, identity
-                break
             except Exception as exc:  # noqa: BLE001 - one bad host must not stop the batch
                 errors.append(f"{urllib.parse.urlsplit(item.url).netloc}: {_short(exc)}")
+                continue
+            if identity is not None:
+                elsewhere.append(_attach_elsewhere(conn, paths, config, log, tmp_dir, row, identity, resolved,
+                                                   downloaded, text, report, new_artifacts))
+                errors.append(f"{urllib.parse.urlsplit(item.url).netloc}: the PDF is another work "
+                              f"(DOI {identity[1]})")
+                continue
+            body, candidate, first_page_text = downloaded, resolved, text
+            break
         if body is None:
             link = f"https://doi.org/{row['doi']}" if row["doi"] else candidates[0].url
             report.failed.append(f"{label}: {'; '.join(errors)} (open in a browser: {link})")
-            report.note(row, "failed", plain_reason(errors), [c.url for c in candidates])
+            report.note(row, "failed", "; ".join([*elsewhere, plain_reason(errors)]), [c.url for c in candidates])
             log.emit("fetch.failed", paper_id=row["id"], errors=errors)
             continue
         assert candidate is not None
-        if other is not None:
-            known_id, pdf_doi = other
-            if conn.execute("SELECT 1 FROM artifacts WHERE paper_id=? AND status='ok' LIMIT 1",
-                            (known_id,)).fetchone():
-                report.note(row, "skipped", f"PDF identifies as DOI {pdf_doi}; its known record already has a PDF")
-                continue
-            tmp = tmp_dir / f"{row['id']}.pdf"
-            tmp.write_bytes(body)
-            try:
-                result = ingest_file(conn, paths, tmp, None, log=log, paper_id=known_id)
-            finally:
-                tmp.unlink(missing_ok=True)
-            version = version_source = None
-            # Only a PDF this fetch attached gets its labels: never overwrite an existing artifact's.
-            if result.status == "new" and result.artifact_id and result.paper_id == known_id:
-                version, version_source = infer_version(candidate.url, candidate.version, candidate.version_source,
-                                                        first_page_text)
-                version_label = format_version_label(version, candidate.url)
-                if version == "submitted" and candidate.declared_version == "accepted":
-                    version_label = f"{version_label} (author-updated)" if version_label else version_label
-                conn.execute("UPDATE artifacts SET version=?,version_source=?,source_url=?,version_label=? WHERE id=?",
-                             (version, version_source, candidate.url, version_label, result.artifact_id))
-                add_paper(conn, project_id, known_id, "discovery")
-                artifact = conn.execute("SELECT * FROM artifacts WHERE id=?", (result.artifact_id,)).fetchone()
-                moved = parse_artifact(conn, paths, config, artifact, log=log)
-                new_artifacts.add(result.artifact_id)
-                report.downloaded += 1
-                report.parsed += moved.status != "failed"
-            report.failed.append(
-                f"{label}: found a different work (PDF DOI {pdf_doi}); it was not attached to this record")
-            report.note(row, "failed", f"PDF identifies as DOI {pdf_doi}; selected record was left unchanged",
-                        [c.url for c in candidates])
-            if version:
-                report.items[-1]["version"] = version
-                report.items[-1]["version_source"] = version_source
-            continue
         tmp = tmp_dir / f"{row['id']}.pdf"
         tmp.write_bytes(body)
         try:
