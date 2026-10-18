@@ -374,6 +374,7 @@ def tools_status_command(ctx: typer.Context) -> None:
     mineru = status["mineru"]
     pix2text = status["pix2text"]
     vision = status["vision"]
+    tectonic = status.get("tectonic", {}).get("tectonic", {})
     vision_name = vision.get("model") or vision.get("message") or "Not configured"
     vision_state = f"{'Ready' if vision.get('ready') else 'Not ready'} · {vision_name}"
     rows = (
@@ -382,9 +383,8 @@ def tools_status_command(ctx: typer.Context) -> None:
          "Not installed" if pix2text["available"] else "Not available on this install", pix2text["size"]),
         ("Image model", str(vision_state),
          str(vision.get("notice") or "model-dependent")),
-        ("Tectonic", f"Installed · {status['tectonic']['tectonic']['version']}"
-         if status["tectonic"]["tectonic"]["installed"] else "Not installed",
-         str(status["tectonic"]["tectonic"]["size"] or "not available for this platform")),
+        ("Tectonic", f"Installed · {tectonic.get('version')}" if tectonic.get("installed") else "Not installed",
+         str(tectonic.get("size") or "not available for this platform")),
     )
     typer.echo(f"{'Tool':<14} {'Status':<42} Size / detail")
     for name, state, size in rows:

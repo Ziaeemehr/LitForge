@@ -170,3 +170,36 @@ def test_selection_limits(env) -> None:
         wa.prepare(conn, doc, "clearer", "x" * (wa.MAX_SELECTION + 1))
     with pytest.raises(wa.AssistError):
         wa.prepare(conn, doc, "poem", "x")
+
+
+def test_repair_escapes_restores_latex_commands() -> None:
+    original = r"\textbf{a} \lr{b} $\nu$ \cite{k}" + "\nnext line"
+    broken = "\textbf{a} \\lr{b} $\nu$ \rule{1pt} \x08egin{x}\nnext line"
+    fixed = wa.repair_escapes(broken, original)
+    assert fixed == "\\textbf{a} \\lr{b} $\\nu$ \\rule{1pt} \\begin{x}\nnext line"
+
+
+def test_fix_does_not_flag_the_broken_command_and_keeps_edges(env) -> None:
+    conn, paths, doc, _ = env
+    gw, _ = gateway(conn, {"replacement": "\\maketitle\n\\textbf{x}"})  # model dropped the final newline
+    excerpt = "\\maketitle\n\\textbff{x}\n"
+    req = wa.prepare(conn, doc, "fix", excerpt, error="Undefined control sequence.", first_line=10, error_line=11)
+    result = wa.run(conn, gw, doc, req, "main.tex")
+    assert result["flags"] == []
+    assert wa.applied_text(excerpt, result["hunks"], [h["index"] for h in result["hunks"]]) == \
+        "\\maketitle\n\\textbf{x}\n"
+
+
+def test_cite_action_flags_changed_wording_and_added_commands(env) -> None:
+    conn, paths, doc, span = env
+    text = "The coupling gain was high across subjects."
+
+    def answer(messages):
+        ids = __import__("re").findall(r'<evidence id="([^"]+)"', messages[-1]["content"])
+        return {"text": f"The coupling gain was very high \\cite{{{ids[0]}}}\\end across subjects.", "citations": [
+            {"evidence_id": ids[0], "quote": "the coupling gain was 3.25 across 40 subjects"}]}
+
+    gw, _ = gateway(conn, answer=answer)
+    result = wa.run(conn, gw, doc, wa.prepare(conn, doc, "cite", text), "main.tex")
+    assert "LaTeX commands added: \\end" in result["flags"]
+    assert any("wording changed" in f for h in result["hunks"] for f in h["flags"])

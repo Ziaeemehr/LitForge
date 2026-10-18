@@ -390,6 +390,52 @@ step is checkpointed; a failed or cancelled run can resume from its next uncompl
 by console actions stay inside the project's export folder. The local web UI has a **Console** view with
 the same plan preview, explicit Run confirmation, progress, cancellation and resume controls.
 
+## Write (LaTeX documents)
+
+**Write** in the sidebar holds the current project's LaTeX documents. Each document is a plain folder,
+`<data>/projects/<project>/writing/<name>/` (`main.tex`, `references.bib`, `figures/`), so you can also open it
+in another editor. Start from the **English article** or **Persian article** template; the Persian one uses
+`xepersian` with the Vazirmatn font (shipped in the document's `fonts/` folder).
+
+- **Editing.** The editor (CodeMirror) highlights LaTeX, searches (Ctrl/Cmd+F) and shows Persian lines right to
+  left. It saves 2 seconds after you stop typing and when you leave the editor. If the file changed in another tab
+  or editor, a banner asks whether to reload that version or keep yours; nothing is overwritten silently.
+- **Versions.** A version is kept at most every 2 minutes while you save (the last 30). **Versions** restores one;
+  the current text is kept as a version first.
+- **Compile** (Ctrl/Cmd+Enter) builds the PDF shown on the right. Errors and warnings appear under the editor with
+  their line; click one to jump to it. Install the engine once in Settings → Optional tools (Tectonic); the first
+  compile downloads the LaTeX packages it needs (about two minutes), later compiles take about a second and work
+  offline.
+- **Cite** (or type `\cite{`) searches the project's papers, or quotes in them under **Evidence**. The key is
+  inserted at the cursor (or added to the `\cite{...}` you are in) and the paper's entry is written to
+  `references.bib`. Keys look like `lee2021brain` and never change once made. Entries you write yourself in
+  `references.bib` are kept; LitForge rewrites only the block between its `% litforge:` markers. With the cursor
+  in a `\cite{...}`, the palette offers **Show quote** for the passage the citation came from.
+- **AI** works on the selection only: **Fix this error** (click a compile error first), **Rewrite: clearer /
+  shorter**, **Translate** to English or Persian, and **Suggest citations** from the project's evidence. The local
+  model is used unless you assign a cloud model to the `write_fix`, `write_rewrite` or `write_cite` task; a cloud
+  route asks before sending and says what is sent. The answer is shown as changes you accept or reject one by one;
+  nothing changes before you click **Apply accepted**. Changes are flagged (and start as rejected) when they add a
+  number that is not in your text or the evidence, a citation key that is unknown or not backed by a quote, drop
+  LaTeX commands, math, `\cite`, `\ref` or `\label`, or add commands. Suggested citations are kept only when
+  their quote is found word for word in the paper.
+
+From the command line:
+
+```bash
+litforge write new "My review" -p my-review --template persian
+litforge write list -p my-review
+litforge write compile DOCUMENT_ID
+litforge export -p my-review --format bibtex > references.bib
+```
+
+**Compile safety.** Shell escape is off and a document cannot write outside its folder. Tectonic's own
+"untrusted" mode does not stop a document from *reading* other files, so on macOS compiling runs inside the
+system sandbox (`sandbox-exec`) and on Linux inside `bwrap` when it is installed; there the document can read only
+its own folder, the engine and its package cache. On Windows, and on Linux without `bwrap`, LitForge refuses
+documents that name files outside their folder, but a determined document could still read other files: the
+Write view says "partial sandbox" then, so compile only documents you trust.
+
 ## Where things are stored
 
 All data lives in `./data` (git-ignored). Use `--data-dir PATH` or `LITFORGE_HOME=PATH` to move it.
@@ -482,6 +528,7 @@ The final installer hint and Settings → Optional tools list the same options.
 |---|---:|---|---|
 | MinerU | ~4 GB | More accurate local PDF reading of equations and tables | Settings → Optional tools; `litforge tools install mineru` (alias: `litforge parse install-mineru`); installer prompt or `LITFORGE_EXTRAS=mineru` |
 | Pix2Text (Math: medium) | ~2 GB | Reads detected formulas as LaTeX in exported notes | Settings → Optional tools; `litforge tools install pix2text`; installer prompt or `LITFORGE_EXTRAS=pix2text`. Chooses the NVIDIA extra when a GPU is detected. |
+| Tectonic (Write) | ~22 MB, plus ~50 MB of LaTeX packages on the first compile | Compiles Write documents to PDF, English and Persian | Settings → Optional tools; `litforge tools install tectonic`. A system TeX Live/MacTeX (`latexmk` + `xelatex`) also works. |
 | Image/vision model (Math: high) | Depends on selected model | Rewrites whole pages, including formulas, tables and scanned text | Settings → Models (or the legacy setup action); the installer does not download models. `litforge tools` shows the resolved model status. |
 
 On 31 pages of 12 arXiv papers, scored against the papers' own LaTeX, both levels read about 95% of

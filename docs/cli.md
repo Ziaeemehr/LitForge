@@ -339,6 +339,14 @@ Install Pix2Text for Math: medium (~2 GB).
 |---|---|
 | `--yes`, `-y` | Don't ask for confirmation |
 
+#### `litforge tools install tectonic`
+
+Install Tectonic, the LaTeX engine of the Writing Studio (~22 MB, packages download on first use).
+
+| Option | Meaning |
+|---|---|
+| `--yes`, `-y` | Don't ask for confirmation |
+
 ## Searching and screening
 
 ### `litforge search`
@@ -753,7 +761,7 @@ Export a project's papers as Markdown with relative asset links.
 | Option | Meaning |
 |---|---|
 | `--project`, `-p` | Project (default: the active project) |
-| `--format` | Export format (markdown) |
+| `--format` | Export format (markdown or bibtex) |
 | `--only` | Which papers: all, relevant (marked ✓) or not-irrelevant (all but ✗) |
 | `--fetch` | First download open-access PDFs of these papers (full-text notes) |
 | `--all-versions` | Export non-primary versions too |
@@ -964,4 +972,35 @@ Load a YAML workflow template into the same preview and execute path.
 | `--yes`, `-y` |  |
 | `--approve-cloud` | Separately approve cloud model routes |
 | `--json` | Print the preview and run as JSON |
+
+### `litforge write`
+
+Writing Studio: LaTeX documents in a project.
+
+#### `litforge write compile`
+
+Compile a document to PDF.
+
+| Option | Meaning |
+|---|---|
+| `DOCUMENT` | argument (required) |
+| `--engine` | tectonic or xelatex |
+
+#### `litforge write list`
+
+List the project's documents.
+
+| Option | Meaning |
+|---|---|
+| `--project`, `-p` | Project (default: the active project) |
+
+#### `litforge write new`
+
+Create a document from a template.
+
+| Option | Meaning |
+|---|---|
+| `TITLE` | argument (required) |
+| `--project`, `-p` | Project (default: the active project) |
+| `--template` | article or persian |
 

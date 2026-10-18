@@ -2347,7 +2347,8 @@
       var lines = W.editor.getText().split('\n').length;
       var first = Math.max(1, err.line - 15), last = Math.min(lines, err.line + 15);
       var from = W.editor.lineRange(first).from, to = W.editor.lineRange(last).to;
-      return { from: from, to: to, text: W.editor.getText().slice(from, to), error: err.message, first_line: first };
+      return { from: from, to: to, text: W.editor.getText().slice(from, to), error: err.message, first_line: first,
+        error_line: err.line };
     }
     var sel = W.editor.selection();
     if (!sel.text.trim()) return { problem: 'Select the text first.' };
@@ -2359,7 +2360,7 @@
     var range = AI.range && approved ? AI.range : writeAiRange(action);
     if (range.problem) { toast(range.problem); return Promise.resolve(); }
     AI.range = range;
-    var body = { doc: W.doc.id, action: action, text: range.text, error: range.error || '', first_line: range.first_line || 1,
+    var body = { doc: W.doc.id, action: action, text: range.text, error: range.error || '', first_line: range.first_line || 1, error_line: range.error_line || 0,
       file: W.file, approved: !!approved };
     $('write-compile-state').textContent = 'Preparing the request…';
     return post('/api/write/assist', body).then(function (res) {

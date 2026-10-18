@@ -41,6 +41,7 @@ _CITED = {"type": "object", "properties": {
 _COMMAND = re.compile(r"\\([a-zA-Z]+)")
 _ARG_COMMANDS = re.compile(r"\\(ref|eqref|autoref|cref|Cref|label|pageref)\*?\{([^}]*)\}")
 _KEYED = re.compile(r"\\[a-zA-Z]*(?:cite|ref|label)[a-zA-Z]*\*?(?:\[[^\]]*\])*\{[^}]*\}")
+_CITE_ONLY = re.compile(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?(?:\[[^\]]*\])*\{[^}]*\}")
 _MATH = re.compile(r"\$\$.+?\$\$|\$[^$]+\$|\\\(.+?\\\)|\\\[.+?\\\]", re.S)
 
 
@@ -54,6 +55,7 @@ class Request:
     text: str
     error: str = ""
     first_line: int = 1
+    error_line: int = 0  # 1-based line of the error inside the excerpt, for "fix"
     task: str = ""
     messages: list[dict[str, str]] = field(default_factory=list)
     packet: EvidencePacket | None = None
@@ -62,7 +64,7 @@ class Request:
 
 
 def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, error: str = "",
-            first_line: int = 1) -> Request:
+            first_line: int = 1, error_line: int = 0) -> Request:
     """Build what would be sent; only the selection (and, for citations, the retrieved evidence) is included."""
     if action not in ACTIONS:
         raise AssistError(f"unknown action; use one of {', '.join(ACTIONS)}")
@@ -70,7 +72,8 @@ def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, err
         raise AssistError("select some text first")
     if len(text) > MAX_SELECTION:
         raise AssistError(f"select at most {MAX_SELECTION} characters")
-    req = Request(action=action, text=text, error=error, first_line=first_line, task=ACTIONS[action])
+    req = Request(action=action, text=text, error=error, first_line=first_line, task=ACTIONS[action],
+                  error_line=max(0, error_line - first_line + 1) if error_line else 0)
     # The user's draft is unpublished work: mark it sensitive so a cloud route always needs approval.
     selection = EvidenceItem(id="selection", paper_id="manuscript", text=text, page=1)
     if action == "fix":
@@ -117,12 +120,23 @@ def run(conn: sqlite3.Connection, gateway: ModelGateway, doc: Document, req: Req
             flags.append(f"{dropped} citation(s) removed: their quote was not found in the evidence")
     else:
         new_text = str(content.get("replacement") or "")
+    new_text = _keep_edges(req.text, repair_escapes(new_text, req.text))
     if not new_text.strip():
         raise AssistError("the model returned no text")
     allowed = _numbers(req.text).union(*(numbers(span.text) for span in req.evidence.values()))
     known = set(cited_keys(req.text)) | {c["key"] for c in citations}
-    flags += latex_flags(req.text, new_text)
+    exempt: set[str] | None = None
+    if req.action == "fix":
+        exempt = set()
+    if req.action == "fix" and req.error_line:  # the broken command on the error line is meant to change
+        lines = req.text.split("\n")
+        exempt = set(_COMMAND.findall(lines[req.error_line - 1])) if req.error_line <= len(lines) else set()
+    flags += latex_flags(req.text, new_text, exempt)
     hunks = [_flag_hunk(h, allowed, known, conn) for h in diff_hunks(req.text, new_text)]
+    if req.action == "cite":
+        for hunk in hunks:
+            if re.sub(r"\s+", "", _CITE_ONLY.sub("", hunk["new"])) != re.sub(r"\s+", "", hunk["old"]):
+                hunk["flags"].append("wording changed: this action should only insert citations")
     suggestion_id = new_id()
     conn.execute(
         """INSERT INTO writing_suggestions(id, document_id, task, model, prompt_version, file, original, hunks_json,
@@ -226,13 +240,17 @@ def _numbers(text: str) -> set[Any]:
     return numbers(_KEYED.sub(" ", text))
 
 
-def latex_flags(old: str, new: str) -> list[str]:
+def latex_flags(old: str, new: str, exempt: set[str] | None = None) -> list[str]:
     """LaTeX the suggestion dropped: commands (by count), math, and \\cite/\\ref/\\label arguments."""
     flags = []
     missing = Counter(_COMMAND.findall(old)) - Counter(_COMMAND.findall(new))
-    missing.pop("cite", None)  # cite keys are checked by name below
+    for name in {"cite", *(exempt or set())}:  # cite keys are checked by name below
+        missing.pop(name, None)
     if missing:
         flags.append("LaTeX commands dropped: " + ", ".join(f"\\{c}" for c in sorted(missing)[:8]))
+    added = set(_COMMAND.findall(new)) - set(_COMMAND.findall(old)) - {"cite", "lr"}
+    if added and exempt is None:  # a fix replaces a broken command with a correct one
+        flags.append("LaTeX commands added: " + ", ".join(f"\\{c}" for c in sorted(added)[:8]))
     old_math = Counter(m.strip() for m in _MATH.findall(old))
     if old_math - Counter(m.strip() for m in _MATH.findall(new)):
         flags.append("math changed or dropped")
@@ -243,6 +261,32 @@ def latex_flags(old: str, new: str) -> list[str]:
     if lost_refs:
         flags.append("references or labels dropped: " + ", ".join(sorted(lost_refs)[:8]))
     return flags
+
+
+_CONTROL = {"\t": "t", "\r": "r", "\f": "f", "\b": "b", "\n": "n"}
+
+
+def repair_escapes(new: str, original: str) -> str:
+    """Undo JSON escapes a model applied to unescaped LaTeX: "\\textbf" sent as \\t + "extbf" arrives as a tab.
+    A control character followed by letters becomes a backslash command again when the command is in the
+    original text, or (except for newlines, which are mostly real) when the original has no such character."""
+    commands = set(_COMMAND.findall(original))
+
+    def fix(match: re.Match[str]) -> str:
+        char, letters = match.group(1), match.group(2)
+        name = _CONTROL[char] + letters
+        if name in commands or (char != "\n" and char not in original):
+            return "\\" + name
+        return match.group(0)
+
+    return re.sub(r"([\t\r\f\b\n])([a-zA-Z]+)", fix, new)
+
+
+def _keep_edges(original: str, new: str) -> str:
+    """Models trim or add surrounding blank space; keep the selection's own leading and trailing whitespace."""
+    lead = original[:len(original) - len(original.lstrip())]
+    trail = original[len(original.rstrip()):]
+    return lead + new.strip() + trail if new.strip() else new
 
 
 def decide(conn: sqlite3.Connection, doc: Document, suggestion_id: str, accepted: list[int]) -> dict[str, Any]:

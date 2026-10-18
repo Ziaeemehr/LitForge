@@ -142,8 +142,9 @@ def install_tectonic_job(app: App, body: dict[str, Any]) -> Job:
 def assist(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str, Any]) -> Any:
     """Preview first: a blocked route is refused, and a route needing approval returns the preview until the
     page sends approved=true. Otherwise the call runs as a job whose report is the suggestion."""
-    req = wassist.prepare(conn, doc, str(body.get("action") or ""), str(body.get("text") or ""),
-                          str(body.get("error") or ""), int(body.get("first_line") or 1))
+    args = (str(body.get("action") or ""), str(body.get("text") or ""), str(body.get("error") or ""),
+            int(body.get("first_line") or 1), int(body.get("error_line") or 0))
+    req = wassist.prepare(conn, doc, *args)
     gateway = app.make_gateway(conn)
     preview = wassist.preview(gateway, req).model_dump()
     sent = {"characters": len(req.text), "evidence": max(0, len(req.packet.items) - 1) if req.packet else 0}
@@ -162,8 +163,8 @@ def assist(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str,
         conn = app.db()
         try:
             gateway = app.make_gateway(conn)
-            job.report = wassist.run(conn, gateway, doc, wassist.prepare(
-                conn, doc, req.action, req.text, req.error, req.first_line), file, approved=approved)
+            job.report = wassist.run(conn, gateway, doc, wassist.prepare(conn, doc, *args), file,
+                                     approved=approved)
         finally:
             conn.close()
 

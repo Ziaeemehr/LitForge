@@ -413,7 +413,7 @@ def test_pair_migration_upgrades_v24_and_preserves_rejection(tmp_path: Path, mon
             for name in ['a', 'b']:
                 legacy.execute('INSERT INTO paper_versions(group_id,paper_id,role,evidence,confirmed,rejected,'
                                "created_at) VALUES (?,?,'unknown','test',0,?,'now')", (group, name, rejected))
-        assert db.migrate(legacy) == ['0025_version_pairs.sql']
+        assert db.migrate(legacy)[0] == '0025_version_pairs.sql'
         assert legacy.execute('SELECT DISTINCT group_id FROM paper_versions').fetchall()[0][0] == 'rejected'
         assert legacy.execute('SELECT COUNT(*) FROM paper_versions').fetchone()[0] == 2
         assert versions._rejected(legacy, 'a', 'b')
