@@ -206,6 +206,8 @@ def read_file(doc: Document, name: str) -> tuple[str, str]:
     path = resolve_inside(doc.folder, name)
     if path.suffix.lower() not in TEXT_SUFFIXES:
         raise DocumentError("only text files open in the editor")
+    if not path.is_file():
+        raise LookupError(f"{name} not found")
     data = path.read_bytes()
     return data.decode("utf-8", errors="replace"), text_hash(data)
 

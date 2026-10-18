@@ -382,6 +382,9 @@ def tools_status_command(ctx: typer.Context) -> None:
          "Not installed" if pix2text["available"] else "Not available on this install", pix2text["size"]),
         ("Image model", str(vision_state),
          str(vision.get("notice") or "model-dependent")),
+        ("Tectonic", f"Installed · {status['tectonic']['tectonic']['version']}"
+         if status["tectonic"]["tectonic"]["installed"] else "Not installed",
+         str(status["tectonic"]["tectonic"]["size"] or "not available for this platform")),
     )
     typer.echo(f"{'Tool':<14} {'Status':<42} Size / detail")
     for name, state, size in rows:
@@ -411,6 +414,98 @@ def install_pix2text_command(
         typer.echo(f"Pix2Text {result['version']} installed.")
     else:
         typer.echo("Installation finished; restart LitForge to use Pix2Text.")
+
+
+@tools_install_app.command("tectonic")
+def install_tectonic_command(
+    ctx: typer.Context,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask for confirmation")] = False,
+) -> None:
+    """Install Tectonic, the LaTeX engine of the Writing Studio (~22 MB, packages download on first use)."""
+    from litforge.writing.compile import CompileError, engine_status, install_tectonic
+
+    paths = _state(ctx).paths
+    status = engine_status(paths)["tectonic"]
+    if status["installed"]:
+        typer.echo(f"Tectonic {status['version']} is already installed at {status['path']}.")
+        return
+    if not status["offerable"]:
+        typer.secho("No Tectonic build for this platform; install TeX Live or MacTeX instead.", fg="yellow", err=True)
+        raise typer.Exit(1)
+    if not yes and not typer.confirm(f"Download Tectonic {status['release']} ({status['size']})?"):
+        return
+    try:
+        install_tectonic(paths, typer.echo)
+    except (OSError, CompileError) as exc:
+        typer.secho(f"Tectonic installation failed: {exc}", fg="red", err=True)
+        raise typer.Exit(1) from exc
+
+
+write_app = typer.Typer(help="Writing Studio: LaTeX documents in a project.", no_args_is_help=True)
+app.add_typer(write_app, name="write")
+
+
+@write_app.command("list")
+def write_list(ctx: typer.Context, project: ProjectOpt = None) -> None:
+    """List the project's documents."""
+    from litforge.writing.documents import list_documents
+
+    st = _state(ctx)
+    conn = st.db()
+    name, _ = _project(st, conn, project, required=True)
+    assert name is not None
+    for doc in list_documents(conn, st.paths, name):
+        typer.echo(f"{doc.id}  {doc.name}  ({doc.template}, {doc.engine})  {doc.folder}")
+
+
+@write_app.command("new")
+def write_new(
+    ctx: typer.Context,
+    title: Annotated[str, typer.Argument(help="Document name")],
+    project: ProjectOpt = None,
+    template: Annotated[str, typer.Option("--template", help="article or persian")] = "article",
+) -> None:
+    """Create a document from a template."""
+    from litforge.writing.documents import DocumentError, create_document
+
+    st = _state(ctx)
+    conn = st.db()
+    name, _ = _project(st, conn, project, required=True)
+    assert name is not None
+    try:
+        doc = create_document(conn, st.paths, name, title, template)
+    except DocumentError as exc:
+        typer.secho(str(exc), fg="red", err=True)
+        raise typer.Exit(2) from exc
+    typer.echo(f"created {doc.id} in {doc.folder}")
+
+
+@write_app.command("compile")
+def write_compile(
+    ctx: typer.Context,
+    document: Annotated[str, typer.Argument(help="Document id (see `litforge write list`)")],
+    engine: Annotated[str | None, typer.Option("--engine", help="tectonic or xelatex")] = None,
+) -> None:
+    """Compile a document to PDF."""
+    from litforge.writing.compile import CompileError, compile_document
+    from litforge.writing.documents import get_document
+
+    st = _state(ctx)
+    conn = st.db()
+    try:
+        doc = get_document(conn, st.paths, document)
+        result = compile_document(doc, st.paths, engine)
+    except (LookupError, CompileError) as exc:
+        typer.secho(str(exc), fg="red", err=True)
+        raise typer.Exit(1) from exc
+    for item in result.errors:
+        typer.secho(f"{item.file or ''}:{item.line or ''}: {item.message}", fg="red", err=True)
+    for item in result.warnings:
+        typer.echo(f"warning: {item.message}", err=True)
+    if not result.ok:
+        raise typer.Exit(1)
+    typer.echo(f"{doc.folder / str(result.pdf)} ({result.elapsed_ms / 1000:.1f} s, {result.engine}, "
+               f"sandbox: {result.sandbox})")
 
 
 @tools_install_app.command("mineru")

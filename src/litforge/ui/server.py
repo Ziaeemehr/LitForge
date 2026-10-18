@@ -81,8 +81,9 @@ from litforge.storage.cache import sha256_file
 from litforge.storage.db import open_db, transaction
 from litforge.storage.recovery import repair_abandoned_runs
 from litforge.tools import install_pix2text, install_timeout_s, pix2text_install_status
-from litforge.ui import api
+from litforge.ui import api, writing_routes
 from litforge.updates import UpdateChecker, automatic_enabled
+from litforge.writing.compile import engine_status
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 HEARTBEAT_S = 15  # how often an open page checks in (app.js)
@@ -192,6 +193,7 @@ class App:
         return {
             "mineru": {**mineru, "size": "~4 GB", "available": True},
             "pix2text": pix2text,
+            "tectonic": engine_status(self.paths),
             "vision": {**vision, "legacy": not self._uses_model_settings(), "size": "model-dependent"},
         }
 
@@ -982,6 +984,11 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(mineru_status(app.paths, app.config.parsing))
                 if path == "/api/tools":
                     return self._json(app.optional_tools_status())
+                if path.startswith("/api/write/"):
+                    result = writing_routes.get(app, conn, path, query)
+                    if isinstance(result, tuple):
+                        return self._send(200, result[0], result[1], {"Content-Disposition": "inline"})
+                    return self._json(result)
                 if path == "/api/keys":
                     return self._json(app.keys.status())
                 if path == "/api/models/catalogue":
@@ -1084,7 +1091,13 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 if url.path == "/api/import":
                     q = {k: v[0] for k, v in parse_qs(url.query).items()}
                     return self._import(q.get("name", "refs.csv"), q.get("project") or "default", q.get("export_dir"))
+                if url.path == "/api/write/upload":
+                    return self._write_upload({k: v[0] for k, v in parse_qs(url.query).items()})
                 body = self._body()
+                if url.path.startswith("/api/write/"):
+                    return self._write_post(url.path, body)
+                if url.path == "/api/tools/tectonic/install":
+                    return self._json(writing_routes.install_tectonic_job(app, body).__dict__)
                 if url.path == '/api/update/check':
                     return self._json(app.updates.force())
                 if url.path == "/api/mineru/install":
@@ -1529,6 +1542,26 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._error(400, 'Invalid Evidence Lens request. Check fields and model settings.')
             except Exception:
                 self._error(500, 'Evidence Lens failed. Check model settings and try again.')
+            finally:
+                conn.close()
+
+        def _write_post(self, path: str, body: dict[str, Any]) -> None:
+            conn = app.db()
+            try:
+                return self._json(writing_routes.post(app, conn, path, body))
+            except writing_routes.Conflict as exc:
+                return self._json(exc.payload, HTTPStatus.CONFLICT)
+            finally:
+                conn.close()
+
+        def _write_upload(self, query: dict[str, str]) -> None:
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 < length <= writing_routes.MAX_FIGURE_UPLOAD:
+                return self._error(HTTPStatus.BAD_REQUEST, "empty or too large upload (at most 25 MB)")
+            data = self.rfile.read(length)
+            conn = app.db()
+            try:
+                return self._json(writing_routes.upload(app, conn, query.get("doc", ""), query.get("name", ""), data))
             finally:
                 conn.close()
 

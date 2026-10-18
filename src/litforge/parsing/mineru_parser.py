@@ -88,7 +88,7 @@ def _read_tail(stream: BinaryIO) -> str:
 
 def _run_command(argv: list[str], *, env: dict[str, str], timeout: float,
                  out_dir: Path | None = None, capture_stdout: bool = False,
-                 merge_output: bool = False) -> subprocess.CompletedProcess[str]:
+                 merge_output: bool = False, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     """Spool diagnostics to disk; Python retains only their final 64 KiB."""
     check_cancelled()
     with ExitStack() as stack:
@@ -96,7 +96,7 @@ def _run_command(argv: list[str], *, env: dict[str, str], timeout: float,
         stdout = stack.enter_context(tempfile.TemporaryFile(dir=out_dir)) if capture_stdout else None
         options: dict[str, Any] = {'start_new_session': True} if os.name != 'nt' else {
             'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}  # type: ignore[attr-defined]
-        process = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL,
+        process = subprocess.Popen(argv, env=env, cwd=cwd, stdin=subprocess.DEVNULL,
                                    stdout=stderr if merge_output else stdout or subprocess.DEVNULL,
                                    stderr=stderr, **options)
         kill_tree = None
