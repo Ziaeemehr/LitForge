@@ -369,6 +369,9 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 
 /* Evidence Lens uses the shared panels, badges, drawer and theme palette. */
 .lens-panel { padding: 16px; }
+.console-panel { margin-bottom: 14px; }
+.console-json { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); padding: 10px; border-radius: 6px; }
+.console-args { margin: 4px 0 8px; padding-left: 18px; overflow-wrap: anywhere; }
 .lens-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
 .lens-actions input[type=text] { width: 180px; max-width: 100%; }
 .lens-actions .check, .lens-actions label.f { margin: 0; }

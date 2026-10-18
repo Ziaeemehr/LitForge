@@ -1,0 +1,42 @@
+name: systematic_review
+description: Screen a year-bounded project set, extract a study matrix, and answer the review question.
+parameters:
+  question:
+    type: string
+    required: true
+  year_from:
+    type: integer
+    default: null
+  year_to:
+    type: integer
+    default: null
+steps:
+  - action: filter_papers
+    args:
+      year_from: "{{year_from}}"
+      year_to: "{{year_to}}"
+  - action: ask
+    args:
+      question: "{{question}}"
+      paper_ids: "$step_1"
+  - action: create_matrix
+    args:
+      name: systematic-review
+      question: "{{question}}"
+      columns:
+        - key: population
+          label: Population
+          instruction: Identify the study population.
+          type: text
+        - key: method
+          label: Method
+          instruction: Summarize the study method.
+          type: text
+        - key: outcome
+          label: Outcome
+          instruction: State the primary outcome.
+          type: text
+  - action: extract_matrix
+    args:
+      matrix_id: "$step_3"
+      paper_ids: "$step_1"

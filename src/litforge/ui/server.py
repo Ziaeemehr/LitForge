@@ -37,6 +37,8 @@ from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.review import record_review
 from litforge.analysis.runs import get_run
 from litforge.config import Config, EnvSettings, Paths, contact_email, save_mailto
+from litforge.console import planner
+from litforge.console.actions import ActionContext
 from litforge.discovery.fetch import fetch_open_access
 from litforge.discovery.http import HttpClient
 from litforge.discovery.run import Sources, run_import, run_search
@@ -233,6 +235,27 @@ class App:
                 conn.close()
 
         return self.start_job(request.task, project, work)
+
+    def console_job(self, run_id: str, project: str, approved_cloud: bool = False) -> Job:
+        def work(job: Job) -> str:
+            conn = self.db()
+            try:
+                saved = planner.get_run(conn, run_id)
+                result = planner.execute_run(
+                    conn, self.make_gateway(conn), self.paths, saved.project_id, run_id, approved=True,
+                    approved_cloud=approved_cloud,
+                    sources=self.sources() if any(step.action == "refresh" for step in saved.plan.steps) else None,
+                    progress=job.messages.append,
+                )
+                job.report = {"status": result.status, "current_step": result.current_step,
+                              "results": result.results}
+                return run_id
+            finally:
+                conn.close()
+
+        job = self.start_job("console", project, work)
+        job.run_id = run_id
+        return job
 
     def asset_job(self, asset_id: str, request: api.AssetAnalysisRequest) -> Job:
         conn = self.db()
@@ -577,6 +600,10 @@ class App:
         job.report.update(downloaded=report.downloaded, candidates=report.candidates, items=report.items)
 
 
+def _console_run_json(run: planner.ConsoleRun) -> dict[str, Any]:
+    return {**run.model_dump(), "plan": run.plan.model_dump(), "results": run.results}
+
+
 def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "LitForge"
@@ -806,8 +833,11 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             return (path in ("/api/ask", "/api/audit", "/api/preview", "/api/review", "/api/matrices",
                              "/api/queue", "/api/screen-fulltext", "/api/snapshots",
                              "/api/refresh", "/api/repro/matrix", "/api/gaps", "/api/gaps/detect",
-                             "/api/gaps/design", "/api/gaps/review")
+                             "/api/gaps/design", "/api/gaps/review", "/api/console/plan",
+                             "/api/console/execute", "/api/console/resume", "/api/console/cancel",
+                             "/api/console/runs")
                     or path.startswith(("/api/answers/", "/api/matrices/", "/api/claims"))
+                    or path.startswith("/api/console/runs/")
                     or bool(re.fullmatch(r"/api/assets/[\w-]+/analyze", path))
                     or bool(re.fullmatch(r"/api/gaps/cards/[\w-]+/export", path))
                     or bool(re.fullmatch(r"/api/papers/[\w-]+/repro", path)))
@@ -816,6 +846,31 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             conn = app.db()
             try:
                 if body is None:
+                    if match := re.fullmatch(r"/api/console/runs/([\w-]+)/exports/([A-Za-z0-9_.-]+)", path):
+                        run = planner.get_run(conn, match[1])
+                        export_paths = [item["output"].get("path") for item in run.results
+                                        if isinstance(item.get("output"), dict)]
+                        if not any(isinstance(value, str) and Path(value).name == match[2]
+                                   for value in export_paths):
+                            raise LookupError("export not found for this console run")
+                        project_row = (conn.execute("SELECT name FROM projects WHERE id=?",
+                                                     (run.project_id,)).fetchone()
+                                       if run.project_id else None)
+                        if project_row is None or run.project_id is None:
+                            raise LookupError("project export not found")
+                        base = default_export_dir(conn, app.paths, project_row["name"], run.project_id).resolve()
+                        target = (base / match[2]).resolve()
+                        if base not in target.parents or not target.is_file():
+                            raise LookupError("export not found")
+                        return self._send(200, target.read_bytes(),
+                                          mimetypes.guess_type(target.name)[0] or "application/octet-stream",
+                                          {"Content-Disposition": f'attachment; filename="{target.name}"'})
+                    if path == "/api/console/runs":
+                        project_id = get_project_id(conn, query["project"]) if query.get("project") else None
+                        return self._json([_console_run_json(item) for item in
+                                           planner.list_runs(conn, project_id, int(query.get("limit", "50")))])
+                    if match := re.fullmatch(r"/api/console/runs/([\w-]+)", path):
+                        return self._json(_console_run_json(planner.get_run(conn, match[1])))
                     if path == "/api/gaps":
                         gap_pid = get_project_id(conn, query.get("project", ""))
                         return self._json(api.gap_panel(conn, gap_pid))
@@ -857,6 +912,73 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                             return self._send(200, content.encode(), types[fmt] + '; charset=utf-8', headers)
                         return self._json(api.lens_matrix(conn, match[1]))
                 else:
+                    if path == "/api/console/plan":
+                        request_text = str(body.get("request") or "")
+                        project_name = str(body["project"]) if body.get("project") else None
+                        project_id = get_project_id(conn, project_name) if project_name else None
+                        gateway = app.make_gateway(conn)
+                        cloud_approved = body.get("approved_cloud") is True
+                        planner_call = planner.preview_planner_call(gateway, request_text)
+                        if planner_call.blocked_reason:
+                            return self._json({"error": "Planner route is blocked.",
+                                               "preview": planner_call.model_dump()}, 400)
+                        if planner_call.requires_approval and not cloud_approved:
+                            return self._json({"error": "Separate approval is required for the cloud planner route.",
+                                               "preview": planner_call.model_dump()}, 403)
+                        plan_value = planner.plan(conn, gateway, request_text, project_id, cloud_approved)
+                        project_row = conn.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone() \
+                            if project_id else None
+                        context = ActionContext(conn, gateway, project_id,
+                                                str(project_row["name"]) if project_row else None, app.paths)
+                        estimate = planner.preview_plan(plan_value, context,
+                                                        app.config.console.seconds_per_model_call)
+                        return self._json({"plan": plan_value.model_dump(), "preview": estimate.model_dump()})
+                    if path == "/api/console/execute":
+                        if body.get("approved") is not True:
+                            return self._error(HTTPStatus.FORBIDDEN, "Explicit execution approval is required.")
+                        raw_plan = body.get("plan")
+                        if not isinstance(raw_plan, dict) or not isinstance(raw_plan.get("request"), str):
+                            raise ValueError("plan must include its request and steps")
+                        plan_value = planner.validate_plan({"steps": raw_plan.get("steps")},
+                                                           raw_plan["request"])
+                        project_name = str(body["project"]) if body.get("project") else None
+                        project_id = get_project_id(conn, project_name) if project_name else None
+                        gateway = app.make_gateway(conn)
+                        project_row = conn.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone() \
+                            if project_id else None
+                        context = ActionContext(conn, gateway, project_id,
+                                                str(project_row["name"]) if project_row else None, app.paths)
+                        estimate = planner.preview_plan(plan_value, context, app.config.console.seconds_per_model_call)
+                        if estimate.blocked_reasons:
+                            return self._json({"error": "One or more model routes are blocked.",
+                                               "preview": estimate.model_dump()}, 400)
+                        if estimate.requires_approval and body.get("approved_cloud") is not True:
+                            return self._json({"error": "Separate cloud-route approval is required.",
+                                               "preview": estimate.model_dump()}, 403)
+                        run_id = planner.create_run(conn, project_id, plan_value)
+                        job = app.console_job(run_id, project_name or "library", body.get("approved_cloud") is True)
+                        return self._json({"run_id": run_id, "job": job.__dict__})
+                    if path == "/api/console/resume":
+                        if body.get("approved") is not True:
+                            return self._error(HTTPStatus.FORBIDDEN, "Explicit execution approval is required.")
+                        run_id = str(body.get("run_id") or "")
+                        saved = planner.get_run(conn, run_id)
+                        project_row = (conn.execute("SELECT name FROM projects WHERE id=?",
+                                                     (saved.project_id,)).fetchone()
+                                       if saved.project_id else None)
+                        project_name = str(project_row["name"]) if project_row else "library"
+                        gateway = app.make_gateway(conn)
+                        context = ActionContext(conn, gateway, saved.project_id, project_name, app.paths)
+                        estimate = planner.preview_plan(saved.plan, context, app.config.console.seconds_per_model_call)
+                        if estimate.requires_approval and body.get("approved_cloud") is not True:
+                            return self._json({"error": "Separate cloud-route approval is required.",
+                                               "preview": estimate.model_dump()}, 403)
+                        return self._json({"run_id": run_id,
+                                           "job": app.console_job(run_id, project_name,
+                                                                  body.get("approved_cloud") is True).__dict__})
+                    if path == "/api/console/cancel":
+                        run = planner.request_cancel(conn, str(body.get("run_id") or ""))
+                        return self._json(_console_run_json(run))
                     if path == "/api/gaps/detect":
                         project_id = get_project_id(conn, str(body.get("project") or ""))
                         return self._json(api.gap_panel(conn, project_id))
@@ -947,6 +1069,9 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._error(404, 'not found')
             except (KeyError, LookupError):
                 self._error(404, 'Evidence Lens item not found.')
+            except planner.PlanValidationError as exc:
+                self._json({"error": "Plan rejected; validation errors are shown.", "validation_errors": exc.errors},
+                           HTTPStatus.BAD_REQUEST)
             except (ValidationError, ValueError, ProjectNotFound, sqlite3.IntegrityError):
                 self._error(400, 'Invalid Evidence Lens request. Check fields and model settings.')
             except Exception:

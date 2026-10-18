@@ -20,6 +20,7 @@
   <button class="nav-item" data-view="matrix" title="Compare studies in the current project">Matrix</button>
   <button class="nav-item" data-view="claims" title="Explore cited claims and disagreements in this project">Claims</button>
   <button class="nav-item" data-view="gaps" title="Review evidence gaps and design research proposals">Gaps</button>
+  <button class="nav-item" data-view="console" title="Plan, preview and run checkpointed research workflows">Console</button>
   <h3 title="A project collects the papers, ✓/✗ marks and exports of one review">Projects</h3>
   <div class="side-list" id="side-projects"></div>
   <h3 title="Your latest searches; click one to reopen it with its marks">Recent</h3>
@@ -244,6 +245,30 @@
       <button class="btn accent" id="gaps-refresh">Refresh candidates</button></div>
     <p class="hint" id="gaps-status" role="status" aria-live="polite"></p>
     <div class="card lens-panel lens-rows" id="gaps-list"></div>
+  </section>
+
+  <section id="view-console" class="view" hidden>
+    <div class="viewhead"><h2>Research Console</h2>
+      <span class="meta">A typed plan, previewed before explicit approval</span></div>
+    <div class="card lens-panel console-panel">
+      <form id="console-form">
+        <label class="f" for="console-request">What would you like to do?</label>
+        <textarea id="console-request" rows="4" required
+          placeholder="Compare methods in papers published since 2020 and answer the review question"></textarea>
+        <div class="lens-actions"><button class="btn accent" type="submit" id="console-plan">Plan and preview</button></div>
+      </form>
+      <p class="hint" id="console-status" role="status" aria-live="polite"></p>
+      <div id="console-preview" class="lens-rows"></div>
+      <div class="lens-actions">
+        <button class="btn accent" id="console-run" hidden>Confirm and run</button>
+        <button class="btn danger" id="console-cancel" hidden>Cancel between steps</button>
+      </div>
+      <div id="console-run-detail" class="lens-rows"></div>
+    </div>
+    <div class="card lens-panel console-panel">
+      <h3>Recent console runs</h3>
+      <div id="console-runs" class="lens-rows"></div>
+    </div>
   </section>
 
   <section id="results" class="view" hidden>

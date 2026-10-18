@@ -1,0 +1,20 @@
+name: scoping_review
+description: Map a question across the project and return a cited initial answer.
+parameters:
+  question:
+    type: string
+    required: true
+  year_from:
+    type: integer
+    default: null
+  year_to:
+    type: integer
+    default: null
+steps:
+  - action: filter_papers
+    args:
+      year_from: "{{year_from}}"
+      year_to: "{{year_to}}"
+  - action: ask
+    args:
+      question: "{{question}}"

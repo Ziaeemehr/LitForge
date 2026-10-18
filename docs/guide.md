@@ -143,6 +143,26 @@ Any command accepts `--project NAME` to work on a project other than the active 
 `litforge --help` lists everything, including the individual `ingest`, `parse` and `index`
 steps that `add` combines.
 
+## Research Console
+
+The Console plans requests using a closed set of typed research actions. The planner receives only your
+request and the action schema, never paper text. Review its per-step preview before approving execution:
+
+```bash
+litforge do "Compare study methods published since 2020" -p my-review
+litforge do "Take a snapshot, then answer the project question" -p my-review --yes
+litforge workflow run systematic_review -p my-review --param question="What methods are reported?"
+litforge console runs -p my-review
+litforge console resume RUN_ID
+litforge console cancel RUN_ID
+```
+
+`--yes` approves execution only; a cloud model route requires a separate approval (`--approve-cloud` or
+the interactive prompt) and remains subject to the configured gateway policy and budget. Each completed
+step is checkpointed; a failed or cancelled run can resume from its next uncompleted step. Exports created
+by console actions stay inside the project's export folder. The local web UI has a **Console** view with
+the same plan preview, explicit Run confirmation, progress, cancellation and resume controls.
+
 ## Where things are stored
 
 All data lives in `./data` (git-ignored). Use `--data-dir PATH` or `LITFORGE_HOME=PATH` to move it.

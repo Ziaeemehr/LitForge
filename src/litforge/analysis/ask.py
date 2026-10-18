@@ -80,7 +80,7 @@ class Answer(BaseModel):
 
 
 def _question_spans(conn: sqlite3.Connection, hits: list[SearchHit], question: str,
-                    project_id: str | None) -> list[EvidenceSpan]:
+                    project_id: str | None, paper_ids: list[str] | None = None) -> list[EvidenceSpan]:
     spans = [span.model_copy(update={"page": hit.page}) for span, hit in
              zip(record_spans(conn, hits), hits, strict=True)]
     seen = {span.id for span in spans}
@@ -90,7 +90,8 @@ def _question_spans(conn: sqlite3.Connection, hits: list[SearchHit], question: s
         if row is not None:
             selected_runs.add((hit.paper_id, row["parse_run_id"]))
     if not hits:
-        selected_runs.update((row["paper_id"], row["id"]) for row in current_runs(conn, project_id))
+        selected_runs.update((row["paper_id"], row["id"]) for row in current_runs(conn, project_id)
+                             if paper_ids is None or row["paper_id"] in paper_ids)
     for paper_id, parse_run_id in sorted(selected_runs):
         for span in relevant_asset_spans(conn, paper_id, parse_run_id, question):
             if span.id not in seen:
@@ -138,9 +139,10 @@ def get_answer(conn: sqlite3.Connection, run_id: str) -> Answer:
 
 
 def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_id: str | None = None,
-               k: int = 8, profile: str | None = None, sensitive: bool = False) -> list[CallPreview]:
-    hits = retrieve_for_question(conn, question, project_id, k)
-    spans = _question_spans(conn, hits, question, project_id)
+               k: int = 8, profile: str | None = None, sensitive: bool = False,
+               paper_ids: list[str] | None = None) -> list[CallPreview]:
+    hits = retrieve_for_question(conn, question, project_id, k, paper_ids=paper_ids)
+    spans = _question_spans(conn, hits, question, project_id, paper_ids)
     if not spans:
         return []
     packet = to_packet(spans, sensitive=sensitive)
@@ -148,13 +150,14 @@ def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, question: str, p
 
 
 def ask(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_id: str | None = None,
-        k: int = 8, profile: str | None = None, approved: bool = False, sensitive: bool = False) -> Answer:
+        k: int = 8, profile: str | None = None, approved: bool = False, sensitive: bool = False,
+        paper_ids: list[str] | None = None) -> Answer:
     run_id = start_run(conn, "ask", project_id, {"question": question},
                        {"question": question, "retrieval": "lexical", "k": k, "profile": profile,
-                        "sensitive": sensitive}, ASK_PROMPT_VERSION)
+                        "sensitive": sensitive, "paper_ids": paper_ids}, ASK_PROMPT_VERSION)
     try:
-        hits = retrieve_for_question(conn, question, project_id, k)
-        spans = _question_spans(conn, hits, question, project_id)
+        hits = retrieve_for_question(conn, question, project_id, k, paper_ids=paper_ids)
+        spans = _question_spans(conn, hits, question, project_id, paper_ids)
         link_evidence(conn, run_id, spans, [*(h.score for h in hits), *([None] * (len(spans) - len(hits)))])
         model, provider = "", ""
         if spans:

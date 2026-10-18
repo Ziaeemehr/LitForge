@@ -105,6 +105,10 @@ class BudgetConfig(BaseModel):
     max_per_month_usd: float = 20
 
 
+class ConsoleConfig(BaseModel):
+    seconds_per_model_call: float = Field(default=2.0, gt=0)
+
+
 class Config(BaseModel):
     parsing: ParsingConfig = Field(default_factory=ParsingConfig)
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
@@ -115,6 +119,7 @@ class Config(BaseModel):
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    console: ConsoleConfig = Field(default_factory=ConsoleConfig)
 
 
 class EnvSettings(BaseSettings):

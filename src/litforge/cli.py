@@ -20,6 +20,7 @@ from litforge.analysis.ledger import record_spans
 from litforge.analysis.retrieve import retrieve_for_question
 from litforge.analysis.runs import finish_run, link_evidence, start_run
 from litforge.config import Config, EnvSettings, Paths, contact_email, load_config, resolve_paths
+from litforge.console.commands import register as register_console
 from litforge.discovery.fetch import fetch_open_access
 from litforge.discovery.http import HttpClient
 from litforge.discovery.run import DiscoveryReport, Sources, enrich_project, run_citations, run_import, run_search
@@ -820,6 +821,7 @@ def launch() -> None:
     app(["ui"])
 
 register(app, eval_app)
+register_console(app)
 
 if __name__ == "__main__":
     app()

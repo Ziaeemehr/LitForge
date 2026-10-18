@@ -135,3 +135,13 @@ def test_run_errors_are_typed_and_safe(conn: sqlite3.Connection, task: str, fail
             extract_matrix(conn, gw, matrix.id, profile=profile)
     row = conn.execute("SELECT status,error FROM analysis_runs ORDER BY rowid DESC LIMIT 1").fetchone()
     assert row["status"] == "error" and row["error"] == expected
+
+
+def test_retrieval_can_be_limited_to_selected_papers(conn: sqlite3.Connection) -> None:
+    from lens_fakes import seed
+
+    from litforge.analysis.retrieve import retrieve_for_question
+    seed(conn, "pa", "Results: gain improves outcomes.")
+    seed(conn, "pb", "Results: gain improves outcomes too.")
+    assert {h.paper_id for h in retrieve_for_question(conn, "gain outcomes", "proj")} == {"pa", "pb"}
+    assert {h.paper_id for h in retrieve_for_question(conn, "gain outcomes", "proj", paper_ids=["pb"])} == {"pb"}

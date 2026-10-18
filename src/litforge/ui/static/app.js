@@ -12,7 +12,8 @@
     mode: 'similar', projects: [], project: store.get('project', null), runId: null, data: null,
     filter: '', oa: false, onlyNew: false, hide: false, channel: null, sort: store.get('sort', 'score'),
     screenFilter: '', criteria: null, criteriaFor: null, criteriaLoading: null,
-    sel: -1, view: [], page: 'new', pdf: null, list: null, pdfs: [], missing: [], fetchReasons: {}, job: null, anchor: -1, exportsRoot: '', dirEdited: false
+    sel: -1, view: [], page: 'new', pdf: null, list: null, pdfs: [], missing: [], fetchReasons: {}, job: null,
+    anchor: -1, exportsRoot: '', dirEdited: false, consolePlan: null, consoleRunId: null
   };
 
   var CHANNEL_LABEL = {
@@ -456,8 +457,8 @@
 
   function showView(view) {
     state.page = view;
-    if (history.replaceState) history.replaceState(null, '', /^(recents|library|ask|matrix|claims|gaps)$/.test(view) ? '#' + view : location.pathname);
-    ['new', 'recents', 'library', 'ask', 'matrix', 'claims', 'gaps'].forEach(function (v) { $(('view-' + v)).hidden = v !== view; });
+    if (history.replaceState) history.replaceState(null, '', /^(recents|library|ask|matrix|claims|gaps|console)$/.test(view) ? '#' + view : location.pathname);
+    ['new', 'recents', 'library', 'ask', 'matrix', 'claims', 'gaps', 'console'].forEach(function (v) { $(('view-' + v)).hidden = v !== view; });
     $('results').hidden = view !== 'results';
     document.querySelectorAll('.sidebar [data-view]').forEach(function (b) { b.classList.toggle('on', b.dataset.view === view); });
     document.querySelectorAll('#side-recent a').forEach(function (a) { a.classList.remove('on'); });
@@ -466,6 +467,7 @@
     if (view === 'library') loadLibrary();
     if (view === 'ask' || view === 'matrix' || view === 'claims') enterLens(view);
     if (view === 'gaps') loadGaps();
+    if (view === 'console') loadConsole();
   }
 
   function deleteRun() {
@@ -1148,6 +1150,179 @@
       block.appendChild(section);
     });
     parent.appendChild(block);
+  }
+
+  function loadConsole() {
+    $('console-status').textContent = state.project ? 'Planning uses the current project.' :
+      'Choose a project for project-scoped actions.';
+    $('console-run-detail').replaceChildren();
+    return loadConsoleRuns();
+  }
+
+  function loadConsoleRuns() {
+    var query = state.project ? '?project=' + encodeURIComponent(state.project) : '';
+    return api('/api/console/runs' + query).then(function (runs) {
+      var list = $('console-runs');
+      list.replaceChildren();
+      if (!runs.length) list.appendChild(lensNode('p', 'No console runs yet.', 'hint'));
+      runs.forEach(function (run) {
+        var item = lensNode('article', null, 'lens-row');
+        item.appendChild(lensNode('strong', run.request || 'Research workflow'));
+        item.appendChild(lensNode('p', run.status + ' · step ' + run.current_step + ' · ' +
+          new Date(run.updated_at).toLocaleString(), 'meta'));
+        item.appendChild(lensButton('Show run', function () { pollConsoleRun(run.id, false); }));
+        list.appendChild(item);
+      });
+    }).catch(function (error) { $('console-status').textContent = error.message; });
+  }
+
+  var CONSOLE_ACTIONS = {
+    filter_papers: 'Filter papers', search_library: 'Search the library', ask: 'Ask the library',
+    create_matrix: 'Create a study matrix', add_column: 'Add a matrix column', extract_matrix: 'Extract matrix cells',
+    extract_claims: 'Extract claims', cluster_claims: 'Cluster claims', relate_claims: 'Assess claim relations',
+    screen_fulltext: 'Screen full text', export_matrix: 'Export a matrix', write_brief: 'Write a research brief',
+    snapshot: 'Take a snapshot', refresh: 'Refresh the living review'
+  };
+
+  // Readable "key: value" lines for a step's arguments; unset values are left out.
+  function consoleArgs(args) {
+    var list = lensNode('ul', null, 'console-args');
+    Object.keys(args || {}).forEach(function (key) {
+      var value = args[key];
+      if (value == null || value === '' || (Array.isArray(value) && !value.length)) return;
+      var text = typeof value === 'boolean' ? (value ? 'yes' : 'no') :
+        /^\$step_\d+$/.test(String(value)) ? 'result of step ' + String(value).slice(6) :
+        typeof value === 'object' ? JSON.stringify(value) : String(value);
+      list.appendChild(lensNode('li', key.replace(/_/g, ' ') + ': ' + text));
+    });
+    if (!list.children.length) list.appendChild(lensNode('li', 'no arguments'));
+    return list;
+  }
+
+  function renderConsolePreview(data) {
+    var target = $('console-preview');
+    target.replaceChildren();
+    var preview = data.preview;
+    target.appendChild(lensNode('p', preview.model_call_count + ' model calls · maximum cost ' +
+      (preview.max_cost_usd == null ? 'unknown' : '$' + Number(preview.max_cost_usd).toFixed(4)) +
+      ' · about ' + Math.ceil(preview.time_estimate_seconds) + ' seconds · writes ' +
+      (preview.writes ? 'yes' : 'no'), 'meta'));
+    preview.blocked_reasons.forEach(function (reason) {
+      target.appendChild(lensNode('p', 'Blocked: ' + reason, 'no'));
+    });
+    preview.steps.forEach(function (step) {
+      var row = lensNode('article', null, 'lens-row');
+      row.appendChild(lensNode('h3', step.step + '. ' + (CONSOLE_ACTIONS[step.action] || step.action)));
+      row.appendChild(consoleArgs(step.args));
+      row.appendChild(lensNode('p', 'Papers in scope: ' +
+        (step.papers_in_scope == null ? 'not determined' : step.papers_in_scope) +
+        ' · model calls: ' + (step.estimate_known === false ? 'known after earlier steps run' :
+          step.model_call_count) + ' · max cost: ' +
+        (step.max_cost_usd == null ? 'unknown' : '$' + Number(step.max_cost_usd).toFixed(4)) +
+        ' · time: ' + Math.ceil(step.time_estimate_seconds) + 's · writes: ' + (step.writes ? 'yes' : 'no'), 'meta'));
+      target.appendChild(row);
+    });
+    state.consolePlan = data.plan;
+    $('console-run').hidden = !data.plan || !!preview.blocked_reasons.length;
+    $('console-status').textContent = 'Preview only. No actions have run.';
+  }
+
+  function showConsoleRun(run) {
+    state.consoleRunId = run.id;
+    var target = $('console-run-detail');
+    target.replaceChildren();
+    target.appendChild(lensNode('h3', 'Run ' + run.id + ' · ' + run.status + ' · step ' + run.current_step));
+    (run.results || []).forEach(function (result) {
+      var row = lensNode('article', null, 'lens-row');
+      row.appendChild(lensNode('strong', 'Step ' + result.step + ': ' + (CONSOLE_ACTIONS[result.action] || result.action)));
+      row.appendChild(lensNode('pre', JSON.stringify(result.output, null, 2), 'console-json'));
+      var output = result.output || {};
+      if (output.matrix_id) {
+        row.appendChild(lensButton('Open matrix', function () {
+          showView('matrix');
+          loadLensMatrices(output.matrix_id).catch(function (error) { toast(error.message); });
+        }));
+      }
+      if (output.run_id && result.action === 'ask') {
+        row.appendChild(lensButton('Open answer', function () {
+          showView('ask');
+          loadLensAnswer(output.run_id).catch(function (error) { toast(error.message); });
+        }));
+      }
+      if (output.path) {
+        var filename = String(output.path).split('/').pop();
+        var brief = lensNode('a', 'Open exported file: ' + filename, 'btn small');
+        brief.href = '/api/console/runs/' + encodeURIComponent(run.id) + '/exports/' + encodeURIComponent(filename);
+        brief.download = filename;
+        row.appendChild(brief);
+      }
+      target.appendChild(row);
+    });
+    $('console-run').hidden = true;
+    $('console-cancel').hidden = run.status !== 'running';
+    if (run.status === 'failed' || run.status === 'cancelled') {
+      target.appendChild(lensButton('Resume from step ' + run.current_step, function () {
+        resumeConsoleRun(run.id);
+      }, 'btn accent'));
+    }
+    $('console-status').textContent = run.status === 'running' ? 'Execution checkpointed after each step.' :
+      'Run status: ' + run.status + (run.status === 'failed' && run.error ? ' — step ' + run.current_step +
+        ': ' + run.error : '');
+  }
+
+  function pollConsoleRun(runId, repeat) {
+    return api('/api/console/runs/' + encodeURIComponent(runId)).then(function (run) {
+      showConsoleRun(run);
+      loadConsoleRuns();
+      if (repeat && (run.status === 'pending' || run.status === 'running')) {
+        setTimeout(function () { pollConsoleRun(runId, true); }, 900);
+      }
+      return run;
+    }).catch(function (error) { $('console-status').textContent = error.message; });
+  }
+
+  function planConsole(request, approvedCloud) {
+    return post('/api/console/plan', { project: state.project, request: request,
+      approved_cloud: !!approvedCloud }).catch(function (error) {
+      if (error.status !== 403 || approvedCloud) throw error;
+      var plan = error.preview || {};
+      var message = 'Separately approve the cloud planner route ' + (plan.provider || '') + '/' +
+        (plan.model || '') + '? It receives only your request and the action registry.';
+      if (!window.confirm(message)) throw new Error('Cloud planner route was not approved.');
+      return planConsole(request, true);
+    });
+  }
+
+  function runConsolePlan(approvedCloud) {
+    var body = { plan: state.consolePlan, project: state.project, approved: true,
+      approved_cloud: !!approvedCloud };
+    return post('/api/console/execute', body).catch(function (error) {
+      if (error.status !== 403 || approvedCloud) throw error;
+      if (!window.confirm('Separately approve the cloud model routes for these steps?')) {
+        throw new Error('Cloud routes were not approved.');
+      }
+      body.approved_cloud = true;
+      return post('/api/console/execute', body);
+    });
+  }
+
+  function resumeConsoleRun(runId) {
+    if (!window.confirm('Resume this run from its failed or cancelled step?')) return;
+    post('/api/console/resume', { run_id: runId, approved: true, approved_cloud: false }).catch(function (error) {
+      if (error.status !== 403) throw error;
+      if (!window.confirm('Separately approve the cloud model routes for the remaining steps?')) {
+        throw new Error('Cloud routes were not approved.');
+      }
+      return post('/api/console/resume', { run_id: runId, approved: true, approved_cloud: true });
+    }).then(function () { pollConsoleRun(runId, true); })
+      .catch(function (error) { $('console-status').textContent = error.message; });
+  }
+
+  function cancelConsoleRun() {
+    if (!state.consoleRunId) return;
+    post('/api/console/cancel', { run_id: state.consoleRunId }).then(function () {
+      $('console-status').textContent = 'Cancellation requested; the current step will finish first.';
+    }).catch(function (error) { $('console-status').textContent = error.message; });
   }
 
   function designGap(gapId, approved) {
@@ -2251,10 +2426,10 @@
     $('pdfs-export').onchange = function () { store.set('pdfs-export', this.checked); setMode(state.mode); };
     setMode(store.get('mode', 'similar'));
     var linked = /^#run=([\w-]+)$/.exec(location.hash);  // a bookmarked search; never set automatically
-    showView(/^#(recents|library|ask|matrix|claims|gaps)$/.test(location.hash) ? location.hash.slice(1) : 'new');
+    showView(/^#(recents|library|ask|matrix|claims|gaps|console)$/.test(location.hash) ? location.hash.slice(1) : 'new');
     if (linked) loadRun(linked[1]);
     window.addEventListener('hashchange', function () {
-      if (/^#(ask|matrix|claims|gaps|recents|library)$/.test(location.hash)) showView(location.hash.slice(1));
+      if (/^#(ask|matrix|claims|gaps|recents|library|console)$/.test(location.hash)) showView(location.hash.slice(1));
     });
     $('sort').value = state.sort;
 
@@ -2281,6 +2456,29 @@
 
     $('btn-run').onclick = run;
     $('btn-more').onclick = function () { startSimilar({ from_relevant: true }); };
+    $('console-form').onsubmit = function (e) {
+      e.preventDefault();
+      var request = $('console-request').value.trim();
+      if (!request) return;
+      $('console-plan').disabled = true;
+      $('console-status').textContent = 'Planning with the closed action registry…';
+      $('console-preview').replaceChildren();
+      planConsole(request, false).then(function (result) { renderConsolePreview(result); })
+        .catch(function (error) { $('console-status').textContent = error.message; })
+        .then(function () { $('console-plan').disabled = false; });
+    };
+    $('console-run').onclick = function () {
+      if (!state.consolePlan || !window.confirm('Execute the previewed steps?')) return;
+      $('console-run').disabled = true;
+      runConsolePlan(false).then(function (result) {
+        state.consoleRunId = result.run_id;
+        $('console-run').hidden = true;
+        $('console-cancel').hidden = false;
+        pollConsoleRun(result.run_id, true);
+      }).catch(function (error) { $('console-status').textContent = error.message; })
+        .then(function () { $('console-run').disabled = false; });
+    };
+    $('console-cancel').onclick = cancelConsoleRun;
     document.querySelectorAll('.sidebar [data-view]').forEach(function (b) {
       b.onclick = function () {
         if (b.dataset.view === 'new') { newSearch(); return; }

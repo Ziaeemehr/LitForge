@@ -95,8 +95,15 @@ def lens_server(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Lens
     config.models.profiles['paid'] = ModelProfileConfig(
         provider='openai_compatible', model='remote', remote=True,
         pricing=Pricing(input_per_million_usd=1, output_per_million_usd=1))
+    planner_response: dict[str, Any] = {
+        'steps': [{'action': 'filter_papers', 'args': {'year_from': 2020}}],
+    }
+    planner_messages: list[dict[str, str]] = []
 
     def reply(messages: list[dict[str, str]]) -> dict[str, Any]:
+        if 'Plan a research-library workflow' in messages[0]['content']:
+            planner_messages[:] = messages
+            return planner_response
         if 'Audit' in messages[0]['content']:
             return {'verdict': 'partial', 'note': UNTRUSTED}
         if 'Extract' in messages[0]['content']:
@@ -117,6 +124,8 @@ def lens_server(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Lens
     finally:
         conn.close()
     server = LensServer(app, fake, answer.run_id, matrix.id)
+    server.planner_response = planner_response
+    server.planner_messages = planner_messages
     httpd = None
     try:
         if request.param == 'http':
@@ -157,6 +166,44 @@ def test_preview_and_remote_approval(lens_server: LensServer, task: str) -> None
     job = server.job(path, {**body, 'approved': True})
     assert job['status'] == 'done', job
     assert server.fake.calls == before + 1
+
+
+def test_console_plan_preview_approval_execution_and_validation(lens_server: LensServer) -> None:
+    server = lens_server
+    conn = server.app.db()
+    conn.execute("UPDATE papers SET year=2022 WHERE id='p'")
+    conn.close()
+    before = server.fake.calls
+    status, data = server.call('/api/console/plan', {'request': 'Select newer papers', 'project': 'demo'})
+    assert status == 200
+    assert data['plan']['steps'][0]['action'] == 'filter_papers'
+    assert data['preview']['steps'][0]['papers_in_scope'] == 1
+    assert data['preview']['steps'][0]['writes'] is False
+    assert server.fake.calls == before + 1
+    prompt = '\n'.join(message['content'] for message in server.planner_messages)
+    assert 'Select newer papers' in prompt and UNTRUSTED not in prompt
+
+    status, error = server.call('/api/console/execute', {'plan': data['plan'], 'project': 'demo'})
+    assert status == 403 and 'Explicit execution approval' in error['error']
+    assert server.call('/api/console/execute', {'plan': data['plan'], 'project': 'demo',
+                                                'approved': 'true'})[0] == 403
+    status, started = server.call('/api/console/execute', {'plan': data['plan'], 'project': 'demo',
+                                                           'approved': True})
+    assert status == 200 and started['run_id']
+    for _ in range(100):
+        status, run = server.call('/api/console/runs/' + started['run_id'])
+        if run['status'] not in ('pending', 'running'):
+            break
+        import time
+        time.sleep(.01)
+    assert status == 200 and run['status'] == 'done' and len(run['results']) == 1
+    assert server.call('/api/console/runs?project=demo')[1][0]['id'] == started['run_id']
+
+    server.planner_response.clear()
+    server.planner_response.update({'steps': [{'action': 'shell', 'args': {'command': 'id'}}]})
+    status, rejected = server.call('/api/console/plan', {'request': 'unsafe action', 'project': 'demo'})
+    assert status == 400 and 'validation_errors' in rejected
+    assert 'unknown action' in str(rejected['validation_errors'])
 
 
 def test_answer_audit_and_sentence_reviews(lens_server: LensServer) -> None:
@@ -621,3 +668,26 @@ def test_phase2_remote_jobs_and_invalid_inputs(lens_server: LensServer, task: st
     assert server.call('/api/queue?project=demo&limit=0')[0] == 400
     assert server.call('/api/claims/review', {'id': 'missing', 'action': 'accept'})[0] == 404
     assert server.call('/api/claims/cluster', {'project': 'demo', 'threshold': 2})[0] == 400
+
+
+def test_console_job_passes_the_separate_cloud_approval(lens_server: LensServer,
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    from litforge.console import planner as console_planner
+    seen: list[bool] = []
+    real = console_planner.execute_run
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs.get("approved_cloud", False))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(console_planner, "execute_run", spy)
+    plan = {"request": "snap", "steps": [{"action": "snapshot", "args": {}}]}
+    status, started = lens_server.call('/api/console/execute', {'plan': plan, 'project': 'demo', 'approved': True,
+                                                                'approved_cloud': True})
+    assert status == 200
+    for _ in range(200):
+        if lens_server.call('/api/console/runs/' + started['run_id'])[1]['status'] not in ('pending', 'running'):
+            break
+        import time
+        time.sleep(.01)
+    assert seen == [True]

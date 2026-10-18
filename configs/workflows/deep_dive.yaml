@@ -1,0 +1,22 @@
+name: deep_dive
+description: Search the project, extract cited claims, cluster them, and assess their relations.
+parameters:
+  query:
+    type: string
+    required: true
+  max_pairs:
+    type: integer
+    default: 200
+steps:
+  - action: search_library
+    args:
+      query: "{{query}}"
+      limit: 100
+  - action: extract_claims
+    args:
+      paper_ids: "$step_1"
+  - action: cluster_claims
+    args: {}
+  - action: relate_claims
+    args:
+      max_pairs: "{{max_pairs}}"
