@@ -1,7 +1,70 @@
 # Writing Studio: a local LaTeX editor with evidence-aware language-model help
 
-Status: plan, not started. Phases are independent deliverables; each gets its own implementation plan and the
-usual review rounds before merge.
+Status: plan, not started.
+
+**Decision (2026-10-18):** the user keeps writing in VS Code. The path that will be built is **W0 + the LitForge
+MCP server** described next: LitForge's evidence, citations and checks become tools for the AI assistants already
+in VS Code (Claude Code, Copilot Chat, Continue), and LaTeX Workshop keeps doing editing, compiling and preview.
+The built-in editor (W1–W4 below) stays in this document as a **future plan that is not scheduled**; it is only
+reconsidered if the MCP path turns out not to be enough in practice.
+
+## Chosen path: W0 + LitForge MCP server
+
+### What the user does
+
+In VS Code, with the `.tex` file open, the user asks the assistant things like "add citations from my library to
+this paragraph", "is this sentence supported by the papers I cited?", "shorten this and keep the citations",
+"write a related-work paragraph from my matrix on X". The assistant calls LitForge's tools, gets evidence with
+exact quotes and pages, and proposes the edit in its own diff view, which the user accepts or rejects.
+
+### Server
+
+- `litforge mcp` starts an MCP server over stdio (the standard local transport); `--project` scopes it to one
+  project, otherwise the active project. Read-only by default.
+- Ready-made configuration snippets for Claude Code (`claude mcp add litforge -- litforge mcp`), VS Code
+  (`.vscode/mcp.json` for Copilot Chat) and Continue; `litforge mcp --print-config <client>` prints them.
+- Runs entirely locally; it talks to the same database and data folder as the app. It never calls a cloud model
+  itself unless a tool explicitly uses the gateway and the user's model settings allow it.
+
+### Tools (first version)
+
+| Tool | What it returns / does |
+|---|---|
+| `search_evidence(query, k, papers?)` | Ranked evidence spans: paper, citation key, version label, page, section, text |
+| `find_citations(text, k)` | For a sentence or paragraph: candidate papers with the supporting exact quote and page |
+| `check_support(text, citation_keys?)` | Supported / partly / not found per sentence, with quotes (reuses Ask retrieval and the quote validator; local model by default, deterministic matching where possible) |
+| `check_text(text, original?)` | Guards for an edit the assistant wrote: numbers and `\cite` keys not present in the original or the returned evidence are flagged; unknown keys; preprint where a published version exists |
+| `get_paper(key or id)` | Metadata, abstract, versions, PDF status |
+| `matrix(name)` / `claims(topic)` | Study-matrix rows and claim clusters with their evidence, for drafting related work |
+| `bibtex(keys or project)` | BibTeX entries with stable keys (W0) |
+| `add_to_bib(path, keys)` | **Write tool**, off unless `--allow-write`: appends entries to the user's `.bib` file (only inside the workspace folder) |
+
+Every tool result carries the evidence ids, so the assistant can cite precisely and `check_text` can verify.
+
+### Privacy
+
+- Tool results contain library text, and the assistant's model (often a cloud model) will see it. The first run
+  shows this clearly; `litforge mcp` refuses to start for a project marked sensitive unless `--allow-sensitive`.
+- Results are evidence snippets, never whole PDFs; a size cap applies per call.
+- Each call is logged (tool, project, number of spans returned) in the same audit area as model calls.
+
+### Optional later: VS Code extension
+
+Only if wanted after using the MCP path: `\cite{` completion from the library, hover showing the quote behind a
+citation, and squiggles from `check_text`/citation check, without going through the chat.
+
+### Acceptance
+
+- In Claude Code and Copilot Chat on a real `.tex` file: "add citations to this paragraph" yields only keys that
+  exist, each backed by a returned quote; `check_support` agrees with a human check on a 30-sentence sample in
+  ≥ 90 % of cases; `check_text` flags every invented number in a seeded test set.
+- No write happens without `--allow-write`; no file outside the workspace is touched.
+
+---
+
+# Future plan (not scheduled): built-in editor
+
+Phases are independent deliverables; each would get its own implementation plan and the usual review rounds.
 
 ## Why
 
