@@ -36,7 +36,16 @@ from litforge.analysis import matrix as matrices
 from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.review import record_review
 from litforge.analysis.runs import get_run
-from litforge.config import Config, EnvSettings, Paths, contact_email, load_config, save_mailto
+from litforge.config import (
+    Config,
+    EnvSettings,
+    Paths,
+    contact_email,
+    load_config,
+    load_settings,
+    save_mailto,
+    save_update_check,
+)
 from litforge.console import planner
 from litforge.console.actions import ActionContext
 from litforge.discovery.fetch import fetch_open_access
@@ -73,6 +82,7 @@ from litforge.storage.db import open_db, transaction
 from litforge.storage.recovery import repair_abandoned_runs
 from litforge.tools import install_pix2text, install_timeout_s, pix2text_install_status
 from litforge.ui import api
+from litforge.updates import UpdateChecker, automatic_enabled
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 HEARTBEAT_S = 15  # how often an open page checks in (app.js)
@@ -102,6 +112,7 @@ class App:
                  vision_setup: OllamaSetup | None = None,
                  make_gateway: Callable[[sqlite3.Connection], ModelGateway] | None = None) -> None:
         self.paths = paths
+        self.updates = UpdateChecker(paths)
         self.config = config
         self.models = api.ModelsPanel(paths, config)
         self.keys = KeyStore(config)
@@ -957,6 +968,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._error(HTTPStatus.BAD_REQUEST, str(exc))
 
         def _get(self, path: str, query: dict[str, str]) -> None:
+            if path == '/api/update':
+                return self._json(app.updates.get())
             if path in ("/", "/index.html"):
                 return self._static("index.html")
             if path.startswith("/static/"):
@@ -1004,6 +1017,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(api.library_removal_preview(conn, app.paths, ids))
                 if path == "/api/settings":
                     return self._json({"mailto": contact_email(app.paths, app.config),
+                                       "update_check": load_settings(app.paths).get('update_check', True),
+                                       "update_check_enabled": automatic_enabled(app.paths),
                                        "exports_root": str(app.paths.exports_root)})
                 if path == "/api/missing-pdfs":
                     pid = get_project_id(conn, query["project"])
@@ -1070,6 +1085,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     q = {k: v[0] for k, v in parse_qs(url.query).items()}
                     return self._import(q.get("name", "refs.csv"), q.get("project") or "default", q.get("export_dir"))
                 body = self._body()
+                if url.path == '/api/update/check':
+                    return self._json(app.updates.force())
                 if url.path == "/api/mineru/install":
                     return self._json(app.mineru_install_job(body).__dict__)
                 if url.path == "/api/tools/pix2text/install":
@@ -1222,8 +1239,15 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     conn.close()
                     return self._json({"ok": True})
                 if url.path == "/api/settings":
-                    save_mailto(app.paths, body.get("mailto"))
+                    if 'update_check' in body and not isinstance(body['update_check'], bool):
+                        raise ValueError('update_check must be a boolean')
+                    if 'mailto' in body:
+                        save_mailto(app.paths, body['mailto'])
+                    if 'update_check' in body:
+                        save_update_check(app.paths, body['update_check'])
                     return self._json({"mailto": contact_email(app.paths, app.config),
+                                       "update_check": load_settings(app.paths).get('update_check', True),
+                                       "update_check_enabled": automatic_enabled(app.paths),
                                        "exports_root": str(app.paths.exports_root)})
                 if url.path == "/api/math-setup":
                     return self._json(app.setup_job(body).__dict__)

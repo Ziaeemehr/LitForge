@@ -57,9 +57,16 @@ On Windows (PowerShell):
 powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Ziaeemehr/LitForge/main/install.ps1 | iex"
 ```
 
-Then open LitForge from its icon. Closing its page stops it after about two minutes; **⏻ Quit** stops it at once. Run the same line again to update. The installer offers optional tools interactively; choose **No** (the default) to skip large downloads. Install later from Settings → Optional tools or with `litforge tools`. Set `LITFORGE_EXTRAS="mineru,pix2text"` to install either or both without prompts; `LITFORGE_NO_PROMPT=1` skips prompts.
-Details: [docs/install.md](docs/install.md). Scores, screening, the command line and storage:
-[docs/guide.md](docs/guide.md).
+Then open LitForge from its icon. Closing its page stops it after about two minutes; **⏻ Quit** stops it at once.
+At the end the installer offers optional tools (large downloads); **No** is the default, and you can add them later
+in Settings → Optional tools.
+
+### Update
+
+Close LitForge, then run the same install line again. It keeps your library, settings and optional tools; the
+database upgrades itself on the next start. Settings → Updates tells you when a new version is available.
+
+More: [installation](docs/install.md) · [user guide](docs/guide.md) · [command line](docs/cli.md).
 
 ---
 
@@ -124,8 +131,14 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Zia
 
 <div dir="rtl">
 
-از این به بعد LitForge را با آیکونش باز کنید و با دکمه‌ی **⏻ Quit** در صفحه ببندید، یا فقط صفحه را ببندید؛ حدود دو دقیقه بعد خودش بسته می‌شود. برای به‌روزرسانی، همان خط را دوباره
-اجرا کنید. جزئیات نصب در [docs/install.md](docs/install.md) است.
+از این به بعد LitForge را با آیکونش باز کنید و با دکمه‌ی **⏻ Quit** در صفحه ببندید، یا فقط صفحه را ببندید؛ حدود دو دقیقه بعد خودش بسته می‌شود.
+
+### به‌روزرسانی
+
+LitForge را ببندید و همان خط نصب را دوباره اجرا کنید. کتابخانه، تنظیمات و ابزارهای اختیاری حفظ می‌شوند و پایگاه داده
+در اجرای بعدی خودش به‌روز می‌شود. بخش «Updates» در تنظیمات خبر می‌دهد که نسخه‌ی تازه آمده است.
+
+بیشتر: [نصب](docs/install.md) · [راهنما](docs/guide.md) · [خط فرمان](docs/cli.md).
 
 </div>
 

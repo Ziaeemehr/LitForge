@@ -373,6 +373,15 @@ def save_mailto(paths: Paths, mailto: str | None) -> str | None:
     return mailto
 
 
+def save_update_check(paths: Paths, enabled: bool) -> None:
+    """Save automatic update consent alongside the other UI settings."""
+    if not isinstance(enabled, bool):
+        raise ValueError('update_check must be a boolean')
+    settings = {**load_settings(paths), 'update_check': enabled}
+    paths.settings.parent.mkdir(parents=True, exist_ok=True)
+    paths.settings.write_text(json.dumps(settings, indent=1) + '\n', encoding='utf-8')
+
+
 def contact_email(paths: Paths, config: Config) -> str | None:
     """The user's contact e-mail for OpenAlex/Crossref polite pools and Unpaywall, which requires one.
     Only ever one the user gave: LITFORGE_MAILTO, the web UI setting, or discovery.mailto in the config."""

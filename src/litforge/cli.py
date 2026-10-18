@@ -66,6 +66,7 @@ from litforge.screening.run import preview_run, screen_run
 from litforge.storage.db import open_db
 from litforge.storage.recovery import repair_abandoned_runs
 from litforge.tools import install_pix2text, install_timeout_s, pix2text_install_status
+from litforge.updates import check_for_update
 
 app = typer.Typer(help="Local-first scientific literature library.", no_args_is_help=True)
 project_app = typer.Typer(help="Manage project workspaces.", no_args_is_help=True)
@@ -145,6 +146,19 @@ def main(
 ) -> None:
     paths = resolve_paths(data_dir)
     ctx.obj = State(paths=paths, config=load_config(config, data_root=paths.root), log=EventLog(paths.logs))
+
+
+@app.command()
+def update(ctx: typer.Context, check: Annotated[bool, typer.Option('--check')] = False) -> None:
+    """Check for updates and print the terminal command; never install or pull."""
+    result = check_for_update(_state(ctx).paths, force=True)
+    typer.echo(f"[{result['status']}] {result['message']}")
+    typer.echo('Close LitForge first, then run this in a terminal:')
+    typer.echo(result['command'])
+    if check:
+        raise typer.Exit({'up_to_date': 0, 'available': 10}.get(result['status'], 1))
+    if result['status'] == 'error':
+        raise typer.Exit(1)
 
 
 @app.command()

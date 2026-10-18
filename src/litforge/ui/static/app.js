@@ -487,7 +487,7 @@
     if (view === 'ask' || view === 'matrix' || view === 'claims') enterLens(view);
     if (view === 'gaps') loadGaps();
     if (view === 'console') loadConsole();
-    if (view === 'settings') loadSettings();
+    if (view === 'settings') { loadSettings(); loadUpdates(); }
   }
 
   function deleteRun() {
@@ -2042,6 +2042,60 @@
   }
   /* ---------- End Models settings ---------- */
 
+  /* ---------- Updates ---------- */
+  var updateTimer = null;
+
+  function renderUpdate(info) {
+    var status = info.status, latest = info.latest || {};
+    if (typeof info.update_check === 'boolean') $('update-auto').checked = info.update_check;
+    $('update-auto-note').textContent = info.update_check && info.update_check_enabled === false ?
+      'Automatic checks are disabled by LITFORGE_NO_UPDATE_CHECK=1.' : '';
+    $('update-notice').hidden = status === 'disabled';
+    $('update-badge').hidden = status !== 'available';
+    var labels = {
+      up_to_date: 'LitForge is up to date',
+      available: 'An update is available: ' + info.behind + ' new changes — ' + (latest.subject || '') + ', ' + (latest.date || ''),
+      diverged: 'Local and remote history have diverged (' + info.behind + ' behind, ' + info.ahead + ' ahead).',
+      not_git: 'Not a git install — rerun the installer to update LitForge.',
+      error: 'Could not check for updates', checking: 'Checking for updates…', disabled: ''
+    };
+    $('update-status').textContent = labels[status] || labels.error;
+    var message = info.message || '';
+    $('update-message').textContent = message.replace(/\.$/, '') === labels[status] ? '' : message;
+    $('update-message').hidden = !$('update-message').textContent;
+    $('update-command').textContent = info.command || '';
+    $('update-instructions').hidden = !info.command || status === 'disabled';
+    $('update-check').disabled = status === 'checking';
+  }
+
+  function loadUpdates() {
+    clearTimeout(updateTimer);
+    return api('/api/update').then(function (info) {
+      renderUpdate(info);
+      if (info.status === 'checking') updateTimer = setTimeout(loadUpdates, 1000);
+    }).catch(function () { renderUpdate({ status: 'error' }); });
+  }
+
+  function initUpdates() {
+    $('update-check').onclick = function () {
+      clearTimeout(updateTimer);
+      renderUpdate({ status: 'checking' });
+      return post('/api/update/check', {}).then(renderUpdate)
+        .catch(function () { renderUpdate({ status: 'error' }); });
+    };
+    $('update-copy').onclick = function () {
+      if (!navigator.clipboard) { toast('Select the command and copy it.'); return; }
+      return navigator.clipboard.writeText($('update-command').textContent)
+        .then(function () { toast('Copied'); }).catch(function () { toast('Select the command and copy it.'); });
+    };
+    $('update-auto').onchange = function () {
+      return post('/api/settings', { update_check: $('update-auto').checked }).then(loadUpdates)
+        .catch(function () { toast('Could not save update setting.'); });
+    };
+    loadUpdates();
+  }
+  /* ---------- End Updates ---------- */
+
   /* ---------- Settings ---------- */
   var localRepo = null, activeDownload = null, catalogueGeneration = 0, localBackend = 'hf', settingsAssignment = null;
 
@@ -3074,6 +3128,7 @@
   }
 
   function init() {
+    initUpdates();
     initModels();
     initSettings();
     initLens();

@@ -29,9 +29,9 @@ uv run litforge export
 ## Settings, keys and cloud-light
 
 Open **⚙ Settings** in the sidebar footer, use **`,`** outside a text field, or bookmark `#settings`.
-This full-width page has cards for Models, API keys, Add API model, Cloud & budget, and Library & export.
+This full-width page has cards for Updates, Models, API keys, Add API model, Cloud & budget, and Library & export.
 Models includes hardware, the recommended setup, local-server status, profile Test/Remove controls and task
-assignments. Every configuration write shows the exact diff and asks for confirmation. YAML comments are
+assignments. Model configuration writes show the exact diff and ask for confirmation. YAML comments are
 not preserved; the previous config is copied to `config.yaml.bak` as described below.
 
 **Library & export** contains the contact e-mail used for OpenAlex, Crossref and Unpaywall, and the default
@@ -796,3 +796,30 @@ Conservative choices where Phase 3 leaves details open:
   reviewed observations. With no extraction or ambiguous context, checklist items remain unclear.
 - Schedule installation writes files and prints activation instructions; activation/deactivation is
   explicit. Compute estimates require both hardware and a duration; otherwise they say “not reported”.
+
+## Update notices
+
+**Settings → Updates** checks whether the imported LitForge installation is behind `origin/main`.
+Automatic checks are enabled by default and run at most once every 24 hours while the UI is open.
+The check contacts GitHub using `git fetch` (or the checkout's configured `origin` remote).
+It sends no library data: no papers, PDFs, searches, settings or model credentials are uploaded.
+Only Git metadata is fetched; your files and branches are left as they are.
+Results, including connection failures, are cached in `<data>/state/update-check.json`.
+
+Turn off **Automatically check for updates daily** to disable automatic checks. This saves
+`"update_check": false` in `<data>/settings.json`, alongside other UI preferences.
+Setting `LITFORGE_NO_UPDATE_CHECK=1` also disables automatic checks, regardless of the checkbox.
+When disabled, no notice or settings badge appears until you explicitly click **Check now**.
+That button always checks, even when automatic checks are disabled.
+
+An available update adds a small dot to the sidebar's Settings button. Copy the displayed command,
+close LitForge, then run it in a terminal. **LitForge never runs the updater or `git pull` for you.**
+ZIP installs cannot compare Git history; rerun the installer to update them. On a non-main branch
+or with local changes, the installer will refuse: review and commit or stash changes first, then
+follow the displayed `git pull --ff-only origin main` instructions in the intended branch.
+Diverged histories require manual reconciliation before updating.
+
+`litforge update` forces a check and prints the result and update command. For scripts,
+`litforge update --check` exits **0** when up to date (including a checkout that is only ahead),
+**10** when an update is available, and **1** for errors, non-Git installs or diverged histories.
+CLI checks also bypass disabled automatic checks. Git commands have a combined 10-second timeout.

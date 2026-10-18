@@ -460,6 +460,8 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 
 /* Settings use the same controls and palette at every screen width. */
 .side-foot { flex-wrap: wrap; }
+.update-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.update-code { padding: 10px; background: var(--chip); border: 1px solid var(--line); border-radius: 6px; }
 #view-settings { width: 100%; min-width: 0; }
 #view-settings .settings-card { padding: 16px; margin: 0 0 16px; min-width: 0; }
 #view-settings .tool-row { display: flex; align-items: center; justify-content: space-between; gap: 16px;

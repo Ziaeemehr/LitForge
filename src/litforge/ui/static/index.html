@@ -25,7 +25,7 @@
   <div class="side-list" id="side-projects"></div>
   <h3 title="Your latest searches; click one to reopen it with its marks">Recent</h3>
   <div class="side-list" id="side-recent"></div>
-  <div class="side-foot"><button class="btn small" data-view="settings" title="Settings (,) — models, keys, cloud and library">⚙ Settings</button><button class="btn small" id="btn-help" title="Quick guide: how LitForge works (?)">? Guide</button>
+  <div class="side-foot"><button class="btn small" data-view="settings" title="Settings (,) — models, keys, cloud and library">⚙ Settings <span id="update-badge" class="update-dot" hidden role="img" aria-label="Update available"></span></button><button class="btn small" id="btn-help" title="Quick guide: how LitForge works (?)">? Guide</button>
     <button class="btn small" id="btn-theme" title="Theme: follow the system, light or dark"></button>
     <button class="btn small ghost" id="btn-quit" title="Stop LitForge on this computer. Open it again from its icon">⏻ Quit</button></div>
   <p class="side-note">Closing this page stops LitForge after about two minutes. ⏻ Quit stops it now.</p>
@@ -61,6 +61,22 @@
   <section id="view-settings" class="view" hidden>
     <h1>Settings</h1>
     <p class="hint">Manage models, API keys, cloud access and library preferences.</p>
+    <div class="card settings-card">
+      <h2>Updates</h2>
+      <div id="update-notice" hidden>
+        <p id="update-status" role="status" aria-live="polite"></p>
+        <p id="update-message" class="hint"></p>
+        <div id="update-instructions" hidden>
+          <pre class="update-code"><code id="update-command"></code></pre>
+          <button class="btn small" id="update-copy">Copy</button>
+          <p class="hint">Close LitForge first, then run this in a terminal</p>
+        </div>
+      </div>
+      <button class="btn small" id="update-check">Check now</button>
+      <label class="check"><input id="update-auto" type="checkbox" checked> Automatically check for updates daily</label>
+      <p class="hint">Checks contact GitHub using git fetch. No library data is sent. Updates are never installed automatically.</p>
+      <p id="update-auto-note" class="hint"></p>
+    </div>
     <div class="card settings-card" id="models-settings-card">
       <h2>Models</h2>
       <p id="models-hardware" class="hint"></p>
