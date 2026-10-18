@@ -328,7 +328,8 @@ def _refresh(context: ActionContext, args: RefreshArgs) -> dict[str, Any]:
     if context.project_id is None or context.sources is None:
         raise ActionError("refresh requires a project and configured discovery sources")
     result = living.refresh_project(context.conn, context.gateway, context.sources, context.project_id,
-                                    screen=args.screen, extract=args.extract, claims=args.claims)
+                                    screen=args.screen, extract=args.extract, claims=args.claims,
+                                    approved_cloud=context.cloud_approved)
     return result.model_dump()
 
 

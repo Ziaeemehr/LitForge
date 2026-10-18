@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from litforge.analysis.runs import input_hash
 from litforge.config import Config, LlamaCppServerConfig, ModelProfileConfig, ReasoningMode, validate_options
+from litforge.jobs import check_cancelled
 from litforge.llm.audit import ModelCallRecord, record_model_call
 from litforge.llm.base import InvalidModelJson, LlmError, LlmUnavailable, ModelReply, ModelTextReply, ModelUsage
 from litforge.llm.budget import BudgetExceeded, BudgetGuard
@@ -319,6 +320,7 @@ class ModelGateway:
                   max_output_tokens: int | None, prompt_version: str, images: list[bytes]
                   ) -> ModelReply | ModelTextReply:
         for attempt in range(2):
+            check_cancelled()
             try:
                 return self._once(task, evidence, messages, schema, profile, approved, run_id,
                                   max_output_tokens, prompt_version, images)

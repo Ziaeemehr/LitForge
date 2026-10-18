@@ -46,6 +46,7 @@ from litforge.discovery.similar import run_similar
 from litforge.discovery.textsim import Embedder, load_embedder
 from litforge.export.markdown import default_export_dir, export_markdown
 from litforge.ingest import IngestResult
+from litforge.jobs import JobCancelled, JobControl, check_cancelled, job_scope
 from litforge.llm.local_models import fit_check, ollama_change, ollama_pull
 from litforge.llm.secrets import KeyStore
 from litforge.observability import EventLog
@@ -62,6 +63,7 @@ from litforge.screening.llm import Llm, LlmError, ollama_from_config
 from litforge.screening.run import screen_run
 from litforge.storage.cache import sha256_file
 from litforge.storage.db import open_db, transaction
+from litforge.storage.recovery import repair_abandoned_runs
 from litforge.ui import api
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
@@ -98,6 +100,9 @@ class App:
         self._job_context = threading.local()
         self.log = EventLog(paths.logs)
         self.jobs: dict[str, Job] = {}
+        self._workers: dict[str, tuple[threading.Thread, JobControl]] = {}
+        self._workers_lock = threading.Lock()
+        self._closing = threading.Event()
         self.model_downloads: dict[str, tuple[dict[str, Any], dict[str, str]]] = {}
         self.stop: Callable[[], None] | None = None  # set by serve(): shuts the server down
         self.last_seen = time.monotonic()  # when a page last checked in, see stop_when_idle()
@@ -119,6 +124,7 @@ class App:
         conn = open_db(paths.db)  # applies migrations once at startup
         # Jobs live in memory: runs left 'running' by a previous server process will never finish.
         conn.execute("UPDATE discovery_runs SET status='interrupted' WHERE status='running'")
+        repair_abandoned_runs(conn)
         conn.close()
 
     def mineru_install_job(self, body: dict[str, Any]) -> Job:
@@ -207,13 +213,14 @@ class App:
                 def progress(info: dict[str, Any], filename: str = item["path"]) -> None:
                     job.report = {"state": "downloading", "file": filename, **info}
                 path = self.models.downloader.run(selected_plan["repo"], item, progress=progress,
-                                                  control=lambda: state["action"])
+                    control=lambda: "cancel" if self._closing.is_set() else state["action"])
                 if path is None:
                     job.report = {"state": "paused" if state["action"] == "pause" else "cancelled"}
                     return
             if state["action"]:
                 job.report = {"state": "paused" if state["action"] == "pause" else "cancelled"}
                 return
+            check_cancelled()
             selected_plan["change"].apply()
             self.models.config = load_config(self.config.config_path, data_root=self.paths.root)
             self.config = self.models.config
@@ -298,19 +305,47 @@ class App:
 
     def start_job(self, kind: str, project: str, work: Callable[[Job], str | None]) -> Job:
         job = Job(id=uuid.uuid4().hex, kind=kind, project=project)
-        self.jobs[job.id] = job
+        control = JobControl()
+
+        def progress(message: str) -> None:
+            control.check()
+            job.messages.append(message)
 
         def target() -> None:
-            self._job_context.progress = job.messages.append
+            self._job_context.progress = progress
             try:
-                job.run_id = work(job)
+                with job_scope(control):
+                    job.run_id = work(job)
+                    control.check()
                 job.status = "done"
+            except JobCancelled as exc:
+                job.status, job.error = "failed", str(exc)
             except Exception as exc:  # noqa: BLE001 - reported to the page
                 job.status, job.error = "failed", f"{type(exc).__name__}: {exc}"
                 self.log.emit("ui.job_failed", job=job.id, error=job.error, trace=traceback.format_exc())
 
-        threading.Thread(target=target, daemon=True).start()
+        worker = threading.Thread(target=target, daemon=True, name=f"ui-{kind}-{job.id}")
+        with self._workers_lock:
+            if self._closing.is_set():
+                raise ValueError("server is shutting down")
+            self.jobs[job.id] = job
+            self._workers[job.id] = worker, control
+            worker.start()
         return job
+
+    def shutdown(self, timeout: float = 5) -> None:
+        """Cancel all jobs, terminate owned process trees, then wait before stopping models."""
+        with self._workers_lock:
+            self._closing.set()
+            workers = list(self._workers.values())
+            for _, control in workers:
+                control.cancelled.set()
+        for _, control in workers:
+            control.terminate_processes()
+        deadline = time.monotonic() + timeout
+        for worker, _ in workers:
+            worker.join(max(0, deadline - time.monotonic()))
+        self.stop_models()
 
     # ---- jobs ----------------------------------------------------------------
 
@@ -466,6 +501,7 @@ class App:
         conn = self.db()
         try:
             pid = get_project_id(conn, request.project)
+            repair_abandoned_runs(conn)
             if conn.execute("SELECT 1 FROM watch_runs WHERE project_id=? AND status='running'", (pid,)).fetchone():
                 raise ValueError("a refresh is already running in this project")
         finally:
@@ -478,7 +514,7 @@ class App:
                 sources.http.refresh = True
                 result = living.refresh_project(conn, self.make_gateway(conn), sources, pid,
                     screen=request.screen, extract=request.extract, claims=request.claims,
-                    progress=job.messages.append)
+                    progress=job.messages.append, approved_cloud=request.approved)
                 job.report = result.model_dump()
                 return result.id
             except Exception:
@@ -1143,7 +1179,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         return self._json(api.living_panel(conn, get_project_id(conn, query.get("project", ""))))
                     if match := re.fullmatch(r"/api/papers/([\w-]+)/repro", path):
                         repro_pid = get_project_id(conn, query["project"]) if query.get("project") else None
-                        return self._json(repro.repro_card(conn, match[1], repro_pid).model_dump(exclude={"brief"}))
+                        return self._json(repro.repro_card(conn, match[1], repro_pid,
+                                                          refresh=False).model_dump(exclude={"brief"}))
                     if path.startswith("/api/claims") or path == "/api/queue":
                         phase2_pid = get_project_id(conn, query.get("project", ""))
                         if path == "/api/queue":
@@ -1247,7 +1284,10 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         return self._json(_console_run_json(run))
                     if path == "/api/gaps/detect":
                         project_id = get_project_id(conn, str(body.get("project") or ""))
-                        return self._json(api.gap_panel(conn, project_id))
+                        return self._json(api.gap_panel(conn, project_id, detect=True))
+                    if match := re.fullmatch(r"/api/papers/([\w-]+)/repro", path):
+                        repro_pid = get_project_id(conn, str(body["project"])) if body.get("project") else None
+                        return self._json(repro.repro_card(conn, match[1], repro_pid).model_dump(exclude={"brief"}))
                     if match := re.fullmatch(r"/api/assets/([\w-]+)/analyze", path):
                         asset_request = api.AssetAnalysisRequest.model_validate(body)
                         gateway = app.make_gateway(conn)
@@ -1409,7 +1449,7 @@ def serve(paths: Paths, config: Config, host: str = "127.0.0.1", port: int = 876
     except KeyboardInterrupt:
         pass
     finally:
-        app.stop_models()
+        app.shutdown()
         httpd.server_close()
 
 

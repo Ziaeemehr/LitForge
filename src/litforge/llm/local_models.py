@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
 from litforge.config import load_config
+from litforge.jobs import check_cancelled
 from litforge.llm.files import file_lock
 from litforge.llm.hardware import Hardware
 from litforge.llm.http import open_url
@@ -384,8 +385,10 @@ def ollama_pull(name: str, *, base_url: str = 'http://localhost:11434', opener: 
                                      data=json.dumps({'name': name, 'stream': True}).encode())
     complete = False
     try:
+        check_cancelled()
         with opener(request, timeout=900) as response:
             for line in response:
+                check_cancelled()
                 item = json.loads(line)
                 if not isinstance(item, dict) or item.get('error'):
                     raise ValueError('Ollama pull failed')

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -32,8 +32,7 @@ from litforge.export.markdown import default_export_dir
 from litforge.screening.fulltext import screen_fulltext
 from litforge.screening.run import screen_papers
 from litforge.storage.db import new_id, now
-
-STALE_RUN_HOURS = 6
+from litforge.storage.recovery import repair_abandoned_runs
 
 
 class WatchRun(BaseModel):
@@ -126,21 +125,17 @@ def _queries(conn: sqlite3.Connection, project_id: str) -> list[tuple[str, list[
 
 def refresh_project(conn: sqlite3.Connection, gateway: ModelGateway, sources: Sources, project_id: str, *,
                     screen: bool = True, extract: bool = True, claims: bool = True,
-                    progress: Callable[[str], None] | None = None) -> WatchRun:
+                    progress: Callable[[str], None] | None = None, approved_cloud: bool = False) -> WatchRun:
     say = progress or (lambda _m: None)
-    # A run still "running" after STALE_RUN_HOURS belongs to a process that was killed; release it.
-    stale = (datetime.now(UTC) - timedelta(hours=STALE_RUN_HOURS)).isoformat(timespec="seconds")
-    conn.execute("""UPDATE watch_runs SET status='error',finished_at=?,error='interrupted: the refresh process stopped'
-                    WHERE project_id=? AND status='running' AND julianday(started_at) < julianday(?)""",
-                 (now(), project_id, stale))
+    repair_abandoned_runs(conn)
     if conn.execute("SELECT 1 FROM watch_runs WHERE project_id=? AND status='running'", (project_id,)).fetchone():
         raise ValueError("a refresh is already running in this project")
     snapshots = list_snapshots(conn, project_id)
     before_id = snapshots[0].id if snapshots else take_snapshot(conn, project_id, "Before refresh")
     before = get_snapshot(conn, before_id)
     run_id, started = new_id(), now()
-    conn.execute("INSERT INTO watch_runs(id,project_id,before_snapshot,status,started_at) VALUES (?,?,?,'running',?)",
-                 (run_id, project_id, before_id, started))
+    conn.execute("INSERT INTO watch_runs(id,project_id,before_snapshot,status,started_at,owner_pid,owner_started_at) "
+                 "VALUES (?,?,?,'running',?,?,?)", (run_id, project_id, before_id, started, os.getpid(), started))
     partial = False
     try:
         # Capture these before replay creates additional discovery_runs rows.
@@ -157,19 +152,20 @@ def refresh_project(conn: sqlite3.Connection, gateway: ModelGateway, sources: So
             "SELECT paper_id FROM project_papers WHERE project_id=?", (project_id,)) if r[0] not in previous)
         say(f"{len(new_papers)} new papers since the previous snapshot")
         if screen and new_papers:
-            s1 = screen_papers(conn, gateway, project_id, new_papers, progress=say)
-            s2 = screen_fulltext(conn, gateway, project_id, paper_ids=new_papers)
+            s1 = screen_papers(conn, gateway, project_id, new_papers, progress=say, approved=approved_cloud)
+            s2 = screen_fulltext(conn, gateway, project_id, paper_ids=new_papers, approved=approved_cloud)
             partial |= bool(s1.failed or s2.budget_stopped)
         if extract:
             for matrix in list_matrices(conn, project_id):
                 say(f"Extracting changed cells: {matrix.name}")
-                result = extract_matrix(conn, gateway, matrix.id)
+                result = extract_matrix(conn, gateway, matrix.id, approved=approved_cloud)
                 partial |= any(c.status == "error" for c in result.cells)
         if claims:
             old_claims = {c.id for c in claim_analysis.list_claims(conn, project_id)}
             if new_papers:
                 say("Extracting claims for new papers")
-                extracted = claim_analysis.extract_claims(conn, gateway, project_id, new_papers)
+                extracted = claim_analysis.extract_claims(conn, gateway, project_id, new_papers,
+                                                           approved=approved_cloud)
                 partial |= extracted.budget_stopped
             if new_papers or old_claims:
                 claim_graph.cluster_claims(conn, project_id)
@@ -177,7 +173,7 @@ def refresh_project(conn: sqlite3.Connection, gateway: ModelGateway, sources: So
             if new_claims:
                 related = claim_graph.classify_relations(conn, gateway, project_id,
                     max_pairs=max(1, len(new_claims) * len(claim_analysis.list_claims(conn, project_id))),
-                    claim_ids=new_claims)
+                    claim_ids=new_claims, approved=approved_cloud)
                 partial |= related.budget_stopped
         after_id = take_snapshot(conn, project_id, "After refresh")
         delta = diff_snapshots(before, get_snapshot(conn, after_id))

@@ -8,11 +8,12 @@ from functools import partial
 
 from pydantic import BaseModel
 
-from litforge.analysis.ask import AnswerSentence, AuditVerdict, get_answer
+from litforge.analysis.ask import AnswerSentence, AuditVerdict, _question_spans, get_answer
 from litforge.analysis.errors import run_error
 from litforge.analysis.gateway import CallPreview, ModelGateway
 from litforge.analysis.ledger import to_packet
 from litforge.analysis.prompts import AUDIT_PROMPT_VERSION, audit_messages
+from litforge.analysis.retrieve import retrieve_for_question
 from litforge.analysis.runs import finish_run, get_run, link_evidence, start_run
 from litforge.analysis.validation import EvidenceText
 
@@ -20,6 +21,20 @@ from litforge.analysis.validation import EvidenceText
 class AuditDraft(BaseModel):
     verdict: AuditVerdict
     note: EvidenceText
+
+
+def plan_automatic(conn: sqlite3.Connection, gateway: ModelGateway, question: str,
+                   project_id: str | None = None, k: int = 8, profile: str | None = None,
+                   sensitive: bool = False) -> list[CallPreview]:
+    """Conservatively estimate eight audits before the answer's sentences exist."""
+    hits = retrieve_for_question(conn, question, project_id, k)
+    spans = _question_spans(conn, hits, question, project_id, None)
+    if not spans:
+        return []
+    schema = AuditDraft.model_json_schema()
+    packet, messages = gateway.fit_evidence("audit", to_packet(spans, sensitive=sensitive),
+        partial(audit_messages, question, spans=spans), profile, schema=schema)
+    return [gateway.preview("audit", packet, messages, profile=profile, schema=schema)] * 8
 
 
 def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, run_id: str,

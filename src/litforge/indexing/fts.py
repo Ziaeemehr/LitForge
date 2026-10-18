@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import uuid
 from dataclasses import asdict
 
 from pydantic import BaseModel
@@ -128,13 +129,10 @@ def build_any_match(query: str) -> tuple[str, list[str]]:
     return " OR ".join(parts), terms
 
 
-def _hit_page(text: str, spans: list[dict[str, int]], terms: list[str], default: int) -> int:
-    lowered = text.lower()
-    positions = [lowered.find(t.lower()) for t in terms]
-    positions = [p for p in positions if p >= 0]
-    if not positions:
-        return default
-    first = min(positions)
+def _hit_page(text: str, spans: list[dict[str, int]], terms: list[str], default: int,
+              position: int | None = None) -> int:
+    positions = [text.lower().find(t.lower()) for t in terms]
+    first = position if position is not None else min((p for p in positions if p >= 0), default=-1)
     for span in spans:
         if span["start"] <= first < span["end"]:
             return span["page"]
@@ -155,18 +153,20 @@ def search(
     if paper_ids == [] or limit <= 0 or max_per_paper <= 0:
         return []
     builder = build_any_match if any_terms else build_match
-    match, terms = (query, re.findall(r"\w+", query)) if raw else builder(query)
+    match = query if raw else builder(query)[0]
     if not match:
         return []
+    marker = uuid.uuid4().hex
     sql = """SELECT c.id, c.paper_id, c.kind, c.section_path, c.text, c.page_start, c.page_end,
                     c.bbox_json, p.title, bm25(chunks_fts) AS score,
+                    highlight(chunks_fts, 0, ?, '') AS highlighted,
                     snippet(chunks_fts, 0, '[', ']', ' … ', 24) AS snip
              FROM chunks_fts
              JOIN chunks c ON c.pk = chunks_fts.rowid
              JOIN parse_runs r ON r.id = c.parse_run_id AND r.is_current = 1
              JOIN papers p ON p.id = c.paper_id
              WHERE chunks_fts MATCH ?"""
-    params: list[object] = [match]
+    params: list[object] = [marker, match]
     if project_id is not None:
         sql += " AND c.paper_id IN (SELECT paper_id FROM project_papers WHERE project_id=?)"
         params.append(project_id)
@@ -187,7 +187,8 @@ def search(
         hits.append(SearchHit(
             chunk_id=row["id"], paper_id=row["paper_id"], title=row["title"],
             section=row["section_path"], kind=row["kind"],
-            page=_hit_page(row["text"], json.loads(row["bbox_json"]), terms, row["page_start"]),
+            page=_hit_page(row["text"], json.loads(row["bbox_json"]), [], row["page_start"],
+                           position=row["highlighted"].find(marker)),
             page_start=row["page_start"], page_end=row["page_end"], score=round(row["score"], 3),
             snippet=re.sub(r"\s+", " ", row["snip"]),
         ))

@@ -108,7 +108,7 @@ def _context(conn: sqlite3.Connection, asset: sqlite3.Row) -> list[EvidenceSpan]
     if spans:
         return spans
     paper = conn.execute(
-        "SELECT a.paper_id,p.title,r.parser,r.parser_version FROM assets a JOIN parse_runs r "
+        "SELECT f.paper_id,p.title,r.parser,r.parser_version FROM assets a JOIN parse_runs r "
         "ON r.id=a.parse_run_id JOIN artifacts f ON f.id=r.artifact_id JOIN papers p ON p.id=f.paper_id "
         "WHERE a.id=?", (asset["id"],),
     ).fetchone()

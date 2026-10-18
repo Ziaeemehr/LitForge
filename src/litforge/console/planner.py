@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections.abc import Callable
 from typing import Any, Literal
@@ -26,6 +27,7 @@ from litforge.console.actions import (
 from litforge.discovery.run import Sources
 from litforge.llm.evidence import EvidencePacket
 from litforge.storage.db import new_id, now
+from litforge.storage.recovery import repair_abandoned_runs
 
 PLAN_TASK = "console_plan"
 PLAN_PROMPT_VERSION = "console-plan-v1"
@@ -311,6 +313,7 @@ def execute_run(
 ) -> ConsoleRun:
     if not approved:
         raise PermissionError("explicit approval is required before execution")
+    repair_abandoned_runs(conn)
     run = get_run(conn, run_id)
     if run.status not in ("pending", "failed", "cancelled"):
         raise ValueError(f"console run cannot execute from status {run.status}")
@@ -320,8 +323,9 @@ def execute_run(
         raise ValueError("console run has an invalid checkpoint")
     say = progress or (lambda _message: None)
     results = run.results
-    conn.execute("UPDATE console_runs SET status='running',cancel_requested=0,error=NULL,updated_at=? WHERE id=?",
-                 (now(), run_id))
+    stamp = now()
+    conn.execute("UPDATE console_runs SET status='running',cancel_requested=0,error=NULL,updated_at=?,"
+                 "owner_pid=?,owner_started_at=? WHERE id=?", (stamp, os.getpid(), stamp, run_id))
     project_name_row = (conn.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone()
                         if project_id is not None else None)
     context = ActionContext(conn, gateway, project_id,

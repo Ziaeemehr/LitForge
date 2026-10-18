@@ -12,6 +12,12 @@ uv run litforge export
 ```
 
 - `new` creates a project and makes it active, so later commands don't need `--project`.
+- `project create NAME --topic "Topic" --question "Research question"` also creates and activates a project;
+  both description options are optional. `project delete NAME` asks for confirmation (`--yes` / `-y` skips it).
+  Papers and PDFs stay in the shared library; `--delete-exports` also removes that project's exported files.
+- `ui` starts the local web interface and opens your browser. Use `--port 8765` (`0` chooses a free port),
+  `--host 127.0.0.1` to select the interface, or `--no-browser` to start without opening a window.
+- `shortcut` adds an application icon that launches the web interface; it takes no command options.
 - `add` imports, parses and indexes PDFs in one step. Run it again any time; nothing is processed twice.
 - `search` returns the paper, section, page and a quoted snippet for every hit.
 - `ask "your question" --evidence-only` retrieves evidence cards with stable IDs, section and page.
@@ -717,7 +723,7 @@ litforge snapshot -p my-review --label "Submitted draft"
 litforge snapshots -p my-review
 litforge delta OLD_SNAPSHOT NEW_SNAPSHOT --md changes.md
 litforge refresh -p my-review --notify
-# Optional: --no-screen --no-extract --no-claims
+# Optional: --no-screen --no-extract --no-claims; --approve for configured cloud tasks
 litforge watch install -p my-review --every 7d
 litforge watch remove -p my-review
 litforge repro -p my-review --paper PAPER_ID --md reproduction.md
@@ -730,7 +736,8 @@ queries (including keyword queries saved by similar-paper discovery), bypasses t
 only papers added since the latest snapshot with the current project criteria, and runs S2 when text
 exists. Existing matrices use their cache keys to extract new or changed cells. Claims are extracted
 only for new papers, reclustered, and related only in pairs involving new claims. Refresh uses the
-configured local gateway route; unattended work never approves a cloud call. Delta Markdown is written
+configured task routes. CLI `--approve` authorizes cloud use for that refresh; the UI asks for cloud
+confirmation when remote tasks are assigned. Unattended work never approves a cloud call. Delta Markdown is written
 as `delta-RUN_ID.md` in the project's export directory. Partial discovery or budget-limited extraction
 is recorded as `partial`; completed work is kept. Answers are compared as stored, not regenerated.
 

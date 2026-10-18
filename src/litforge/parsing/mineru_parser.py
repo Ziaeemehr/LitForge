@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager, suppress
@@ -21,6 +22,7 @@ from typing import Any, BinaryIO
 import pymupdf
 
 from litforge.config import Config, ParsingConfig, Paths
+from litforge.jobs import check_cancelled, track_process
 from litforge.llm.llamacpp_server import LlamaCppServer
 from litforge.parsing.base import Asset, PageInfo, Paragraph, ParsedDocument, Section, section_kind
 from litforge.parsing.formulas import tidy_latex
@@ -90,6 +92,7 @@ def _run_command(argv: list[str], *, env: dict[str, str], timeout: float,
                  out_dir: Path | None = None, capture_stdout: bool = False,
                  merge_output: bool = False) -> subprocess.CompletedProcess[str]:
     """Spool diagnostics to disk; Python retains only their final 64 KiB."""
+    check_cancelled()
     with ExitStack() as stack:
         stderr = stack.enter_context(tempfile.TemporaryFile(dir=out_dir))
         stdout = stack.enter_context(tempfile.TemporaryFile(dir=out_dir)) if capture_stdout else None
@@ -99,12 +102,23 @@ def _run_command(argv: list[str], *, env: dict[str, str], timeout: float,
                                    stdout=stderr if merge_output else stdout or subprocess.DEVNULL,
                                    stderr=stderr, **options)
         kill_tree = None
+        terminate_lock = threading.Lock()
+        terminated = False
+
+        def terminate() -> None:
+            nonlocal terminated
+            with terminate_lock:
+                if not terminated:
+                    _terminate_tree(process, kill_tree)
+                    terminated = True
+
         try:
             if os.name == 'nt':
                 kill_tree = stack.enter_context(_windows_job(process))
-            process.wait(timeout=timeout)
+            with track_process(process.pid, terminate):
+                process.wait(timeout=timeout)
         except BaseException as exc:
-            _terminate_tree(process, kill_tree)
+            terminate()
             if isinstance(exc, subprocess.TimeoutExpired):
                 exc.stderr = _read_tail(stderr).encode('utf-8')
             raise

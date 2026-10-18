@@ -54,14 +54,14 @@ def refresh(ctx: typer.Context, project: Project = None,
             no_screen: Annotated[bool, typer.Option("--no-screen")] = False,
             no_extract: Annotated[bool, typer.Option("--no-extract")] = False,
             no_claims: Annotated[bool, typer.Option("--no-claims")] = False,
-            notify: Annotated[bool, typer.Option("--notify")] = False) -> None:
+            notify: Annotated[bool, typer.Option("--notify")] = False, approve: Approve = False) -> None:
     """Refresh stored searches and print evidence-change signals."""
     from litforge.cli import _sources
     with _context(ctx, project) as (st, conn, pid):
         try:
             result = living.refresh_project(conn, ModelGateway(conn, st.config), _sources(st, True), _required(pid),
                                             screen=not no_screen, extract=not no_extract, claims=not no_claims,
-                                            progress=typer.echo)
+                                            progress=typer.echo, approved_cloud=approve)
         except (RoutingError, BudgetExceeded) as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(1) from exc

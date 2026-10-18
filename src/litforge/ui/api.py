@@ -620,6 +620,7 @@ class RefreshRequest(BaseModel):
     screen: bool = Field(default=True, strict=True)
     extract: bool = Field(default=True, strict=True)
     claims: bool = Field(default=True, strict=True)
+    approved: bool = Field(default=False, strict=True)
 
 
 class AssetAnalysisRequest(BaseModel):
@@ -655,8 +656,8 @@ def asset_crop(conn: sqlite3.Connection, paths: Paths, asset_id: str) -> Path:
     return target
 
 
-def gap_panel(conn: sqlite3.Connection, project_id: str) -> list[dict[str, Any]]:
-    items = gaps.detect_gaps(conn, project_id)
+def gap_panel(conn: sqlite3.Connection, project_id: str, *, detect: bool = False) -> list[dict[str, Any]]:
+    items = gaps.detect_gaps(conn, project_id) if detect else gaps.list_gaps(conn, project_id, refresh=False)
     return [{**item.model_dump(), "evidence": [span.model_dump() for span in get_spans(conn, item.evidence_ids)],
              "card": gaps.get_gap_card(conn, item.card_id).model_dump() if item.card_id else None}
             for item in items]

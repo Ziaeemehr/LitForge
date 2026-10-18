@@ -141,7 +141,8 @@ class ReproCard(BaseModel):
     evidence: list[EvidenceSpan]
 
 
-def repro_card(conn: sqlite3.Connection, paper_id: str, project_id: str | None = None) -> ReproCard:
+def repro_card(conn: sqlite3.Connection, paper_id: str, project_id: str | None = None, *,
+               refresh: bool = True) -> ReproCard:
     row = conn.execute("SELECT title FROM papers WHERE id=?", (paper_id,)).fetchone()
     if row is None:
         raise KeyError(paper_id)
@@ -172,7 +173,13 @@ def repro_card(conn: sqlite3.Connection, paper_id: str, project_id: str | None =
         items.append(ChecklistItem(key=column.key, label=column.label, state=state,
             value=str(cell.value) if state == "present" and cell else None,
             evidence_ids=sorted(cell.evidence_ids) if cell and state == "present" else []))
-    links = extract_links(conn, paper_id)
+    if refresh:
+        links = extract_links(conn, paper_id)
+    else:
+        links = [ReproLink(**dict(r)) for r in conn.execute(
+            "SELECT l.* FROM repro_links l JOIN evidence_spans e ON e.id=l.evidence_id "
+            "JOIN parse_runs r ON r.id=e.parse_run_id WHERE l.paper_id=? AND r.is_current=1 "
+            "ORDER BY l.url,l.evidence_id", (paper_id,))]
     by_key = {i.key: i for i in items}
     data_keys = ("data_availability", "dataset_names", "data_split")
 

@@ -41,6 +41,7 @@ class OpenRouterPricing:
                  clock: Callable[[], float] = time.time) -> None:
         self.path = cache_dir.resolve() / "openrouter-pricing.json"
         self.fetch, self.clock = fetch, clock
+        self.read_only = False
 
     def catalogue(self, *, vision: bool = False, max_input_price: float | None = None,
                   q: str = "") -> list[dict[str, Any]]:
@@ -84,6 +85,9 @@ class OpenRouterPricing:
 
     def lookup(self, model: str) -> PriceInfo:
         try:
+            if self.read_only:
+                with self._lock:
+                    return self._lookup(model)
             with self._lock, file_lock(self.path.with_suffix(".lock")):
                 return self._lookup(model)
         except (OSError, TimeoutError):
@@ -103,6 +107,8 @@ class OpenRouterPricing:
         except (OSError, ValueError, KeyError, TypeError):
             cached = {}
         if not cached:
+            if self.read_only:
+                return PriceInfo()
             try:
                 data = self.fetch()
                 if not isinstance(data, dict) or not isinstance(data.get("data"), list):

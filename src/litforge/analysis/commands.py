@@ -99,12 +99,11 @@ def run_ask(ctx: typer.Context, question: str, project: str | None, k: int, prof
         gateway = ModelGateway(conn, st.config)
         plan = answers.plan_calls(conn, gateway, question, pid, k, profile, sensitive)
         if audit and plan:
-            # Conservative pre-generation estimate: at most eight cited sentences, each audited once.
-            plan += answers.plan_calls(conn, gateway, question, pid, k, audit_profile or profile, sensitive) * 8
+            plan += audits.plan_automatic(conn, gateway, question, pid, k, audit_profile, sensitive)
         check_plan(gateway, plan, approved, preview)
         answer = answers.ask(conn, gateway, question, pid, k, profile, approved, sensitive)
         if audit:
-            audits.audit_answer(conn, gateway, answer.run_id, audit_profile or profile, approved)
+            audits.audit_answer(conn, gateway, answer.run_id, audit_profile, approved)
             answer = answers.get_answer(conn, answer.run_id)
         if as_json:
             typer.echo(answer.model_dump_json(indent=1))

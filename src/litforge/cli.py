@@ -49,8 +49,9 @@ from litforge.projects import (
     set_active,
 )
 from litforge.screening.llm import Llm, LlmError, ollama_from_config
-from litforge.screening.run import screen_run
+from litforge.screening.run import preview_run, screen_run
 from litforge.storage.db import open_db
+from litforge.storage.recovery import repair_abandoned_runs
 
 app = typer.Typer(help="Local-first scientific literature library.", no_args_is_help=True)
 project_app = typer.Typer(help="Manage project workspaces.", no_args_is_help=True)
@@ -68,9 +69,15 @@ class State:
     config: Config
     log: EventLog
 
-    def db(self) -> sqlite3.Connection:
+    def db(self, *, read_only: bool = False) -> sqlite3.Connection:
+        if read_only:
+            conn = sqlite3.connect(f"{self.paths.db.resolve().as_uri()}?mode=ro", uri=True, isolation_level=None)
+            conn.row_factory = sqlite3.Row
+            return conn
         self.paths.ensure()
-        return open_db(self.paths.db)
+        conn = open_db(self.paths.db)
+        repair_abandoned_runs(conn)
+        return conn
 
 
 def _state(ctx: typer.Context) -> State:
@@ -661,7 +668,7 @@ def screen(
         run_fulltext(ctx, project, top, profile, approve, preview, as_json)
         return
     st = _state(ctx)
-    conn = st.db()
+    conn = st.db(read_only=preview)
     name, pid = _project(st, conn, project, required=True)
     if run is None:
         row = conn.execute("SELECT id FROM discovery_runs WHERE project_id=? ORDER BY rowid DESC LIMIT 1",
@@ -673,6 +680,19 @@ def screen(
     gateway = (ModelGateway(conn, st.config) if model is None and
                (profile is not None or "screen" in st.config.models.tasks) else None)
     try:
+        if preview:
+            if gateway is None:
+                config = st.config.model_copy(deep=True)
+                config.models.local.provider = "ollama"
+                config.models.local.model = model or st.config.screening.model
+                config.models.local.remote = False
+                config.models.tasks.pop("screen", None)
+                gateway = ModelGateway(conn, config)
+            gateway.pricing.read_only = True
+            plan = preview_run(conn, gateway, run, st.config.screening.default_top if top is None else top,
+                               profile if model is None else None)
+            typer.echo(json.dumps(plan, ensure_ascii=False, indent=1))
+            return
         report = screen_run(conn, _make_llm(st.config, model) if gateway is None else None, run,
                             st.config.screening.default_top if top is None else top,
                             progress=None if as_json else typer.echo, log=st.log,

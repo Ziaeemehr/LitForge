@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections import Counter
 from collections.abc import Callable
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +32,42 @@ class ScreenReport(BaseModel):
     cached: int = 0
     failed: int = 0
     counts: dict[str, int] = Field(default_factory=dict)
+
+
+def preview_run(conn: sqlite3.Connection, gateway: ModelGateway, run_id: str, top: int,
+                profile: str | None = None) -> dict[str, Any]:
+    """Read candidate/cache state and estimate S1 calls without creating a run."""
+    if top < 1:
+        raise ValueError("top must be at least 1")
+    run = conn.execute("SELECT project_id FROM discovery_runs WHERE id=?", (run_id,)).fetchone()
+    if run is None:
+        raise LookupError("run not found")
+    criteria = load_criteria(conn, run["project_id"])
+    if criteria.is_empty():
+        raise ValueError("no screening criteria: fill in the research question first")
+    papers = conn.execute(
+        "SELECT p.*,s.fingerprint,s.error FROM discovery_results d JOIN papers p ON p.id=d.paper_id "
+        "LEFT JOIN screening_results s ON s.project_id=? AND s.paper_id=p.id WHERE d.run_id=? "
+        "ORDER BY COALESCE(d.priority,d.score) DESC,p.title LIMIT ?", (run["project_id"], run_id, top)).fetchall()
+    model = gateway.resolve("screen", profile)[1].model
+    calls = []
+    cached = 0
+    for paper in papers:
+        fp = fingerprint(criteria, model, paper["title"], paper["abstract"])
+        if paper["fingerprint"] == fp and not paper["error"]:
+            cached += 1
+            continue
+        packet = EvidencePacket(items=[EvidenceItem(id="s1_" + paper["id"], paper_id=paper["id"], page=1,
+            text=f"{paper['title'] or ''}\n{paper['abstract'] or ''}".strip() or "No title or abstract")])
+        messages = build_messages(criteria, paper["title"], paper["abstract"], paper["year"], paper["venue"])
+        calls.append(gateway.preview("screen", packet, messages, profile=profile, schema=response_schema(criteria)))
+    return {"candidates": len(papers), "cached": cached, "number_of_calls": len(calls),
+            "models": [model], "profiles": sorted({c.profile for c in calls}),
+            "remote": any(c.remote for c in calls), "requires_approval": any(c.requires_approval for c in calls),
+            "max_cost_usd": None if any(c.max_cost_usd is None for c in calls) else
+                            sum(c.max_cost_usd or 0 for c in calls),
+            "blocked_reasons": [c.blocked_reason for c in calls if c.blocked_reason],
+            "calls": [c.model_dump() for c in calls]}
 
 
 def screen_run(conn: sqlite3.Connection, llm: Llm | None, run_id: str, top: int,

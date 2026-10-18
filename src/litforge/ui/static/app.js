@@ -1089,7 +1089,7 @@
       return Promise.resolve();
     }
     $('gaps-status').textContent = 'Checking claims and study matrices…';
-    return api('/api/gaps?project=' + encodeURIComponent(project)).then(function (items) {
+    return post('/api/gaps/detect', { project: project }).then(function (items) {
       if (project !== state.project || state.page !== 'gaps') return;
       $('gaps-status').textContent = items.length + ' deterministic candidate' + (items.length === 1 ? '' : 's');
       list.replaceChildren();
@@ -2684,7 +2684,20 @@
     if (!state.project || lens.busy) return;
     var project = state.project;
     lensBusy(true); $('living-status').textContent = "Starting refresh…";
-    post("/api/refresh", { project: project }).then(function (job) {
+    api('/api/models').then(function (info) {
+      var tasks = ['screen', 'screen_fulltext', 'matrix_extract', 'claim_extract', 'claim_relation'];
+      var remote = info.profiles.filter(function (profile) {
+        return profile.remote && tasks.some(function (task) {
+          return info.tasks[task] && info.tasks[task].profile === profile.name;
+        });
+      });
+      var approved = remote.length > 0 && window.confirm('Refresh may send paper evidence to cloud models: ' +
+        remote.map(function (profile) { return profile.model; }).join(', ') +
+        '. Provider charges and configured budget limits apply. Approve cloud use for this refresh?');
+      if (remote.length && !approved) { lensBusy(false); $('living-status').textContent = 'Refresh cancelled.'; return null; }
+      return post('/api/refresh', { project: project, approved: approved });
+    }).then(function (job) {
+      if (!job) return;
       (function tick() {
         api("/api/jobs/" + job.id).then(function (j) {
           if (project === state.project) $('living-status').textContent = j.status === "running" ?
@@ -2784,7 +2797,7 @@
     repro.appendChild(status); repro.appendChild(cardHost);
     function load() {
       status.textContent = "Loading reproducibility…";
-      api("/api/papers/" + encodeURIComponent(paper.id) + "/repro?project=" + encodeURIComponent(project || ""))
+      post("/api/papers/" + encodeURIComponent(paper.id) + "/repro", { project: project })
         .then(function (card) {
           if (request !== drawerRequest || project !== state.project) return;
           renderReproCard(cardHost, card); status.textContent = "";

@@ -35,6 +35,8 @@ def test_snapshots_refresh_background_and_repro_endpoints(paths: Paths) -> None:
     assert status == 200 and len(panel["snapshots"]) == 2
     assert panel["latest"]["signals"] == [] and "No significant signals" in panel["report"]
     status, card = server.call("/api/papers/p/repro?project=demo")
+    assert status == 200 and card["links"] == []
+    status, card = server.call("/api/papers/p/repro", {"project": "demo"})
     assert status == 200 and len(card["checklist"]) == 12 and card["links"][0]["kind"] == "code"
     assert card["sections"] and card["evidence"] and "brief" not in card
     assert fake.calls == 0
