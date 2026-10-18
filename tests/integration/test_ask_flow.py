@@ -153,7 +153,7 @@ def test_generated_answer_quotes_are_short_and_single_line(conn: sqlite3.Connect
     monkeypatch.setattr(commands, 'ModelGateway', lambda *args: gw)
     result = CliRunner().invoke(app, ['--data-dir', str(paths.root), 'ask', 'gain', '-p', 'demo', '--no-audit'])
     assert result.exit_code == 0, result.output
-    quote = result.output.split('“', 1)[1].split('”', 1)[0]
+    quote = result.output.split('   “', 1)[1].split('”', 1)[0]
     assert '\n' not in quote and len(quote) <= 300
     assert quote.rstrip('…').endswith('completeword')
     assert text not in result.output

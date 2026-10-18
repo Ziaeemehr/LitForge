@@ -16,7 +16,8 @@ from litforge.analysis.review import review_queue
 def test_verdict_storage_and_queue(conn: sqlite3.Connection, verdict: str) -> None:
     span = seed(conn)
     gw, _ = gateway(conn, {"sentences": [
-        {"text": "Gain 3.25.", "kind": "reported_fact", "evidence_ids": [span.id]},
+        {"text": "Gain 3.25.", "kind": "reported_fact", "evidence_ids": [span.id],
+         "quotes": [{"evidence_id": span.id, "text": span.text}]},
         {"text": "Unknown.", "kind": "unsupported", "evidence_ids": []}], "insufficient": True})
     answer = ask(conn, gw, "gain", sensitive=True)
     auditor, fake = gateway(conn, {"verdict": verdict, "note": "checked"})

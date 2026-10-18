@@ -19,6 +19,7 @@ from litforge.analysis.validation import (
     EvidenceText,
     citations,
     image_only_numbers,
+    locate_quote,
     missing_numbers,
     strip_evidence_mentions,
 )
@@ -31,11 +32,39 @@ AuditVerdict = Literal["supported", "partial", "unsupported", "contradicted"]
 ReviewStatus = Literal["open", "accepted", "rejected", "edited"]
 
 
+# Flags shown to the reader that do not by themselves send a sentence to review.
+INFO_FLAGS = frozenset({"citation_without_quote"})
+
+class Quote(BaseModel):
+    evidence_id: str
+    text: str = Field(max_length=400)
+    start: int | None = None
+    end: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def cap_text(cls, value: Any) -> Any:
+        if isinstance(value, dict) and isinstance(value.get("text"), str):
+            text = value["text"].strip()
+            if len(text) > 400:  # cut on a word boundary so the kept part is still a verbatim quote
+                text = text[:401].rsplit(None, 1)[0] if " " in text[:401] else text[:400]
+            return {**value, "text": text}
+        return value
+
+
 class SentenceDraft(BaseModel):
     text: EvidenceText
     kind: SentenceKind
     evidence_ids: list[str] = Field(default_factory=list)
+    quotes: list[Quote] = Field(default_factory=list, max_length=3)
     flags: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def cap_quotes(cls, value: Any) -> Any:
+        if isinstance(value, dict) and isinstance(value.get("quotes"), list):
+            return {**value, "quotes": value["quotes"][:3]}
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -56,7 +85,7 @@ class AnswerSentence(SentenceDraft):
 
     @property
     def needs_review(self) -> bool:
-        return bool(self.flags or self.kind != "reported_fact"
+        return bool(set(self.flags) - INFO_FLAGS or self.kind != "reported_fact"
                     or (self.audit_verdict is not None and self.audit_verdict != "supported"))
 
 
@@ -106,10 +135,13 @@ def _question_spans(conn: sqlite3.Connection, hits: list[SearchHit], question: s
     return spans
 
 
-def validate_sentences(drafts: list[SentenceDraft], packet: EvidencePacket | None
+def validate_sentences(drafts: list[SentenceDraft], packet: EvidencePacket | None,
+                       spans: list[EvidenceSpan] | None = None
                        ) -> tuple[list[AnswerSentence], list[str]]:
     result: list[AnswerSentence] = []
     invalid: list[str] = []
+    items = {e.id: e.text for e in packet.items} if packet else {}
+    originals = {s.id: s.text for s in spans} if spans is not None else items
     for draft in drafts:
         text = strip_evidence_mentions(draft.text)
         if not text:
@@ -125,12 +157,35 @@ def validate_sentences(drafts: list[SentenceDraft], packet: EvidencePacket | Non
             flags.append("uncited_interpretation")
         if missing_numbers(text, ids, packet):
             flags.append("from_image" if image_only_numbers(text, ids, packet) else "number_not_in_evidence")
-        result.append(AnswerSentence(idx=len(result), text=text, kind=kind, evidence_ids=ids, flags=flags))
+        quotes = []
+        for quote in draft.quotes:
+            offsets = None
+            words = sum(any(c.isalnum() for c in word) for word in quote.text.split())
+            if not words:
+                continue  # an empty quote is no claim about the evidence
+            if words < 2:
+                if "quote_not_in_evidence" not in flags:  # one word cannot identify a passage
+                    flags.append("quote_not_in_evidence")
+                continue
+            if quote.evidence_id in ids and locate_quote(quote.text, items[quote.evidence_id]) is not None:
+                offsets = locate_quote(quote.text, originals.get(quote.evidence_id, ""))
+            if offsets is None:
+                if "quote_not_in_evidence" not in flags:
+                    flags.append("quote_not_in_evidence")
+            else:
+                quotes.append(quote.model_copy(update={"start": offsets[0], "end": offsets[1]}))
+        if kind == "reported_fact" and ids and not quotes:
+            flags.append("unquoted_fact")
+        elif quotes and set(ids) - {q.evidence_id for q in quotes}:
+            flags.append("citation_without_quote")  # informational: another cited span has no exact quote
+        result.append(AnswerSentence(idx=len(result), text=text, kind=kind, evidence_ids=ids,
+                                     quotes=quotes, flags=flags))
     return result, invalid
 
 
 def get_sentences(conn: sqlite3.Connection, run_id: str) -> list[AnswerSentence]:
     return [AnswerSentence(**{**dict(row), "evidence_ids": json.loads(row["evidence_ids_json"]),
+                              "quotes": json.loads(row["quotes_json"]),
                               "flags": json.loads(row["flags_json"])})
             for row in conn.execute("SELECT * FROM answer_sentences WHERE run_id=? ORDER BY idx", (run_id,))]
 
@@ -178,17 +233,17 @@ def ask(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_
             packet = None
             draft = AnswerDraft(sentences=[SentenceDraft(
                 text="No evidence found in the library for this question.", kind="unsupported")], insufficient=True)
-        sentences, invalid = validate_sentences(draft.sentences, packet)
+        sentences, invalid = validate_sentences(draft.sentences, packet, spans)
         answer = Answer(run_id=run_id, question=question, sentences=sentences, evidence=spans,
                         invalid_citations=invalid, insufficient=draft.insufficient, model=model, provider=provider,
                         flags=draft.flags)
         with transaction(conn):
             for s in sentences:
                 conn.execute("""INSERT INTO answer_sentences(id,run_id,idx,text,kind,
-                                evidence_ids_json,flags_json,created_at)
-                                VALUES (?,?,?,?,?,?,?,?)""",
+                                evidence_ids_json,quotes_json,flags_json,created_at)
+                                VALUES (?,?,?,?,?,?,?,?,?)""",
                              (s.id, run_id, s.idx, s.text, s.kind, canonical_json(s.evidence_ids),
-                              canonical_json(s.flags), now()))
+                              canonical_json([q.model_dump() for q in s.quotes]), canonical_json(s.flags), now()))
             finish_run(conn, run_id, "ok", answer.model_dump())
         return answer
     except Exception as exc:

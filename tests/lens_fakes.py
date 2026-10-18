@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from html import unescape
 from typing import Any
 
 from litforge.analysis.gateway import ModelGateway
@@ -34,7 +35,9 @@ def evidence_id(messages: list[dict[str, str]]) -> str:
 
 def gateway(conn: sqlite3.Connection, payload: dict[str, Any] | None = None) -> tuple[ModelGateway, FakeLlm]:
     fake = FakeLlm(lambda m: payload if payload is not None else {
-        "sentences": [{"text": "The gain is 3.25.", "kind": "reported_fact", "evidence_ids": [evidence_id(m)]}],
+        "sentences": [{"text": "The gain is 3.25.", "kind": "reported_fact", "evidence_ids": [evidence_id(m)],
+                       "quotes": [{"evidence_id": evidence_id(m), "text": unescape(
+                           re.findall(r"<evidence[^>]*>(.*?)</evidence>", m[-1]["content"], re.S)[0])[:400]}]}],
         "insufficient": False,
     })
     return ModelGateway(conn, Config(), providers={"local": fake}), fake

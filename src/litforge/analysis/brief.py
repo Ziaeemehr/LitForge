@@ -49,6 +49,9 @@ def write_brief(conn: sqlite3.Connection, answer_run_id: str, matrix_id: str | N
         if sentence.audit_verdict in ("unsupported", "contradicted", "partial"):
             label += f" *(audit: {sentence.audit_verdict} — needs review)*"
         lines.append(inert(sentence.text) + markers + label)
+        for quote in sentence.quotes[:3]:
+            if quote.evidence_id in sentence.evidence_ids and quote.start is not None and quote.end is not None:
+                lines.extend(["", f"> {inert(excerpt(quote.text))}[^{quote.evidence_id}]", ""])
     if rejected:
         lines.extend(["", "## Rejected by reviewer", "", *["- " + text for text in rejected]])
     counts = Counter(s.audit_verdict or "not audited" for s in answer.sentences)
@@ -70,9 +73,9 @@ def write_brief(conn: sqlite3.Connection, answer_run_id: str, matrix_id: str | N
         lines.append("None.")
     lines.extend(["", "## Evidence appendix", ""])
     for s in spans.values():
-        quote = inert(excerpt(s.text))
+        passage = inert(excerpt(s.text))
         lines.extend([f"[^{s.id}]: {inert(s.citation)}; section={inert(s.section or s.kind)}; evidence ID={s.id}; "
-                      f"parse={s.parse_run_id}; parser={s.parser} {s.parser_version} — \"{quote}\""])
+                      f"parse={s.parse_run_id}; parser={s.parser} {s.parser_version} — \"{passage}\""])
     if claims:
         if run.project_id is None:
             raise ValueError("claim landscape requires a project-scoped answer")

@@ -89,7 +89,7 @@ def test_image_numbers_are_not_text_reported() -> None:
         [SentenceDraft(text="Value 10.", kind="reported_fact", evidence_ids=[source.id])], packet,
     )
     assert cell.status == "reported" and flags == ["from_image"]
-    assert sentences[0].flags == ["from_image"]
+    assert sentences[0].flags == ["from_image", "unquoted_fact"]
     text = source.model_copy(update={"id": "ev_text", "kind": "text", "from_image": False})
     text_packet = to_packet([source, text])
     _, text_flags = validate_cell(
@@ -122,7 +122,7 @@ def test_ask_retrieves_selected_asset_evidence_without_text_hits(conn: sqlite3.C
     from litforge.analysis.ask import ask
 
     answer = ask(conn, answer_gateway, "parameter estimate")
-    assert answer.evidence[0].from_image and answer.sentences[0].flags == ["from_image"]
+    assert answer.evidence[0].from_image and answer.sentences[0].flags == ["from_image", "unquoted_fact"]
 
 
 def test_chart_and_equation_fidelity_and_glossary(conn: sqlite3.Connection, paths) -> None:

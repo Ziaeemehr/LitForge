@@ -34,7 +34,8 @@ function setup() {
     { name: 'paid', provider: 'remote', model: 'cloud-model', remote: true }];
   const ctx = vm.createContext({ $, state: { project: 'demo' }, store: { set() {} }, setTimeout,
     toast(message) { throw Error(message); },
-    document: { createElement: tag => new Element(tag), querySelectorAll: selector => selector === '[data-lens-tab]' ? tabs : [] },
+    document: { createElement: tag => new Element(tag),
+      createTextNode: text => { const el = new Element('#text'); el.textContent = text; return el; }, querySelectorAll: selector => selector === '[data-lens-tab]' ? tabs : [] },
     api: async path => path === '/api/model-profiles' ? profiles : path.startsWith('/api/jobs/') ?
       { status: 'done', run_id: 'run', report: answer } : answer,
     post: async (path, body) => {
@@ -263,4 +264,63 @@ test('Screening displays a warning after a mismatched quote is cleared', () => {
   function walk(el) { texts.push(el.textContent); el.children.forEach(walk); }
   walk($('detail'));
   assert.ok(texts.includes('Quote not in evidence'));
+});
+
+test('sentence quotes stay inert and open an expanded drawer with original offsets marked', () => {
+  const { ctx, $ } = setup();
+  ctx.drawerRequest = 0;
+  const passage = 'The treat-\nment improves <script>outcomes</script>.';
+  const prefix = '😀 Before. ' + 'padding '.repeat(60);
+  const span = { id: 'ev', paper_id: 'p', title: '<b>Study</b>', page: 2, text: prefix + passage + ' After.' };
+  const quote = { evidence_id: 'ev', text: 'The treatment improves <script>outcomes</script>.',
+    start: Array.from(prefix).length, end: Array.from(prefix + passage).length };
+  const row = ctx.lensSentence({ id: 's', text: 'Answer.', kind: 'reported_fact', evidence_ids: ['ev'],
+    flags: ['unquoted_fact', 'quote_not_in_evidence'], quotes: [quote] }, [span]);
+  const nodes = descendants(row);
+  assert.equal(nodes.find(e => e.tagName === 'BLOCKQUOTE').textContent, quote.text);
+  assert.ok(visibleText(row).includes('No exact quote'));
+  assert.ok(visibleText(row).includes('Quote not in evidence'));
+  nodes.find(e => e.tagName === 'BLOCKQUOTE').children.find(e => e.tagName === 'BUTTON').click();
+  const drawer = descendants($('dbody'));
+  assert.equal(drawer.find(e => e.tagName === 'MARK').textContent, passage);
+  assert.ok(visibleText($('dbody')).includes(prefix));
+  assert.ok(!drawer.some(e => ['SCRIPT', 'B'].includes(e.tagName)));
+});
+
+test('sentence caps quote count and length and ignores short or unverified quotes', () => {
+  const { ctx } = setup();
+  const span = { id: 'ev', paper_id: 'p', title: 'Study', page: 1, text: 'word '.repeat(200) };
+  const quote = { evidence_id: 'ev', text: span.text, start: 0, end: 800 };
+  const row = ctx.lensSentence({ id: 's', text: 'Answer.', kind: 'reported_fact', evidence_ids: ['ev'],
+    quotes: [quote, quote, quote, quote], flags: [] }, [span]);
+  const quotes = descendants(row).filter(e => e.tagName === 'BLOCKQUOTE');
+  assert.equal(quotes.length, 3);
+  assert.ok(quotes.every(e => e.textContent.length <= 400));
+  const short = ctx.lensSentence({ id: 's', text: 'Answer.', kind: 'reported_fact', evidence_ids: ['ev'],
+    quotes: [{ ...quote, text: 'word' }, { evidence_id: 'ev', text: 'three whole words' }], flags: [] }, [span]);
+  assert.equal(descendants(short).filter(e => e.tagName === 'BLOCKQUOTE').length, 0);
+});
+
+test('a local model notice does not open the cloud dialog and is shown in the status line', async () => {
+  const { ctx, $, calls } = setup();
+  let confirmations = 0;
+  ctx.post = async (path, body) => {
+    calls.push({ path, body });
+    return path === '/api/preview' ? { blocked_reasons: [], remote: false, requires_approval: false,
+      model_notices: ['starts llama-server; the model loads on first use'] } : { id: 'job' };
+  };
+  ctx.confirmLensPreview = async () => { confirmations++; return true; };
+  ctx.startLensTask('ask', '/api/ask', {}, 'lens-ask-status', false);
+  await flush();
+  assert.equal(confirmations, 0);
+  assert.equal(calls.filter(c => c.path === '/api/ask').length, 1);
+  assert.equal(calls.find(c => c.path === '/api/ask').body.approved, undefined);
+});
+
+test('the partial-quote flag is labelled and neutral, not a warning', async () => {
+  const { ctx, $ } = setup();
+  ctx.lensBadges($('badges'), [], ['citation_without_quote', 'unquoted_fact']);
+  const badges = $('badges').children[0].children;
+  assert.deepEqual(badges.map(b => b.textContent), ['Not every citation quoted', 'No exact quote']);
+  assert.deepEqual(badges.map(b => b.className), ['badge neutral', 'badge warning']);
 });

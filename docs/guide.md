@@ -480,6 +480,17 @@ unknown citations are removed and uncited facts become `unsupported`. Numeric ch
 normalised numbers (including decimal, scientific and thousands notation) with the cited
 text actually sent to the model. These checks validate citations and numbers, not semantic truth.
 
+Ask also shows verified exact supporting quotes under each sentence (up to three, 400 characters each).
+Click a quote's paper/page chip to open its evidence with the original passage highlighted. Quotes are
+checked against the evidence actually sent: the words must match in order, while case, spacing, punctuation,
+PDF ligatures (ﬁ) and line-break hyphenation may differ; hyphens inside words, signs, comparison symbols and
+digits must match exactly.
+`quote_not_in_evidence` ("Quote not in evidence") means a proposed quote was dropped;
+`unquoted_fact` ("No exact quote") means a cited fact has no verified quote. Both enter the needs-review
+queue even if an audit supports the sentence. "Not every citation quoted" is informational: the sentence has a
+verified quote, but another evidence span it cites has none. Research briefs include verified quotes below each
+sentence.
+
 ```bash
 litforge ask "How were parameters inferred?" --profile local --preview
 litforge ask "How were parameters inferred?" --sensitive --json

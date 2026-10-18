@@ -16,8 +16,8 @@ from litforge.analysis.runs import get_run
     ("reported_fact", ["bad"], "A claim.", "unsupported", ["uncited_fact"]),
     ("interpretation", [], "An inference.", "interpretation", ["uncited_interpretation"]),
     ("unsupported", [], "Unknown.", "unsupported", []),
-    ("reported_fact", ["valid"], "Gain 3.250 and 1200, 20%.", "reported_fact", []),
-    ("reported_fact", ["valid"], "Gain 3.2.", "reported_fact", ["number_not_in_evidence"]),
+    ("reported_fact", ["valid"], "Gain 3.250 and 1200, 20%.", "reported_fact", ["unquoted_fact"]),
+    ("reported_fact", ["valid"], "Gain 3.2.", "reported_fact", ["number_not_in_evidence", "unquoted_fact"]),
     ("interpretation", ["valid"], "Gain 99%.", "interpretation", ["number_not_in_evidence"]),
 ])
 def test_sentence_rules(conn: sqlite3.Connection, kind: str, ids: list[str], text: str,
@@ -56,7 +56,7 @@ def test_prompt_storage_and_packet_validation(conn: sqlite3.Connection) -> None:
     long = span.model_copy(update={"text": "Results " + "word " * 500 + "9999"})
     sentences, _ = validate_sentences([SentenceDraft(text="9999", kind="reported_fact", evidence_ids=[span.id])],
                                       to_packet([long]))
-    assert sentences[0].flags == ["number_not_in_evidence"]
+    assert sentences[0].flags == ["number_not_in_evidence", "unquoted_fact"]
 
 
 def test_extra_sentences_are_truncated(conn: sqlite3.Connection) -> None:
@@ -145,3 +145,212 @@ def test_retrieval_can_be_limited_to_selected_papers(conn: sqlite3.Connection) -
     seed(conn, "pb", "Results: gain improves outcomes too.")
     assert {h.paper_id for h in retrieve_for_question(conn, "gain outcomes", "proj")} == {"pa", "pb"}
     assert {h.paper_id for h in retrieve_for_question(conn, "gain outcomes", "proj", paper_ids=["pb"])} == {"pb"}
+
+
+@pytest.mark.parametrize(("quote", "passage"), [
+    ("Gain improves patient outcomes.", "Gain improves patient outcomes."),
+    ("gain improves patient outcomes.", "GAIN  improves\npatient\t outcomes."),
+    ("The treatment improves outcomes.", "The treat-\nment improves outcomes."),
+    ("The treatment improves outcomes.", "The treat\u00adment improves outcomes."),
+    ('The “gain” is high—again.', 'The "gain" is high-again.'),
+    ("STRASSE has better outcomes.", "Straße has better outcomes."),
+    # Real PDF text (Averting A Crisis, Hermans et al.): ligatures, hyphenation across a blank line, punctuation.
+    ("overconfident posterior approximations, unreliable for scientific use",
+     "overconﬁdent posterior approximations, unreliable for scientiﬁc use"),
+    ("variants of Approximate Bayesian Computation", "variants of Approxi-\n\nmate Bayesian Computation"),
+    ("whether it is correct, or rather: suitable to a use case",
+     "whether it is correct, or rather, suitable to a use case"),
+    ("trained with simulation-based inference here", "trained with simulation-\nbased inference here"),
+    ("budgets of 10-20 thousand simulations", "budgets of 10–20 thousand simulations"),
+    # Real PDF text (Benchmarking SBI): a stray glyph from a nearby equation on its own line.
+    ("based on the distribution of θ′ samples.", "based on the distribution of θ′\n\nR\n\nsamples."),
+    ("a change of -3.5 points overall", "a change of −3.5 points overall"),
+])
+def test_locate_quote_original_offsets(quote: str, passage: str) -> None:
+    from litforge.analysis.validation import locate_quote
+
+    text = "Before. " + passage + " After."
+    offsets = locate_quote(quote, text)
+    assert offsets is not None
+    assert text[slice(*offsets)] == passage
+    assert offsets == (8, 8 + len(passage))
+
+
+@pytest.mark.parametrize("quote", ["", "   ", "absent passage here"])
+def test_locate_quote_not_found(quote: str) -> None:
+    from litforge.analysis.validation import locate_quote
+
+    assert locate_quote(quote, "Results improve patient outcomes.") is None
+
+
+@pytest.mark.parametrize(("quote", "text"), [
+    ("the score was 0.95 overall", "the score was 9.5 overall"),
+    ("the score was 0.95 overall", "the score was 095 overall"),
+    ("gain worsens patient outcomes", "gain improves patient outcomes"),
+    ("The score was -0.95 overall", "The score was 0.95 overall"),
+    ("the effect was significant with p < 0.05 here", "the effect was significant with p > 0.05 here"),
+    ("accuracy improved by 20% overall", "accuracy improved by 20 overall"),
+    ("they will resign the contract tomorrow", "they will re-sign the contract tomorrow"),
+    ("they will re-sign the contract tomorrow", "they will resign the contract tomorrow"),
+    ("gain improves patient outcomes", "again improves patient outcomes"),
+    ("improves patient out", "improves patient outcomes"),
+])
+def test_locate_quote_keeps_numbers_and_words_exact(quote: str, text: str) -> None:
+    from litforge.analysis.validation import locate_quote
+
+    assert locate_quote(quote, text) is None
+
+
+@pytest.mark.parametrize(("quote", "quote_id", "expected_flags", "kept"), [
+    ("Gain improves patient outcomes.", "cited", [], True),
+    ("gain improves patient outcomes.", "cited", [], True),
+    ("Gain worsens patient outcomes.", "cited", ["quote_not_in_evidence", "unquoted_fact"], False),
+    ("Gain improves patient outcomes.", "other", ["quote_not_in_evidence", "unquoted_fact"], False),
+    ("Gain", "cited", ["quote_not_in_evidence", "unquoted_fact"], False),  # one word cannot identify a passage
+    ("", "cited", ["unquoted_fact"], False),  # an empty quote is ignored
+])
+def test_sentence_quotes(conn: sqlite3.Connection, quote: str, quote_id: str,
+                         expected_flags: list[str], kept: bool) -> None:
+    span = seed(conn, text="Results: Gain  improves\npatient outcomes.")
+    other = seed(conn, "q", text=span.text)
+    draft = SentenceDraft.model_validate({"text": "Gain improves outcomes.", "kind": "reported_fact",
+        "evidence_ids": [span.id], "quotes": [{"evidence_id": span.id if quote_id == "cited" else other.id,
+                                               "text": quote, "start": 999, "end": 1000}]})
+    result, _ = validate_sentences([draft], to_packet([span, other]))
+    sentence = result[0]
+    assert sentence.flags == expected_flags
+    assert sentence.needs_review == bool(expected_flags)
+    assert len(sentence.quotes) == int(kept)
+    if kept:
+        matched = sentence.quotes[0]
+        assert matched.start == 9 and matched.end == len(span.text)
+        assert span.text[matched.start:matched.end] == "Gain  improves\npatient outcomes."
+
+
+def test_quotes_limits_and_multiple_papers(conn: sqlite3.Connection) -> None:
+    from litforge.analysis.ask import Quote
+
+    first = seed(conn, text="Results: Gain improves patient outcomes.")
+    second = seed(conn, "q", text="Results: Treatment reduces patient symptoms.")
+    quotes = [{"evidence_id": s.id, "text": s.text} for s in [first, second, first, second]]
+    draft = SentenceDraft.model_validate({"text": "Both improve outcomes.", "kind": "reported_fact",
+                                         "evidence_ids": [first.id, second.id], "quotes": quotes})
+    result, _ = validate_sentences([draft], to_packet([first, second]))
+    assert len(draft.quotes) == len(result[0].quotes) == 3
+    assert {q.evidence_id for q in result[0].quotes} == {first.id, second.id}
+    assert result[0].flags == []
+    assert len(Quote(evidence_id=first.id, text="word " * 200).text) <= 400
+
+
+def test_quotes_reject_unsent_text(conn: sqlite3.Connection) -> None:
+    span = seed(conn, text="Results gain " + "word " * 500 + "An unseen supporting passage.")
+    draft = SentenceDraft.model_validate({"text": "Gain improves outcomes.", "kind": "reported_fact",
+        "evidence_ids": [span.id], "quotes": [{"evidence_id": span.id, "text": "An unseen supporting passage."}]})
+    result, _ = validate_sentences([draft], to_packet([span]))
+    assert result[0].quotes == []
+    assert result[0].flags == ["quote_not_in_evidence", "unquoted_fact"]
+    other = seed(conn, "q")
+    result, invalid = validate_sentences([draft], to_packet([other]))
+    assert result[0].quotes == [] and invalid == [span.id]
+    assert "quote_not_in_evidence" in result[0].flags
+
+
+def test_quote_round_trip_and_prompt(conn: sqlite3.Connection) -> None:
+    span = seed(conn, text="Results: The treat-\nment improves outcomes.")
+    gw, _ = gateway(conn, {"sentences": [{"text": "Treatment improves outcomes.", "kind": "reported_fact",
+        "evidence_ids": [span.id], "quotes": [{"evidence_id": span.id,
+        "text": "The treatment improves outcomes."}]}], "insufficient": False})
+    answer = ask(conn, gw, "outcomes")
+    quote = answer.sentences[0].quotes[0]
+    assert quote.start is not None and quote.end is not None
+    assert span.text[quote.start:quote.end] == "The treat-\nment improves outcomes."
+    assert get_answer(conn, answer.run_id) == answer
+    assert ASK_PROMPT_VERSION == "ask-v3"
+    prompt = ask_messages("outcomes?", to_packet([span]), [span])[0]["content"]
+    assert "quotes" in prompt and "verbatim" in prompt and "never paraphrase" in prompt.lower()
+    conn.execute("UPDATE answer_sentences SET quotes_json='[]'")
+    assert get_answer(conn, answer.run_id).sentences[0].quotes == []
+
+
+def test_quote_flags_stay_in_queue_after_supported_audit(conn: sqlite3.Connection) -> None:
+    from litforge.analysis.audit import audit_answer
+    from litforge.analysis.review import review_queue
+
+    span = seed(conn)
+    gw, _ = gateway(conn, {"sentences": [{"text": "Gain improves outcomes.", "kind": "reported_fact",
+        "evidence_ids": [span.id], "quotes": [{"evidence_id": span.id, "text": "A fabricated supporting passage."}]}],
+        "insufficient": False})
+    answer = ask(conn, gw, "gain")
+    auditor, _ = gateway(conn, {"verdict": "supported", "note": "checked"})
+    audit_answer(conn, auditor, answer.run_id)
+    items = review_queue(conn)
+    assert len(items) == 1 and items[0].target_id == answer.sentences[0].id
+    assert items[0].flags == ["quote_not_in_evidence", "unquoted_fact"]
+
+
+def test_ask_quotes_use_fitted_packet_and_original_offsets(conn: sqlite3.Connection,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    span = seed(conn, text="Results: The treat-\nment improves outcomes. An unseen supporting passage.")
+    payload = {"sentences": [{"text": f"Treatment improves outcomes ({span.id}).", "kind": "reported_fact",
+        "evidence_ids": [span.id], "quotes": [
+            {"evidence_id": span.id, "text": "The treatment improves outcomes."},
+            {"evidence_id": span.id, "text": "An unseen supporting passage."}]}], "insufficient": False}
+    gw, _ = gateway(conn, payload)
+    fitted = to_packet([span.model_copy(update={"text": "Results: The treatment improves outcomes."})])
+    monkeypatch.setattr(gw, "fit_evidence", lambda task, packet, build, *a, **kw: (fitted, build(fitted)))
+    answer = ask(conn, gw, "outcomes")
+    sentence = answer.sentences[0]
+    assert sentence.text == "Treatment improves outcomes." and sentence.flags == ["quote_not_in_evidence"]
+    assert len(sentence.quotes) == 1
+    quote = sentence.quotes[0]
+    assert quote.start == 9 and quote.end == span.text.index(" An unseen")
+    assert span.text[quote.start:quote.end] == "The treat-\nment improves outcomes."
+
+
+def test_punctuation_is_not_a_quote_word(conn: sqlite3.Connection) -> None:
+    span = seed(conn, text="Results: Gain .")
+    draft = SentenceDraft.model_validate({"text": "Gain improves outcomes.", "kind": "reported_fact",
+        "evidence_ids": [span.id], "quotes": [{"evidence_id": span.id, "text": "Gain ."}]})
+    result, _ = validate_sentences([draft], to_packet([span]))
+    assert result[0].quotes == [] and result[0].flags == ["quote_not_in_evidence", "unquoted_fact"]
+
+
+def test_migration_keeps_old_answers_without_quotes(conn: sqlite3.Connection) -> None:
+    from litforge.storage.db import migrate, schema_version
+
+    seed(conn)
+    gw, _ = gateway(conn)
+    answer = ask(conn, gw, "gain")
+    conn.execute("ALTER TABLE answer_sentences DROP COLUMN quotes_json")
+    conn.execute("PRAGMA user_version=18")
+    assert migrate(conn) == ["0019_answer_quotes.sql"]
+    assert schema_version(conn) == 19
+    loaded = get_answer(conn, answer.run_id)
+    assert loaded.sentences[0].text == answer.sentences[0].text
+    assert loaded.sentences[0].quotes == []
+
+
+
+def test_sentence_citing_two_spans_with_one_quote_is_flagged_but_not_sent_to_review() -> None:
+    from litforge.analysis.ask import Quote, SentenceDraft, validate_sentences
+    from litforge.llm.evidence import EvidenceItem, EvidencePacket
+    packet = EvidencePacket(items=[EvidenceItem(id="a", paper_id="p", text="Gain improves patient outcomes.", page=1),
+                                   EvidenceItem(id="b", paper_id="q", text="Loss reduces patient outcomes.", page=1)])
+    draft = SentenceDraft(text="Gain helps and loss hurts.", kind="reported_fact", evidence_ids=["a", "b"],
+                          quotes=[Quote(evidence_id="a", text="Gain improves patient outcomes.")])
+    (sentence,), _ = validate_sentences([draft], packet)
+    assert sentence.flags == ["citation_without_quote"] and not sentence.needs_review
+
+
+
+def test_short_exact_quote_is_kept_and_short_wrong_quote_is_flagged() -> None:
+    from litforge.analysis.ask import Quote, SentenceDraft, validate_sentences
+    from litforge.llm.evidence import EvidenceItem, EvidencePacket
+    packet = EvidencePacket(items=[EvidenceItem(id="a", paper_id="p", text="Results: No change. Then more.", page=1)])
+    ok = SentenceDraft(text="There was no change.", kind="reported_fact", evidence_ids=["a"],
+                       quotes=[Quote(evidence_id="a", text="No change.")])
+    bad = SentenceDraft(text="Gain rose.", kind="reported_fact", evidence_ids=["a"],
+                        quotes=[Quote(evidence_id="a", text="Gain.")])
+    (kept, flagged), _ = validate_sentences([ok, bad], packet)
+    assert kept.flags == [] and kept.quotes[0].text == "No change."
+    assert flagged.flags == ["quote_not_in_evidence", "unquoted_fact"]

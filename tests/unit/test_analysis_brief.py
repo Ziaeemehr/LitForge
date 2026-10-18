@@ -17,7 +17,7 @@ def test_brief_provenance_and_refusal(conn: sqlite3.Connection, tmp_path: Path) 
     out = tmp_path / "brief.md"
     assert write_brief(conn, answer.run_id, out=out) == out
     text = out.read_text()
-    for part in [span.id, "fake", "ask-v2", "lexical", "gain", "Audit", "Review", "p.1"]:
+    for part in [span.id, "fake", "ask-v3", "lexical", "gain", "Audit", "Review", "p.1"]:
         assert part in text
     conn.execute("UPDATE answer_sentences SET evidence_ids_json='[]' WHERE run_id=?", (answer.run_id,))
     with pytest.raises(ValueError, match="evidence|label"):
@@ -77,3 +77,21 @@ def test_brief_untrusted_text_and_quote_limit(conn: sqlite3.Connection, tmp_path
     quote = text.split(" — \"")[-1].rstrip().removesuffix("\"")
     assert quote.endswith("…") and not quote.endswith("wor…")
     assert len(quote) < 500
+
+
+def test_brief_verified_quotes_are_under_sentence_and_escaped(conn: sqlite3.Connection, tmp_path: Path) -> None:
+    from litforge.analysis.audit import audit_answer
+    from litforge.analysis.markdown_safe import inert
+
+    quote = '<script> [click](https://evil) `code` **bold**'
+    span = seed(conn, text="Results gain " + quote)
+    gw, _ = gateway(conn, {"sentences": [{"text": "Gain improves outcomes.", "kind": "reported_fact",
+        "evidence_ids": [span.id], "quotes": [{"evidence_id": span.id, "text": quote}]}], "insufficient": False})
+    answer = ask(conn, gw, "gain")
+    auditor, _ = gateway(conn, {"verdict": "supported", "note": "checked"})
+    audited = audit_answer(conn, auditor, answer.run_id)
+    assert audited[0].quotes == answer.sentences[0].quotes
+    text = write_brief(conn, answer.run_id, out=tmp_path / "brief.md").read_text().split("## Audit")[0]
+    assert text.index("Gain improves outcomes.") < text.index("> " + inert(quote))
+    assert f"[^{span.id}]" in text.split("\n> ", 1)[1]
+    assert "<script>" not in text and "[click](" not in text

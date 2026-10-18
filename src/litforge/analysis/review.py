@@ -87,7 +87,7 @@ def record_review(conn: sqlite3.Connection, target_kind: Literal["sentence", "ce
                                                    packet)
                 sentence = validated[0]
                 conn.execute("UPDATE answer_sentences SET text=?,kind=?,flags_json=?,audit_verdict=NULL,"
-                             "audit_note='',audit_model=NULL WHERE id=?",
+                             "audit_note='',audit_model=NULL,quotes_json='[]' WHERE id=?",
                              (sentence.text, sentence.kind, canonical_json(sentence.flags), target_id))
             else:
                 # Validate the edit against its column before recording the override.

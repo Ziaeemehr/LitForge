@@ -110,7 +110,10 @@ def lens_server(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Lens
             return {'status': 'reported', 'value': 3.25, 'unit': 'ms',
                     'evidence_ids': [evidence_id(messages)], 'note': UNTRUSTED}
         return {'sentences': [{'text': 'Gain 3.25. ' + UNTRUSTED, 'kind': 'interpretation',
-                               'evidence_ids': [evidence_id(messages)]}], 'insufficient': False}
+                               'evidence_ids': [evidence_id(messages)],
+                               'quotes': [{'evidence_id': evidence_id(messages),
+                                           'text': 'Results: gain 3.25 and 1,200 participants, 20%.'}]}],
+                'insufficient': False}
 
     fake = FakeLlm(reply)
     app = App(Paths(tmp_path / 'data'), config,
@@ -215,8 +218,12 @@ def test_answer_audit_and_sentence_reviews(lens_server: LensServer) -> None:
     sentence = answer['sentences'][0]
     assert sentence['needs_review'] and sentence['audit_focus']
     assert UNTRUSTED in sentence['text']
+    assert sentence['quotes'][0]['evidence_id'] == sentence['evidence_ids'][0]
+    quote = sentence['quotes'][0]
+    assert answer['evidence'][0]['text'][quote['start']:quote['end']] == quote['text']
     job = server.job('/api/audit', {'run_id': answer['run_id']})
     assert job['status'] == 'done' and job['report']['sentences'][0]['audit_verdict'] == 'partial'
+    assert job['report']['sentences'][0]['quotes'] == sentence['quotes']
     _, queue = server.call('/api/review?project=demo')
     item = next(i for i in queue if i['target_id'] == sentence['id'])
     assert item['run_id'] == answer['run_id'] and item['evidence'][0]['page'] == 1
@@ -228,6 +235,7 @@ def test_answer_audit_and_sentence_reviews(lens_server: LensServer) -> None:
     _, updated = server.call('/api/answers/' + answer['run_id'])
     assert updated['sentences'][0]['text'] == 'Edited gain 3.25.'
     assert updated['sentences'][0]['review_status'] == 'edited'
+    assert updated['sentences'][0]['quotes'] == []
 
 
 @pytest.mark.parametrize('view', ['matrix', 'sentence_review', 'cell_review'])

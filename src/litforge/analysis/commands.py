@@ -18,6 +18,7 @@ from litforge.analysis import audit as audits
 from litforge.analysis.brief import write_brief
 from litforge.analysis.evaluation import evaluate_answers, evaluate_matrix, load_benchmark
 from litforge.analysis.gateway import CallPreview, GatewayError, ModelGateway
+from litforge.analysis.markdown_safe import excerpt
 from litforge.analysis.matrix import (
     MatrixColumn,
     add_column,
@@ -112,14 +113,21 @@ def run_ask(ctx: typer.Context, question: str, project: str | None, k: int, prof
         typer.echo(f"Answer run: {answer.run_id}")
         for sentence in answer.sentences:
             markers = "".join(f"[{ranks[e]}]" for e in sentence.evidence_ids)
-            flags = ", ".join(sentence.flags)
+            labels = {"quote_not_in_evidence": "Quote not in evidence", "unquoted_fact": "No exact quote",
+                      "citation_without_quote": "Not every citation quoted",
+                      "number_not_in_evidence": "Number not in evidence", "uncited_fact": "No citation",
+                      "uncited_interpretation": "No citation", "invalid_kind": "Invalid sentence kind",
+                      "from_image": "From image"}
+            flags = ", ".join(labels.get(f, f.replace("_", " ").capitalize()) for f in sentence.flags)
             typer.echo(f"{sentence.text}{markers} [{sentence.kind}; audit={sentence.audit_verdict or "not audited"}"
                        + (f"; {flags}" if flags else "") + "]")
+            for quote in sentence.quotes[:3]:
+                typer.echo(f"   > “{excerpt(quote.text)}” [{ranks[quote.evidence_id]}]")
         for rank, span in enumerate(answer.evidence, 1):
-            quote = " ".join(span.text.split())
-            if len(quote) > 300:
-                quote = quote[:299].rsplit(" ", 1)[0] + "…"
-            typer.echo(f"{rank}. [{span.id}] {span.citation} — {span.section or span.kind}\n   “{quote}”")
+            passage = " ".join(span.text.split())
+            if len(passage) > 300:
+                passage = passage[:299].rsplit(" ", 1)[0] + "…"
+            typer.echo(f"{rank}. [{span.id}] {span.citation} — {span.section or span.kind}\n   “{passage}”")
 
 
 def audit(ctx: typer.Context, run_id: str, profile: Profile = None, approve: Approve = False,

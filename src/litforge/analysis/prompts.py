@@ -8,7 +8,7 @@ from html import escape
 from litforge.analysis.ledger import EvidenceSpan
 from litforge.llm.evidence import EvidencePacket
 
-ASK_PROMPT_VERSION = "ask-v2"
+ASK_PROMPT_VERSION = "ask-v3"
 AUDIT_PROMPT_VERSION = "audit-v2"
 MATRIX_PROMPT_VERSION = "matrix-v2"
 
@@ -32,7 +32,10 @@ def ask_messages(question: str, packet: EvidencePacket, spans: Sequence[Evidence
                  "Answer only from the evidence, briefly, at most 8 sentences. Every sentence cites evidence IDs. "
                  "Use kind reported_fact for directly stated facts, interpretation for inferences across evidence, "
                  "or unsupported for needed information absent from evidence. Say when evidence is insufficient. "
-                 "Return JSON with sentences (text, kind, evidence_ids) and insufficient."),
+                 "For each cited evidence ID, include quotes with evidence_id and text: copy the shortest "
+                 "verbatim supporting passage (one sentence) from that evidence; never paraphrase. "
+                 "Use at least 2 words per quote, at most 400 characters, and at most 3 quotes per sentence. "
+                 "Return JSON with sentences (text, kind, evidence_ids, quotes) and insufficient."),
             dict(role="user", content=question + "\n" + evidence_text(packet, spans))]
 
 

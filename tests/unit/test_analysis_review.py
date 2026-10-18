@@ -57,7 +57,8 @@ def test_edits_invalidate_sentence_audit_and_keep_cell_override(conn: sqlite3.Co
     audit_answer(conn, gw, answer.run_id)
     record_review(conn, "sentence", answer.sentences[0].id, "edit", new_value="Gain 99.")
     edited = get_answer(conn, answer.run_id).sentences[0]
-    assert edited.audit_verdict is None and edited.flags == ["number_not_in_evidence"]
+    assert edited.audit_verdict is None and edited.flags == ["number_not_in_evidence", "unquoted_fact"]
+    assert edited.quotes == []
     fake.answer = lambda m: {"status": "reported", "value": 99, "evidence_ids": [evidence_id(m)]}
     matrix = create_matrix(conn, "proj", "m", "gain", [MatrixColumn(key="gain", label="Gain", instruction="gain",
                                                                                 type="number")])

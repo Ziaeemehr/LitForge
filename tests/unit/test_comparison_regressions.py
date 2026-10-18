@@ -111,7 +111,7 @@ def test_evidence_ids_removed_before_validation_and_storage(suffix: str) -> None
     ids = ["ev_abcdef0123456789"]
     packet = EvidencePacket(items=[EvidenceItem(id=ids[0], paper_id="p", text="Gain is 3.25", page=1)])
     sentences, invalid = validate_sentences([SentenceDraft(text=raw, kind="reported_fact", evidence_ids=ids)], packet)
-    assert sentences[0].flags == [] and invalid == []
+    assert sentences[0].flags == ["unquoted_fact"] and invalid == []
     assert sentences[0].text == "Gain is 3.25."
     assert sentences[0].evidence_ids == ids
     assert GapSentence(text=raw, evidence_ids=ids).text == "Gain is 3.25."

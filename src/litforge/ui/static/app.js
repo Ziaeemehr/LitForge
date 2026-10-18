@@ -2034,6 +2034,8 @@
     reported_fact: 'Reported', interpretation: 'Interpretation', unsupported: 'Unsupported',
     reported: 'Reported', not_reported: 'Not reported', not_found: 'Not found',
     not_applicable: 'Not applicable', error: 'Error',
+    quote_not_in_evidence: 'Quote not in evidence', unquoted_fact: 'No exact quote',
+    citation_without_quote: 'Not every citation quoted',
     number_not_in_evidence: 'Number not in evidence', uncited_fact: 'No citation',
     uncited_interpretation: 'No citation', uncited_value: 'No citation',
     option_mismatch: 'Option not allowed', type_mismatch: 'Type mismatch',
@@ -2086,7 +2088,7 @@
       if (!value) return;
       var label = lensLabel(value), key = String(value).toLowerCase();
       if (!label) return;
-      var severity = flag || ['partial', 'unsupported', 'contradicted', 'contradicts', 'uncertain', 'exclude', 'single_source', 'unsupported_hypothesis', 'stale'].indexOf(key) >= 0 ? 'warning' :
+      var severity = (flag && key !== 'citation_without_quote') || ['partial', 'unsupported', 'contradicted', 'contradicts', 'uncertain', 'exclude', 'single_source', 'unsupported_hypothesis', 'stale'].indexOf(key) >= 0 ? 'warning' :
         ['supported', 'supports', 'replicates', 'include'].indexOf(key) >= 0 ? 'ok' : 'neutral';
       badges.appendChild(lensNode('span', label, 'badge ' + severity));
     }
@@ -2095,16 +2097,39 @@
     parent.appendChild(badges);
   }
 
-  function lensEvidence(parent, spans) {
+  function lensQuoteRanges(text, ranges) {
+    var length = Array.from(text).length, merged = [];
+    (ranges || []).filter(function (r) {
+      return Number.isInteger(r.start) && Number.isInteger(r.end) && r.start >= 0 && r.end > r.start && r.end <= length;
+    }).sort(function (a, b) { return a.start - b.start; }).forEach(function (r) {
+      var last = merged[merged.length - 1];
+      if (last && r.start <= last.end) last.end = Math.max(last.end, r.end);
+      else merged.push({ start: r.start, end: r.end });
+    });
+    return merged;
+  }
+
+  function lensEvidence(parent, spans, highlights) {
     if (!spans.length) parent.appendChild(lensNode('p', 'No cited evidence.', 'hint'));
     spans.forEach(function (s) {
       var card = lensNode('article', null, 'lens-evidence');
       card.appendChild(lensNode('h3', s.title || s.paper_id));
       card.appendChild(lensNode('p', [s.section || s.kind, 'p.' + s.page].join(' · '), 'meta'));
       var fullText = String(s.text || ''), quote = lensEvidenceQuote(fullText);
-      var excerpt = lensNode('blockquote', quote.text);
+      var ranges = lensQuoteRanges(fullText, (highlights || []).filter(function (r) { return r.evidence_id === s.id; }));
+      var excerpt = lensNode('blockquote', ranges.length ? null : quote.text);
+      if (ranges.length) {
+        // Python offsets count Unicode code points; JS string offsets count UTF-16 units.
+        var chars = Array.from(fullText), cursor = 0;
+        ranges.forEach(function (r) {
+          excerpt.appendChild(document.createTextNode(chars.slice(cursor, r.start).join('')));
+          excerpt.appendChild(lensNode('mark', chars.slice(r.start, r.end).join('')));
+          cursor = r.end;
+        });
+        excerpt.appendChild(document.createTextNode(chars.slice(cursor).join('')));
+      }
       card.appendChild(excerpt);
-      if (quote.truncated) {
+      if (quote.truncated && !ranges.length) {
         var toggle = lensButton('Show more', function () {
           var expanded = toggle.textContent === 'Show less';
           excerpt.textContent = expanded ? lensEvidenceQuote(fullText).text : fullText;
@@ -2119,11 +2144,11 @@
     });
   }
 
-  function lensDrawer(title, spans, target) {
+  function lensDrawer(title, spans, target, highlights) {
     drawerRequest++;
     $('dhead').replaceChildren(lensNode('h2', title));
     $('dbody').replaceChildren();
-    lensEvidence($('dbody'), spans);
+    lensEvidence($('dbody'), spans, highlights);
     if (target) lensReviewEditor($('dbody'), target);
     $('drawer').classList.add('open'); $('drawer').setAttribute('aria-hidden', 'false');
     $('drawer-close').focus();
@@ -2165,6 +2190,17 @@
       sentence.review_status], sentence.flags);
     if (sentence.audit_note) row.appendChild(lensNode('p', sentence.audit_note, 'hint'));
     var cited = evidence.filter(function (e) { return sentence.evidence_ids.indexOf(e.id) >= 0; });
+    (sentence.quotes || []).slice(0, 3).forEach(function (quote) {
+      var span = cited.find(function (s) { return s.id === quote.evidence_id; });
+      var text = String(quote.text || '').slice(0, 400).trim();
+      var words = text.split(/\s+/).filter(function (word) { return /[\p{L}\p{N}]/u.test(word); });
+      if (!span || words.length < 2 || !lensQuoteRanges(span.text, [quote]).length) return;
+      var block = lensNode('blockquote', text, 'lens-quote');
+      block.appendChild(lensButton((span.title || span.paper_id) + ' · p.' + span.page, function () {
+        lensDrawer('Evidence', [span], null, [quote]);
+      }, 'btn small quote-chip'));
+      row.appendChild(block);
+    });
     var chips = lensNode('div', null, 'lens-actions');
     cited.forEach(function (s) {
       chips.appendChild(lensButton((s.title || s.paper_id) + ' · p.' + s.page, function () {
@@ -2257,6 +2293,11 @@
   function confirmLensPreview(plan) {
     return new Promise(function (resolve) {
       var dialog = $('lens-preview');
+      $('lens-preview-title').textContent = plan.remote ? 'Send evidence to a remote model?' : 'Run this action?';
+      $('lens-preview-hint').textContent = plan.remote ?
+        'The listed evidence will leave this computer. Confirm to start this action.' :
+        'Local models only; nothing leaves this computer. Confirm to start this action.';
+      $('lens-preview-confirm').textContent = plan.remote ? 'Confirm and send' : 'Confirm';
       $('lens-preview-content').textContent = 'Profile: ' + plan.profiles.join(', ') + '\nProvider: ' + plan.providers.join(', ') +
         '\nModel: ' + plan.models.join(', ') + '\nCalls: ' + plan.number_of_calls + '\nEvidence spans: ' + plan.evidence_ids_count +
         '\nEstimated input tokens: ' + plan.estimated_input_tokens + '\nMaximum cost: ' +
@@ -2291,12 +2332,14 @@
     $('lens-run-audit').disabled = true;
     post('/api/preview', body).then(function (plan) {
       if (plan.blocked_reasons.length) throw new Error('Action blocked: ' + plan.blocked_reasons.join(', '));
-      if (plan.remote || plan.requires_approval || (plan.model_notices || []).length) return confirmLensPreview(plan);
+      if (plan.remote || plan.requires_approval) return confirmLensPreview(plan);
+      // Local only: nothing leaves the computer, so inform without blocking (e.g. "starts llama-server").
+      if ((plan.model_notices || []).length) statusNode.textContent = plan.model_notices.join(' · ');
       return null;
     }).then(function (approved) {
       if (approved === false || project !== state.project) { lensBusy(false); return; }
       if (approved === true) body.approved = true;
-      statusNode.textContent = 'Starting…';
+      if (!statusNode.textContent) statusNode.textContent = 'Starting…';
       return post(path, body).then(function (job) {
         (function tick() {
           api('/api/jobs/' + job.id).then(function (j) {

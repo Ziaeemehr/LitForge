@@ -470,3 +470,7 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 #view-settings .task-checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .5rem; margin: 1rem 0; }
 #view-settings .models-profile a { overflow-wrap: anywhere; }
 @media (max-width: 600px) { #view-settings .models-profile { align-items: flex-start; } #view-settings .models-profile span { flex-basis: 100%; } }
+
+.lens-quote { margin: .6rem 0; padding: .5rem .8rem; border-left: 3px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+.lens-quote .quote-chip { display: block; margin-top: .4rem; }
+.lens-evidence mark { background: #ffe58a; color: #222; }

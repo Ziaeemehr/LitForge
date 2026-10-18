@@ -179,3 +179,30 @@ def test_cli_validation_error_hides_model_content(conn: sqlite3.Connection, path
     assert result.exit_code == 1
     assert secret not in result.output
     assert result.output.strip() == "ValidationError: invalid model response"
+
+
+def test_ask_prints_capped_quotes_and_readable_flags(conn: sqlite3.Connection, paths: Paths,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    from lens_fakes import gateway, seed
+
+    span = seed(conn, text="Results: " + "gain improves patient outcomes. " * 30)
+    payload = {"sentences": [
+        {"text": "Gain improves outcomes.", "kind": "reported_fact", "evidence_ids": [span.id],
+         "quotes": [{"evidence_id": span.id, "text": "gain improves patient outcomes. " * 20}]},
+        {"text": "Gain changes outcomes.", "kind": "reported_fact", "evidence_ids": [span.id],
+         "quotes": [{"evidence_id": span.id, "text": "An invented supporting passage."}]},
+    ], "insufficient": False}
+    _, fake = gateway(conn, payload)
+    original = ModelGateway.__init__
+
+    def init(self: ModelGateway, db: sqlite3.Connection, config: Config) -> None:
+        original(self, db, config, providers={"local": fake})
+
+    monkeypatch.setattr(ModelGateway, "__init__", init)
+    result = CliRunner().invoke(app, ["--data-dir", str(paths.root), "ask", "gain", "--no-audit"])
+    assert result.exit_code == 0, result.output
+    assert "Quote not in evidence" in result.output and "No exact quote" in result.output
+    assert "quote_not_in_evidence" not in result.output and "unquoted_fact" not in result.output
+    quote_lines = [line for line in result.output.splitlines() if line.startswith("   > ")]
+    assert len(quote_lines) == 1 and len(quote_lines[0].split("”")[0].removeprefix("   > “")) <= 400
+    assert result.output.index("Gain improves outcomes.") < result.output.index("   > ")
