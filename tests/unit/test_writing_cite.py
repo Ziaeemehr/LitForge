@@ -78,3 +78,8 @@ def test_cite_refuses_papers_outside_the_project(env) -> None:
     conn.execute("INSERT INTO papers(id,title,created_at,updated_at) VALUES ('px','Other','now','now')")
     with pytest.raises(LookupError):
         wc.cite(conn, doc, "px")
+
+
+def test_cited_keys_more_forms() -> None:
+    text = "\\Citet{d} \\cites{e}{f} x\\\\% \\cite{g}\n\\cite[see][p.~2]{a} 5\\% \\citeauthor*{b}"
+    assert wc.cited_keys(text) == ["d", "e", "f", "a", "b"]

@@ -140,3 +140,16 @@ def test_delete_moves_to_trash(env) -> None:
     target = wd.delete_document(conn, paths, doc.id)
     assert target.parent == paths.project_dir("demo") / "trash" and (target / "main.tex").is_file()
     assert not doc.folder.exists() and wd.list_documents(conn, paths, "demo") == []
+
+
+def test_restoring_the_oldest_snapshot_survives_rotation(env, monkeypatch) -> None:
+    conn, paths = env
+    doc = wd.create_document(conn, paths, "demo", "d")
+    monkeypatch.setattr(wd, "SNAPSHOT_EVERY_S", 0)
+    _, h = wd.read_file(doc, "main.tex")
+    for i in range(40):
+        h = wd.save_file(conn, doc, "main.tex", f"v{i}", h)
+    oldest = wd.list_snapshots(doc)[-1]
+    expected = (doc.folder / ".snapshots" / oldest["id"] / "main.tex").read_text()
+    assert "main.tex" in wd.restore_snapshot(conn, doc, oldest["id"])
+    assert wd.read_file(doc, "main.tex")[0] == expected

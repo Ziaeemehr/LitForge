@@ -209,3 +209,13 @@ def test_latexmkrc_refused_and_norc(env) -> None:
     (doc.folder / "latexmkrc").unlink()
     wc.compile_document(doc, paths, "xelatex")
     assert "-norc" in json.loads(record.read_text())["argv"]
+
+
+def test_parse_log_returns_to_main_after_a_closed_subfile() -> None:
+    log = ("(./main.tex (/usr/share/texmf/article.cls (size10.clo)) (./sections/a.tex\n"
+           "LaTeX Warning: Reference `x' on page 1 undefined on input line 3.\n)\n"
+           "LaTeX Warning: Citation `y' on page 1 undefined on input line 14.\n"
+           "! Undefined control sequence.\nl.12 \\foo\n)")
+    errors, warnings = wc.parse_log(log)
+    assert [(w.file, w.line) for w in warnings] == [("sections/a.tex", 3), ("main.tex", 14)]
+    assert [(e.file, e.line) for e in errors] == [("main.tex", 12)]

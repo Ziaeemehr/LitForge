@@ -81,7 +81,8 @@ def test_entry_escaping_and_fields(conn) -> None:
         doi="10.1/x_y", oa_url="https://example.org/a_b?x=1%20")
     entry = bibtex_entry(conn, "p1")
     assert entry.startswith("@article{obrien2020dna,")
-    assert r"\&" in entry and r"\%" in entry and r"\{braces\}" in entry and "{DNA}" in entry
+    assert r"\&" in entry and r"\%" in entry and "{DNA}" in entry
+    assert r"\textbraceleft{}braces\textbraceright{}" in entry
     assert "author = {O'Brien, Pat and Lee, Ann}" in entry
     assert "url = {https://example.org/a_b?x=1%20}" in entry
     assert balanced(entry)
@@ -133,3 +134,21 @@ def test_cli_export_bibtex(tmp_path: Path) -> None:
     result = CliRunner().invoke(cli.app, ["--data-dir", str(tmp_path), "export", "-p", "demo", "--format", "bibtex"])
     assert result.exit_code == 0, result.output
     assert result.output.startswith("@misc{lee2020one,")
+
+
+def test_literal_braces_doi_and_and_names(conn) -> None:
+    add(conn, "p1", "Sets {A and B", ["Research and Development Group", "Ann Lee"], doi="10.1002/x_y")
+    entry = bibtex_entry(conn, "p1")
+    assert balanced(entry) and "\\textbraceleft{}" in entry
+    assert "doi = {10.1002/x_y}" in entry
+    assert "author = {{Group, Research and Development} and Lee, Ann}" in entry
+
+
+def test_stray_markers_do_not_freeze_entries(conn, tmp_path: Path) -> None:
+    add(conn, "p1", "One", ["Ann Lee"])
+    bib = tmp_path / "references.bib"
+    write_bib(conn, ["p1"], bib)
+    bib.write_text(bib.read_text().replace(BEGIN_MARK, ""), encoding="utf-8")
+    write_bib(conn, ["p1"], bib)
+    text = bib.read_text()
+    assert text.count(END_MARK) == 1 and text.count(BEGIN_MARK) == 1

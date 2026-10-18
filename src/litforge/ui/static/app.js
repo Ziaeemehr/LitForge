@@ -2507,7 +2507,10 @@
     window.addEventListener('beforeunload', function (e) {
       if (W.doc && W.dirty && !W.conflictHash) {  // keepalive lets the save finish while the page closes
         fetch('/api/write/save', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ doc: W.doc.id, name: W.file, text: W.editor.getText(), hash: W.hash }) });
+          body: JSON.stringify({ doc: W.doc.id, name: W.file, text: W.editor.getText(), hash: W.hash }) })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (r) { if (r && r.hash) { W.hash = r.hash; W.dirty = false; writeSaveState('Saved'); } })
+          .catch(function () { /* the page is closing */ });
         e.preventDefault(); e.returnValue = '';
       }
     });

@@ -346,7 +346,7 @@ def compile_document(doc: Document, paths: Paths, engine: str | None = None, *, 
 
 _FILE_LINE_ERROR = re.compile(r"^(\.?/?[^\s:()]+\.(?:tex|sty|cls|bib|bbl)):(\d+): (.*)$")
 _LINE_NO = re.compile(r"^l\.(\d+)")
-_OPEN_FILE = re.compile(r"\((\./[^\s()]+\.(?:tex|bbl))")
+_PAREN = re.compile(r"\((\.?/?[^\s()]+\.(?:tex|bbl|sty|cls|cfg|def|fd|clo|aux|ltx))|\(|\)")
 _WARNING = re.compile(r"^(LaTeX|Package [\w-]+|Class [\w-]+|LaTeX Font) Warning: (.*)")
 _INPUT_LINE = re.compile(r"on input line (\d+)")
 
@@ -356,12 +356,25 @@ def parse_log(log: str) -> tuple[list[LogItem], list[LogItem]]:
     errors: list[LogItem] = []
     warnings: list[LogItem] = []
     lines = log.splitlines()
-    current = "main.tex"
+    stack: list[str | None] = []  # TeX prints "(file" on open and ")" on close; other parentheses push None
+
+    def current_file() -> str:
+        return next((f for f in reversed(stack) if f), "main.tex")
+
     i = 0
     while i < len(lines):
         line = lines[i]
-        for opened in _OPEN_FILE.findall(line):
-            current = opened.removeprefix("./")
+        current = current_file()
+        if not line.startswith(("!", "l.")) and not _WARNING.match(line):
+            for paren in _PAREN.finditer(line):
+                if paren.group(0) == ")":
+                    if stack:
+                        stack.pop()
+                else:
+                    name = paren.group(1)
+                    stack.append(name.removeprefix("./") if name and name.endswith((".tex", ".bbl")) else
+                                 ("" if name else None))
+            current = current_file()
         if match := _FILE_LINE_ERROR.match(line):
             errors.append(LogItem(match.group(3).strip(), match.group(1).removeprefix("./"), int(match.group(2))))
             i += 1

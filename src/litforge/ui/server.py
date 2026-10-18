@@ -958,6 +958,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             if raw is None:  # browsers always send Host; other local clients may not
                 return True
             bound = str(getattr(getattr(self, "server", None), "server_address", ("",))[0])
+            if bound in {"0.0.0.0", "::"}:  # the user chose to serve the LAN (--host); any address is expected
+                return True
             return urlsplit("//" + raw).hostname in {"127.0.0.1", "localhost", "::1", bound}
 
         def _same_origin(self) -> bool:

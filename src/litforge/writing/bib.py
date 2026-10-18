@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import sqlite3
 import unicodedata
@@ -21,7 +20,9 @@ _STOPWORDS = {
     "towards", "toward", "via", "using", "into", "about", "its", "their",
 }
 _SPECIAL = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_",
-            "~": r"\textasciitilde{}", "^": r"\textasciicircum{}", "{": r"\{", "}": r"\}"}
+            "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+            # BibTeX counts braces even after a backslash, so \{ would unbalance the entry.
+            "{": r"\textbraceleft{}", "}": r"\textbraceright{}"}
 
 
 class CitationKeyError(ValueError):
@@ -127,6 +128,10 @@ def _title(text: str) -> str:
     return " ".join(out)
 
 
+def _verbatim(value: str) -> str:
+    return re.sub(r"[{}\\\s]", "", value)
+
+
 def _author_field(authors: list[str]) -> str:
     names = []
     for author in authors:
@@ -135,7 +140,8 @@ def _author_field(authors: list[str]) -> str:
             continue
         parts = author.split()
         names.append(escape(f"{parts[-1]}, {' '.join(parts[:-1])}" if len(parts) > 1 else author))
-    return " and ".join(names)
+    # A name containing " and " (an organisation) would be split by BibTeX: brace it.
+    return " and ".join("{" + n + "}" if re.search(r"\sand\s", n, re.I) else n for n in names)
 
 
 def bibtex_entry(conn: sqlite3.Connection, paper_id: str) -> str:
@@ -157,13 +163,13 @@ def bibtex_entry(conn: sqlite3.Connection, paper_id: str) -> str:
         fields.append(("journal" if kind == "article" else "howpublished", escape(row["venue"])))
     if row["year"]:
         fields.append(("year", str(row["year"])))
-    if row["doi"]:
-        fields.append(("doi", escape(row["doi"])))
+    if row["doi"]:  # biblatex reads doi/eprint verbatim, like url
+        fields.append(("doi", _verbatim(row["doi"])))
     if row["arxiv_id"]:
-        fields.append(("eprint", escape(row["arxiv_id"])))
+        fields.append(("eprint", _verbatim(row["arxiv_id"])))
         fields.append(("archiveprefix", "arXiv"))
     if row["oa_url"]:  # URLs stay verbatim (the url package reads them raw); braces would unbalance
-        fields.append(("url", re.sub(r"[{}\\\s]", "", row["oa_url"])))
+        fields.append(("url", _verbatim(row["oa_url"])))
     if preprint:
         fields.append(("note", "Preprint"))
     body = ",\n".join(f"  {name} = {{{value}}}" for name, value in fields)
@@ -178,15 +184,16 @@ def write_bib(conn: sqlite3.Connection, paper_ids: Iterable[str], path: Path) ->
     if BEGIN_MARK in existing and END_MARK in existing.split(BEGIN_MARK, 1)[1]:
         before, rest = existing.split(BEGIN_MARK, 1)
         after = rest.split(END_MARK, 1)[1]
+    before, after = before.replace(END_MARK, ""), after.replace(BEGIN_MARK, "").replace(END_MARK, "")
     own = {m.group(1).strip() for m in _ENTRY_KEY.finditer(before + after)}  # the user's entries win
     ids = [pid for pid in dict.fromkeys(paper_ids) if citation_key(conn, pid) not in own]
     entries = [bibtex_entry(conn, pid) for pid in ids]
     keys = [citation_key(conn, pid) for pid in ids]
     block = BEGIN_MARK + "\n" + "\n".join(entries) + END_MARK
     text = before.rstrip("\n") + ("\n\n" if before.strip() else "") + block + "\n" + after.lstrip("\n")
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    from litforge.writing.documents import _atomic_write
+
+    _atomic_write(path, text.encode("utf-8"))
     return keys
 
 

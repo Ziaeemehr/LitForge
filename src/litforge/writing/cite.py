@@ -14,16 +14,17 @@ from litforge.storage.db import now
 from litforge.writing.bib import citation_key, paper_for_key, write_bib
 from litforge.writing.documents import Document, list_files
 
-_CITE = re.compile(r"\\(?:[a-zA-Z]*cite[a-zA-Z]*|nocite)\*?\s*(?:\[[^\]]*\]\s*){0,2}\{([^}]*)\}")
+_CITE = re.compile(r"\\(?:[a-zA-Z]*[cC]ite[a-zA-Z]*|nocite)\*?\s*(?:\[[^\]]*\]\s*){0,2}((?:\{[^}]*\}\s*)+)")
+_COMMENT = re.compile(r"(?<!\\)(?:\\\\)*%.*")  # a % after an even number of backslashes starts a comment
 
 
 def cited_keys(text: str) -> list[str]:
     """Keys used by \\cite-like commands, in order of first use, ignoring comments."""
     keys: dict[str, None] = {}
     for line in text.splitlines():
-        code = re.sub(r"(?<!\\)%.*", "", line)
+        code = _COMMENT.sub(lambda m: m.group(0)[:m.group(0).index("%")], line)
         for match in _CITE.finditer(code):
-            for key in match.group(1).split(","):
+            for key in ",".join(re.findall(r"\{([^}]*)\}", match.group(1))).split(","):
                 if key.strip():
                     keys.setdefault(key.strip(), None)
     return list(keys)
@@ -48,7 +49,10 @@ def sync_bib(conn: sqlite3.Connection, doc: Document, extra_paper_ids: list[str]
             ids.setdefault(paper_id, None)
     for paper_id in extra_paper_ids or []:
         ids.setdefault(paper_id, None)
-    return write_bib(conn, list(ids), doc.folder / "references.bib")
+    from litforge.writing.documents import _lock
+
+    with _lock(doc.id):
+        return write_bib(conn, list(ids), doc.folder / "references.bib")
 
 
 def _version(conn: sqlite3.Connection, paper_id: str) -> str | None:

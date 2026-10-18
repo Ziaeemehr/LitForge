@@ -326,12 +326,13 @@ def restore_snapshot(conn: sqlite3.Connection, doc: Document, snap_id: str) -> l
         raise DocumentError("unknown snapshot")
     meta = json.loads((source / ".meta.json").read_text(encoding="utf-8"))
     with _lock(doc.id):
+        # Read first: the safety snapshot below may rotate this (oldest) snapshot away.
+        contents = {name: path.read_bytes() for name in meta.get("files", [])
+                    if (path := resolve_inside(source, name)).is_file()}
         create_snapshot(doc, f"before restoring {snap_id}")
         restored = []
-        for name in meta.get("files", []):
-            src = resolve_inside(source, name)
-            if src.is_file():
-                _atomic_write(resolve_inside(doc.folder, name), src.read_bytes())
-                restored.append(name)
+        for name, data in contents.items():
+            _atomic_write(resolve_inside(doc.folder, name), data)
+            restored.append(name)
         conn.execute("UPDATE writing_documents SET updated_at=? WHERE id=?", (now(), doc.id))
     return restored
