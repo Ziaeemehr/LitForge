@@ -17,3 +17,7 @@ build/
 
 # OS
 .DS_Store
+
+# Local agent state (oh-my-claudecode); .omc/skills/ holds shareable project skills
+.omc/*
+!.omc/skills/
