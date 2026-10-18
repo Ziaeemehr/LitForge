@@ -30,6 +30,7 @@ from litforge.doctor import run_checks
 from litforge.export.markdown import export_markdown
 from litforge.indexing.fts import current_runs, index_run, search
 from litforge.ingest import ingest_paths
+from litforge.library_cleanup import RemovalPreview, plan_removal, remove_papers
 from litforge.llm.budget import BudgetExceeded
 from litforge.llm.commands import register as register_models
 from litforge.llm.router import RoutingError
@@ -53,6 +54,8 @@ from litforge.storage.db import open_db
 app = typer.Typer(help="Local-first scientific literature library.", no_args_is_help=True)
 project_app = typer.Typer(help="Manage project workspaces.", no_args_is_help=True)
 app.add_typer(project_app, name="project")
+library_app = typer.Typer(help="Manage papers in the shared library.", no_args_is_help=True)
+app.add_typer(library_app, name="library")
 eval_app = typer.Typer(help="Evaluate retrieval quality.", no_args_is_help=True)
 app.add_typer(eval_app, name="eval")
 register_models(app)
@@ -182,6 +185,44 @@ def project_delete(
     typer.echo(f"deleted '{name}' ({res['papers']} papers stay in the library)")
     if res["kept_exports"]:
         typer.echo(f"kept your exports in {res['kept_exports']}")
+
+
+def _print_removal(preview: RemovalPreview) -> None:
+    typer.echo(f"{preview.paper_count} papers · {preview.pdf_count} PDFs · "
+               f"{preview.parsed_folder_count} parsed folders · {preview.bytes_freed / 1_000_000:.2f} MB")
+    for paper in preview.papers:
+        typer.echo(f"  {paper.id}  {paper.title or '(no title)'}")
+    for refusal in preview.refused:
+        typer.echo(f"Refused {refusal.id}: {refusal.reason}")
+    for error in preview.file_errors:
+        typer.echo(f"Files kept {error.path}: {error.reason}")
+
+
+@library_app.command("remove-unused")
+def library_remove_unused(
+    ctx: typer.Context,
+    yes: Annotated[bool, typer.Option('--yes', '-y', help="Don't ask for confirmation")] = False,
+    paper: Annotated[list[str] | None, typer.Option('--paper', help='Paper ID (repeatable; default: all unused)')]
+    = None,
+) -> None:
+    """Permanently remove papers that belong to no project and have no cited evidence."""
+    st = _state(ctx)
+    conn = st.db()
+    try:
+        preview = plan_removal(conn, st.paths, paper)
+        _print_removal(preview)
+        if not preview.paper_count:
+            return
+        if not yes:
+            typer.confirm('Remove these papers and their PDFs and parsed text? This is irreversible.', abort=True)
+        report = remove_papers(conn, st.paths, [p.id for p in preview.papers])
+        typer.echo(f'Removed {len(report.removed)} papers; freed {report.bytes_freed / 1_000_000:.2f} MB')
+        for refusal in report.refused:
+            typer.echo(f'Refused {refusal.id}: {refusal.reason}')
+        for error in report.file_errors:
+            typer.echo(f'Files kept {error.path}: {error.reason}')
+    finally:
+        conn.close()
 
 
 @project_app.command("list")

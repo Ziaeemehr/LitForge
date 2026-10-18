@@ -700,3 +700,48 @@ def test_console_job_passes_the_separate_cloud_approval(lens_server: LensServer,
         import time
         time.sleep(.01)
     assert seen == [True]
+
+
+def test_library_cleanup_endpoints_and_origin(lens_server: LensServer) -> None:
+    server = lens_server
+    conn = server.app.db()
+    try:
+        conn.execute("INSERT INTO papers(id,title,created_at,updated_at) VALUES ('unused','Unused','now','now')")
+        assert server.call('/api/library/removal-preview?paper_ids=')[1]['paper_count'] == 0
+        status, preview = server.call('/api/library/removal-preview?paper_ids=unused')
+        assert status == 200 and preview['paper_count'] == 1
+        assert next(p for p in server.call('/api/library')[1] if p['id'] == 'unused')['unused'] is True
+        status, _ = server.call('/api/library/remove', {'paper_ids': ['unused']},
+                         origin='https://evil.example')
+        assert status == 403
+        assert conn.execute("SELECT COUNT(*) FROM papers WHERE id='unused'").fetchone()[0] == 1
+        assert server.call('/api/library/remove', {'paper_ids': 'unused'})[0] == 400
+        # Membership may have changed since the preview.
+        conn.execute("INSERT INTO projects(id,name,created_at) VALUES ('pr','Project','now')")
+        conn.execute("INSERT INTO project_papers VALUES ('pr','unused','manual','now')")
+        status, report = server.call('/api/library/remove', {'paper_ids': ['unused']})
+        assert status == 200 and report['removed'] == [] and 'project' in report['refused'][0]['reason']
+        conn.execute("DELETE FROM project_papers WHERE paper_id='unused'")
+        status, report = server.call('/api/library/remove', {'paper_ids': ['unused']})
+        assert status == 200 and report['removed'] == ['unused']
+        assert server.call('/api/library/removal-preview')[1]['paper_count'] == 0
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize('body', [{}, {'other': True}, {'paper_ids': None}, {'paper_ids': []},
+                                 {'all_unused': False}, {'all_unused': 1}, {'all_unused': 'true'}])
+def test_library_cleanup_requires_explicit_selection(lens_server: LensServer, body: dict[str, Any]) -> None:
+    server = lens_server
+    with server.app.db() as conn:
+        conn.execute("INSERT INTO papers(id,title,created_at,updated_at) VALUES ('unused','Unused','now','now')")
+        assert server.call('/api/library/remove', body)[0] == 400
+        assert conn.execute("SELECT COUNT(*) FROM papers WHERE id='unused'").fetchone()[0] == 1
+
+
+def test_library_cleanup_all_unused_opt_in(lens_server: LensServer) -> None:
+    server = lens_server
+    with server.app.db() as conn:
+        conn.execute("INSERT INTO papers(id,title,created_at,updated_at) VALUES ('unused','Unused','now','now')")
+        status, report = server.call('/api/library/remove', {'all_unused': True})
+        assert status == 200 and 'unused' in report['removed']

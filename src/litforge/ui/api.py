@@ -25,6 +25,7 @@ from litforge.analysis.ledger import get_spans
 from litforge.analysis.review import review_queue
 from litforge.config import TASK_NAMES, Config, Paths, contact_email, load_config, load_settings
 from litforge.export.markdown import default_export_dir
+from litforge.library_cleanup import plan_removal, remove_papers
 from litforge.llm.hardware import Hardware, detect_hardware
 from litforge.llm.llamacpp_server import LlamaCppServer
 from litforge.llm.local_models import Download, HuggingFace, download_change, fit_check
@@ -89,6 +90,7 @@ def library(conn: sqlite3.Connection, limit: int = 5000) -> list[dict[str, Any]]
     rows = conn.execute(
         """SELECT p.id, p.title, p.year, p.venue, p.doi, p.arxiv_id, p.oa_url, p.authors_json, p.cited_by_count,
                   EXISTS(SELECT 1 FROM artifacts a WHERE a.paper_id = p.id AND a.status = 'ok') AS has_pdf,
+                  NOT EXISTS(SELECT 1 FROM project_papers pp WHERE pp.paper_id = p.id) AS unused,
                   (SELECT GROUP_CONCAT(pr.name, '|') FROM project_papers pp JOIN projects pr ON pr.id = pp.project_id
                    WHERE pp.paper_id = p.id) AS projects
            FROM papers p ORDER BY has_pdf DESC, p.year DESC, p.title LIMIT ?""",
@@ -99,7 +101,30 @@ def library(conn: sqlite3.Connection, limit: int = 5000) -> list[dict[str, Any]]
         "arxiv_id": r["arxiv_id"], "oa_url": r["oa_url"], "cited_by_count": r["cited_by_count"],
         "authors": (json.loads(r["authors_json"]) if r["authors_json"] else [])[:4], "has_pdf": bool(r["has_pdf"]),
         "projects": sorted(r["projects"].split("|")) if r["projects"] else [],
+        "unused": bool(r["unused"]),
     } for r in rows]
+
+
+def _removal_ids(paper_ids: object) -> list[str] | None:
+    if paper_ids is None:
+        return None
+    if not isinstance(paper_ids, list) or any(not isinstance(p, str) or not p for p in paper_ids):
+        raise ValueError('paper_ids must be a list of nonempty paper IDs or null')
+    return paper_ids
+
+
+def library_removal_preview(conn: sqlite3.Connection, paths: Paths, paper_ids: object = None) -> dict[str, Any]:
+    return plan_removal(conn, paths, _removal_ids(paper_ids)).model_dump()
+
+
+def library_remove(
+    conn: sqlite3.Connection, paths: Paths, paper_ids: object = None, *, all_unused: object = False,
+) -> dict[str, Any]:
+    if all_unused is True and paper_ids is None:
+        return remove_papers(conn, paths).model_dump()
+    if all_unused is not False or not paper_ids:
+        raise ValueError('provide a non-empty paper_ids list or all_unused: true')
+    return remove_papers(conn, paths, _removal_ids(paper_ids)).model_dump()
 
 
 def missing_pdfs(conn: sqlite3.Connection, project_id: str, only: str = "all") -> list[dict[str, Any]]:
@@ -280,6 +305,8 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
         "oa_url": row["oa_url"], "cited_by_count": row["cited_by_count"], "abstract": row["abstract"],
         "authors": json.loads(row["authors_json"]) if row["authors_json"] else [],
         "has_pdf": run is not None, "markdown": markdown, "mark": mark,
+        "unused": conn.execute('SELECT 1 FROM project_papers WHERE paper_id=? LIMIT 1', (paper_id,)).fetchone()
+        is None,
         "pdf_url": f"/api/papers/{paper_id}/pdf" if _pdf_path(conn, paths, paper_id) else None,
         "links_in_library": {"cites": cites, "cited_by": cited}, "screening": screening,
         "fulltext_screening": fulltext_result(conn, project_id, paper_id) if project_id else None,

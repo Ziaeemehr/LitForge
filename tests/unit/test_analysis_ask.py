@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 from lens_fakes import gateway, seed
@@ -315,19 +316,31 @@ def test_punctuation_is_not_a_quote_word(conn: sqlite3.Connection) -> None:
     assert result[0].quotes == [] and result[0].flags == ["quote_not_in_evidence", "unquoted_fact"]
 
 
-def test_migration_keeps_old_answers_without_quotes(conn: sqlite3.Connection) -> None:
-    from litforge.storage.db import migrate, schema_version
+def test_migration_keeps_old_answers_without_quotes(tmp_path: Path) -> None:
+    from litforge.analysis.runs import finish_run, start_run
+    from litforge.storage.db import available_migrations, connect, latest_version, migrate, schema_version
 
-    seed(conn)
-    gw, _ = gateway(conn)
-    answer = ask(conn, gw, "gain")
-    conn.execute("ALTER TABLE answer_sentences DROP COLUMN quotes_json")
-    conn.execute("PRAGMA user_version=18")
-    assert migrate(conn) == ["0019_answer_quotes.sql"]
-    assert schema_version(conn) == 19
-    loaded = get_answer(conn, answer.run_id)
-    assert loaded.sentences[0].text == answer.sentences[0].text
-    assert loaded.sentences[0].quotes == []
+    # Build the actual old schema instead of dropping a column from the current
+    # schema, whose cleanup view now references quotes_json.
+    conn = connect(tmp_path / 'legacy.sqlite')
+    try:
+        for version, _, sql in available_migrations():
+            if version <= 18:
+                conn.executescript(f'BEGIN;\n{sql}\nPRAGMA user_version={version};\nCOMMIT;')
+        seed(conn)
+        run = start_run(conn, 'ask', 'proj', {}, {})
+        conn.execute("""INSERT INTO answer_sentences(id,run_id,idx,text,kind,created_at)
+                        VALUES ('sentence',?,0,'Gain is reported.','reported_fact','now')""", (run,))
+        finish_run(conn, run, 'ok', {'run_id': run, 'question': 'gain', 'sentences': [],
+                                   'evidence': [], 'insufficient': False})
+        expected = [name for version, name, _ in available_migrations() if version > 18]
+        assert migrate(conn) == expected
+        assert schema_version(conn) == latest_version()
+        loaded = get_answer(conn, run)
+        assert loaded.sentences[0].text == 'Gain is reported.'
+        assert loaded.sentences[0].quotes == []
+    finally:
+        conn.close()
 
 
 

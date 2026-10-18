@@ -39,6 +39,8 @@ def test_snapshots_are_idempotent_and_survive_source_deletion(conn: sqlite3.Conn
     assert get_spans(conn, [first.id, first.id]) == [first, first]
     with pytest.raises(KeyError):
         get_spans(conn, ["missing"])
+    run = start_run(conn, "ask", None, {}, {})
+    link_evidence(conn, run, [first], [None])
     for sql in ["UPDATE evidence_spans SET text='forged'", "DELETE FROM evidence_spans"]:
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):
             conn.execute(sql)

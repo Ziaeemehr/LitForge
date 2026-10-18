@@ -413,6 +413,7 @@
     var f = $('library-filter').value.trim().toLowerCase(), pdfOnly = state.libraryPdf;
     var list = (state.library || []).filter(function (p) {
       if (pdfOnly && !p.has_pdf) return false;
+      if (state.libraryUnused && !p.unused) return false;
       if (!f) return true;
       return [p.title, p.venue, p.doi, p.authors.join(' '), p.projects.join(' ')].join(' ').toLowerCase().indexOf(f) >= 0;
     });
@@ -423,6 +424,7 @@
     el.innerHTML = list.slice(0, 1000).map(function (p, i) {
       var meta = [p.year, p.venue, p.authors.join(', ')].filter(Boolean).map(esc).join(' · ');
       var chips = p.projects.map(function (n) { return '<span class="chip">' + esc(n) + '</span>'; }).join('');
+      if (p.unused) chips += '<span class="chip">Not in a project</span>';
       return '<div class="row" data-i="' + i + '"><div><div class="title">' + esc(p.title || '(no title)') + '</div>' +
         '<div class="meta">' + meta + '</div>' + (chips ? '<div class="chips">' + chips + '</div>' : '') + '</div>' +
         '<div class="badges">' + (p.has_pdf ? '<a class="btn small" target="_blank" rel="noopener" href="/api/papers/' +
@@ -431,6 +433,29 @@
     el.querySelectorAll('.row').forEach(function (row) {
       row.onclick = function (e) { if (!e.target.closest('a')) openDrawer(list[+row.dataset.i]); };
     });
+  }
+
+  function removeLibraryPapers(ids) {
+    var query = ids ? '?paper_ids=' + encodeURIComponent(ids.join(',')) : '';
+    return api('/api/library/removal-preview' + query).then(function (preview) {
+      var refusals = preview.refused.map(function (r) { return r.id + ': ' + r.reason; }).join('; ');
+      if (!preview.paper_count) { toast('No papers can be removed.' + (refusals ? ' ' + refusals : '')); return; }
+      var message = 'Remove ' + preview.paper_count + ' papers, ' + preview.pdf_count + ' PDFs and ' +
+        preview.parsed_folder_count + ' parsed folders (' + (preview.bytes_freed / 1000000).toFixed(2) + ' MB)?' +
+        '\nThis deletion is irreversible. PDFs and extracted text will be permanently removed.' +
+        (refusals ? '\nKept: ' + refusals : '') +
+        (preview.file_errors.length ? '\nSome files cannot be removed and will be reported.' : '');
+      if (!window.confirm(message)) return;
+      return post('/api/library/remove', { paper_ids: preview.papers.map(function (p) { return p.id; }) }).then(function (report) {
+        closeDrawer();
+        return loadLibrary().then(function () {
+          var issues = report.refused.map(function (r) { return r.id + ': ' + r.reason; })
+            .concat(report.file_errors.map(function (r) { return r.path + ': ' + r.reason; }));
+          toast('Removed ' + report.removed.length + ' papers; freed ' + (report.bytes_freed / 1000000).toFixed(2) +
+            ' MB.' + (issues.length ? ' Kept: ' + issues.join('; ') : '') + (refusals ? ' Kept: ' + refusals : ''));
+        });
+      });
+    }).catch(function (e) { toast(e.message); });
   }
 
   // "+ New": an empty search form for the selected project; the open run stays in Recents.
@@ -797,12 +822,14 @@
         '<button class="rel' + (p.mark === 'relevant' ? ' on' : '') + '" data-mark="relevant" title="Relevant (r)">✓</button>' +
         '<button class="irr' + (p.mark === 'irrelevant' ? ' on' : '') + '" data-mark="irrelevant" title="Not relevant (x)">✗</button></span>' : '') +
         '<button class="btn small" id="btn-like" title="Start a new similar-paper search from this paper">Find similar to this</button>' +
+        (d.unused ? '<button class="btn small ghost danger" id="btn-remove-paper">Remove from library</button>' : '') +
         (d.markdown ? '<button class="btn small" id="btn-full" title="Show or hide the text extracted from its PDF">Full text</button>' : '') +
         (d.pdf_url ? '<a class="btn small" target="_blank" rel="noopener" href="' + esc(d.pdf_url) + '" title="Open the PDF in a new tab">Open PDF</a>' : '') + '</div>';
       $('dhead').querySelectorAll('button[data-mark]').forEach(function (b) {
         b.onclick = function () { toggleMark(p, b.dataset.mark); };
       });
       $('btn-like').onclick = function () { startSimilar({ seeds: [d.id] }); };
+      if (d.unused) $('btn-remove-paper').onclick = function () { removeLibraryPapers([d.id]); };
 
       var comp = p.components || {}, html = '';
       if (comp.text !== undefined) {
@@ -2898,6 +2925,13 @@
       this.classList.toggle('on', state.libraryPdf);
       renderLibrary();
     };
+    $('library-unused').onclick = function () {
+      state.libraryUnused = !state.libraryUnused;
+      this.classList.toggle('on', state.libraryUnused);
+      this.setAttribute('aria-pressed', String(!!state.libraryUnused));
+      renderLibrary();
+    };
+    $('library-remove-unused').onclick = function () { removeLibraryPapers(); };
     $('btn-missing').onclick = function () {
       var scope = $('export-scope').value;  // start from what export would cover
       $('missing-scope').value = scope === 'visible' ? 'all' : scope;

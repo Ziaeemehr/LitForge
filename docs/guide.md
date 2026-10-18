@@ -392,10 +392,20 @@ All data lives in `./data` (git-ignored). Use `--data-dir PATH` or `LITFORGE_HOM
 data/
 ├── library/              shared by all projects
 │   ├── papers.sqlite     metadata, sections, search index
-│   ├── pdfs/             original PDFs, named by SHA256 (never deleted)
+│   ├── pdfs/             original PDFs, named by SHA256
 │   └── parsed/           per-PDF output: canonical.json, paper.md, assets/
 └── projects/<name>/      project settings
 ```
+
+The **Library** view labels papers **Not in a project** and offers an **Unused only** filter.
+Use **Remove unused papers…**, or **Remove from library** in an unused paper's drawer, to preview
+paper/PDF counts and disk space before confirming irreversible deletion. The CLI equivalent is
+`litforge library remove-unused` (`--paper ID` is repeatable; `--yes` skips confirmation).
+Deleting a project still keeps its papers. Cleanup refuses papers used by any project or whose evidence
+is cited by an existing analysis, including detached runs, model calls, snapshots and review history.
+Unreferenced evidence spans are deleted; referenced spans retain their immutable audit protection.
+Only shared-library PDFs and parsed folders are collected after the database commits; user originals
+and exports stay intact. File failures are reported, and space estimates exclude SQLite's database file.
 
 ## How a PDF is processed
 

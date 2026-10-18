@@ -837,6 +837,10 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(api.list_runs(conn, pid, int(query.get("limit", 50))))
                 if path == "/api/library":
                     return self._json(api.library(conn))
+                if path == "/api/library/removal-preview":
+                    raw_ids = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get('paper_ids')
+                    ids = [p for value in raw_ids for p in value.split(',') if p] if raw_ids is not None else None
+                    return self._json(api.library_removal_preview(conn, app.paths, ids))
                 if path == "/api/settings":
                     return self._json({"mailto": contact_email(app.paths, app.config),
                                        "exports_root": str(app.paths.exports_root)})
@@ -905,6 +909,13 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     q = {k: v[0] for k, v in parse_qs(url.query).items()}
                     return self._import(q.get("name", "refs.csv"), q.get("project") or "default", q.get("export_dir"))
                 body = self._body()
+                if url.path == "/api/library/remove":
+                    conn = app.db()
+                    try:
+                        return self._json(api.library_remove(conn, app.paths, body.get('paper_ids'),
+                                                             all_unused=body.get('all_unused', False)))
+                    finally:
+                        conn.close()
                 if url.path == "/api/keys":
                     app.keys.set(body.get("name"), body.get("value"))
                     return self._json({"ok": True})
