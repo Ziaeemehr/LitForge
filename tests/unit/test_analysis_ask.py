@@ -354,3 +354,117 @@ def test_short_exact_quote_is_kept_and_short_wrong_quote_is_flagged() -> None:
     (kept, flagged), _ = validate_sentences([ok, bad], packet)
     assert kept.flags == [] and kept.quotes[0].text == "No change."
     assert flagged.flags == ["quote_not_in_evidence", "unquoted_fact"]
+
+
+@pytest.mark.parametrize("normalized_packet", [False, True])
+def test_quote_offsets_stay_in_transmitted_occurrence(conn: sqlite3.Connection, normalized_packet: bool) -> None:
+    quote = "trained with simulation-based inference here."
+    passage = "trained with simulation-\nbased inference here."
+    span = seed(conn, text="Results: " + passage + " " + "padding " * 500 + quote)
+    packet = to_packet([span])
+    if normalized_packet:
+        packet = to_packet([span.model_copy(update={"text": "Results: " + quote})])
+    draft = SentenceDraft.model_validate({"text": "Training used simulation.", "kind": "reported_fact",
+        "evidence_ids": [span.id], "quotes": [{"evidence_id": span.id, "text": quote}]})
+    (sentence,), _ = validate_sentences([draft], packet, [span])
+    assert sentence.flags == []
+    matched, = sentence.quotes
+    assert (matched.start, matched.end) == (9, 9 + len(passage))
+    if not normalized_packet:
+        assert matched.end <= len(packet.items[0].text)
+
+
+@pytest.mark.parametrize(("quote", "text"), [
+    ("5 patients improved", "0.5 patients improved"),
+    ("3 patients improved", "-3 patients improved"),
+    ("gain was 20", "gain was 20%"),
+    ("value .5 overall", "value 5 overall"),
+    ("gain was 3 overall", "gain was − 3 overall"),
+    ("value 15 overall", "value 1．5 overall"),
+    ("value 3 overall", "value ＜3 overall"),
+    ("of f", "of ﬃ"),
+    ("f improved", "ﬀ improved"),
+    ("The treat", "The treat-\nment"),
+    ("3 patients improved", "< 3 patients improved"),
+    ("3 patients improved", "1/3 patients improved"),
+    ("gain was 20", "gain was 20 %"),
+    ("gain was 3", "gain was 3 < 5"),
+    ("gain was 20%", "gain was 20%-30%"),
+])
+def test_quote_review_rejects_partial_or_changed_meaning(quote: str, text: str) -> None:
+    from litforge.analysis.ask import Quote
+    from litforge.analysis.validation import locate_quote
+    from litforge.llm.evidence import EvidenceItem, EvidencePacket
+
+    assert locate_quote(quote, text) is None
+    packet = EvidencePacket(items=[EvidenceItem(id="a", paper_id="p", page=1, text=text)])
+    draft = SentenceDraft(text="The study reports an outcome.", kind="reported_fact", evidence_ids=["a"],
+                          quotes=[Quote(evidence_id="a", text=quote)])
+    (sentence,), _ = validate_sentences([draft], packet)
+    assert sentence.quotes == []
+    assert sentence.flags == ["quote_not_in_evidence", "unquoted_fact"]
+
+
+@pytest.mark.parametrize(("quote", "text", "end"), [
+    ("gain 20%", "gain 20%/year", 8),
+    ("gain 20%.", "gain 20%. Next.", 9),
+    ("gain 20%.", "gain 20%/year", 8),
+    ("(-3 patients improved.)", "(-3 patients improved.) Then more.", 23),
+])
+def test_quote_edge_symbols_do_not_consume_unrelated_punctuation(quote: str, text: str, end: int) -> None:
+    from litforge.analysis.validation import locate_quote
+
+    assert locate_quote(quote, text) == (0, end)
+
+
+@pytest.mark.parametrize("size", [384_000, 768_000, 1_536_000])
+def test_quote_line_break_work_is_linear(size: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    from litforge.analysis import validation
+
+    class CopyBudgetText(str):
+        """Detect quadratic suffix copying without depending on machine speed."""
+
+        copied = 0
+
+        def __getitem__(self, key: int | slice) -> str:
+            result = super().__getitem__(key)
+            if isinstance(key, slice):
+                self.copied += len(result)
+                assert self.copied <= 10 * len(self), "quote normalization repeatedly copies the remaining span"
+            return result
+
+    unit = "treat-\nment "
+    text = CopyBudgetText(unit * (size // len(unit)))
+    normalize = validation._nfkc_text
+
+    def counted(value: str, skip: set[int] | None = None) -> tuple[str, list[int]]:
+        value, offsets = normalize(value, skip)
+        return CopyBudgetText(value), offsets
+
+    monkeypatch.setattr(validation, "_nfkc_text", counted)
+    assert validation.locate_quote("treatment treatment", text) == (0, len(unit) * 2 - 1)
+
+
+def test_sentence_quotes_reuse_normalized_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    from litforge.analysis import validation
+    from litforge.analysis.ask import Quote
+    from litforge.llm.evidence import EvidenceItem, EvidencePacket
+
+    text = "treat-\nment " * 1000
+    packet = EvidencePacket(items=[EvidenceItem(id="a", paper_id="p", page=1, text=text)])
+    quote = Quote(evidence_id="a", text="treatment treatment")
+    drafts = [SentenceDraft(text="Treatment helps.", kind="reported_fact", evidence_ids=["a"],
+                            quotes=[quote, quote, quote]) for _ in range(2)]
+    normalize = validation._quote_text
+    calls = 0
+
+    def counted(value: str, *args: object, **kwargs: object) -> object:
+        nonlocal calls
+        if value == text:
+            calls += 1
+        return normalize(value, *args, **kwargs)
+
+    monkeypatch.setattr(validation, "_quote_text", counted)
+    sentences, _ = validate_sentences(drafts, packet)
+    assert all(not sentence.flags and len(sentence.quotes) == 3 for sentence in sentences)
+    assert calls <= 2  # one preparation of each line-break variant, shared by all six quotes

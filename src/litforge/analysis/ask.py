@@ -17,9 +17,9 @@ from litforge.analysis.retrieve import retrieve_for_question
 from litforge.analysis.runs import canonical_json, finish_run, get_run, link_evidence, start_run
 from litforge.analysis.validation import (
     EvidenceText,
+    QuoteLocator,
     citations,
     image_only_numbers,
-    locate_quote,
     missing_numbers,
     strip_evidence_mentions,
 )
@@ -142,6 +142,7 @@ def validate_sentences(drafts: list[SentenceDraft], packet: EvidencePacket | Non
     invalid: list[str] = []
     items = {e.id: e.text for e in packet.items} if packet else {}
     originals = {s.id: s.text for s in spans} if spans is not None else items
+    locators = {key: QuoteLocator(text, originals.get(key, "")) for key, text in items.items()}
     for draft in drafts:
         text = strip_evidence_mentions(draft.text)
         if not text:
@@ -167,8 +168,8 @@ def validate_sentences(drafts: list[SentenceDraft], packet: EvidencePacket | Non
                 if "quote_not_in_evidence" not in flags:  # one word cannot identify a passage
                     flags.append("quote_not_in_evidence")
                 continue
-            if quote.evidence_id in ids and locate_quote(quote.text, items[quote.evidence_id]) is not None:
-                offsets = locate_quote(quote.text, originals.get(quote.evidence_id, ""))
+            if quote.evidence_id in ids:
+                offsets = locators[quote.evidence_id].locate(quote.text)
             if offsets is None:
                 if "quote_not_in_evidence" not in flags:
                     flags.append("quote_not_in_evidence")
