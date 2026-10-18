@@ -333,3 +333,21 @@ def test_cli_exit_codes(checkout: tuple[Path, Path], paths: Paths, monkeypatch: 
     assert runner.invoke(cli, base).exit_code == 0
     git(checkout[0], 'remote', 'set-url', 'origin', str(paths.root / 'missing'))
     assert runner.invoke(cli, base + ['--check']).exit_code == 1
+
+
+def test_windows_branch_command_avoids_pipeline_chain(checkout: tuple[Path, Path], paths: Paths,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    clone, writer = checkout
+    commit(writer, 'Remote change')
+    git(writer, 'push', 'origin', 'main')
+    git(clone, 'checkout', '-b', 'feature')
+    monkeypatch.setattr(updates.platform, 'system', lambda: 'Windows')
+    command = updates.check_for_update(paths, force=True)['command']
+    assert '&&' not in command and 'if ($?)' in command and 'switch main' in command
+
+
+def test_failed_check_still_targets_this_install(checkout: tuple[Path, Path], paths: Paths) -> None:
+    clone, _ = checkout
+    git(clone, 'remote', 'set-url', 'origin', str(clone.parent / 'missing.git'))
+    result = updates.check_for_update(paths, force=True)
+    assert result['status'] == 'error' and f'LITFORGE_DIR={clone}' in result['command']

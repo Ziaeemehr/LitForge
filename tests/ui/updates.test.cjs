@@ -32,7 +32,7 @@ test('Available update renders hostile commit text safely, copies command and sh
   const s = setup({ status: 'available', behind: 3, latest: { subject: '<img onerror=bad>', date: '2026-10-18' },
     command: 'curl | sh', message: 'Details', update_check: true, update_check_enabled: true });
   await s.ctx.loadUpdates();
-  assert.match(s.$('update-status').textContent, /An update is available: 3 new changes — <img onerror=bad>, 2026-10-18/);
+  assert.match(s.$('update-status').textContent, /An update is available: 3 new changes — <img onerror=bad> \(2026-10-18\)/);
   assert.equal(s.$('update-badge').hidden, false);
   assert.equal(s.$('update-command').textContent, 'curl | sh');
   s.ctx.initUpdates();
@@ -45,7 +45,7 @@ test('Available update renders hostile commit text safely, copies command and sh
 test('All statuses render and clear the badge; disabled hides the notice until manual check', async () => {
   const s = setup();
   const statuses = { up_to_date: /LitForge is up to date/, diverged: /diverged/i,
-    not_git: /not a git install/i, error: /could not check/i, checking: /checking/i };
+    not_git: /installed without git/i, error: /could not check/i, checking: /checking/i };
   for (const [status, pattern] of Object.entries(statuses)) {
     s.ctx.renderUpdate({ status, command: 'command', behind: 1, ahead: 1 });
     assert.match(s.$('update-status').textContent, pattern);

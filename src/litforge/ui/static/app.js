@@ -2054,9 +2054,10 @@
     $('update-badge').hidden = status !== 'available';
     var labels = {
       up_to_date: 'LitForge is up to date',
-      available: 'An update is available: ' + info.behind + ' new changes — ' + (latest.subject || '') + ', ' + (latest.date || ''),
+      available: 'An update is available: ' + info.behind + ' new changes — ' + (latest.subject || '') +
+        (latest.date ? ' (' + String(latest.date).slice(0, 10) + ')' : ''),
       diverged: 'Local and remote history have diverged (' + info.behind + ' behind, ' + info.ahead + ' ahead).',
-      not_git: 'Not a git install — rerun the installer to update LitForge.',
+      not_git: 'This copy was installed without git and cannot update itself.',
       error: 'Could not check for updates', checking: 'Checking for updates…', disabled: ''
     };
     $('update-status').textContent = labels[status] || labels.error;

@@ -111,6 +111,8 @@ def check_for_update(paths: Paths, *, force: bool = False) -> dict[str, Any]:
                 assert cached is not None
                 return cached
         root = _install_root()
+        if root is not None:
+            result['command'] = _installer_command(root)  # also shown when the check itself fails
         if root is None or not (root / '.git').exists():
             result.update(status='not_git', command='', message=(
                 'This copy was installed without git, so it cannot update itself and the installer leaves it '
@@ -147,7 +149,10 @@ def check_for_update(paths: Paths, *, force: bool = False) -> dict[str, Any]:
             result['command'] = _installer_command(root)
             if status != 'up_to_date' and result['branch'] != 'main':
                 # The installer pulls into whatever branch is checked out; switch to main first.
-                result['command'] = f'git -C {_quote(root)} switch main && git -C {_quote(root)} pull --ff-only'
+                switch, pull = f'git -C {_quote(root)} switch main', f'git -C {_quote(root)} pull --ff-only'
+                # Windows PowerShell 5.1 has no `&&`; `if ($?)` runs the pull only after a successful switch.
+                result['command'] = (f'{switch}; if ($?) {{ {pull} }}' if platform.system() == 'Windows'
+                                     else f'{switch} && {pull}')
                 message += f" This copy is on branch '{result['branch']}'; the command switches to main first."
             elif status != 'up_to_date' and result['local_changes']:
                 message += (' This copy has local changes: the update keeps them, or stops without changing '
