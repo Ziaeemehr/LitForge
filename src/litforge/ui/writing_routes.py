@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
+from litforge.writing import assist as wassist
 from litforge.writing import cite as wcite
 from litforge.writing import compile as wc
 from litforge.writing import documents as wd
@@ -86,6 +87,10 @@ def post(app: App, conn: sqlite3.Connection, path: str, body: dict[str, Any]) ->
         return {"id": wd.create_snapshot(doc, str(body.get("note") or "manual")[:200])}
     if path == "/api/write/cite":
         return wcite.cite(conn, doc, str(body.get("paper_id") or ""), body.get("evidence_id") or None)
+    if path == "/api/write/assist":
+        return assist(app, conn, doc, body)
+    if path == "/api/write/assist/decide":
+        return wassist.decide(conn, doc, str(body.get("suggestion") or ""), list(body.get("accepted") or []))
     if path == "/api/write/compile":
         return compile_job(app, doc).__dict__
     raise LookupError("not found")
@@ -132,3 +137,35 @@ def install_tectonic_job(app: App, body: dict[str, Any]) -> Job:
         job.report = wc.install_tectonic(app.paths, job.messages.append)
 
     return app.start_job("tectonic-install", "", work)
+
+
+def assist(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str, Any]) -> Any:
+    """Preview first: a blocked route is refused, and a route needing approval returns the preview until the
+    page sends approved=true. Otherwise the call runs as a job whose report is the suggestion."""
+    req = wassist.prepare(conn, doc, str(body.get("action") or ""), str(body.get("text") or ""),
+                          str(body.get("error") or ""), int(body.get("first_line") or 1))
+    gateway = app.make_gateway(conn)
+    preview = wassist.preview(gateway, req).model_dump()
+    sent = {"characters": len(req.text), "evidence": max(0, len(req.packet.items) - 1) if req.packet else 0}
+    if preview["blocked_reason"]:
+        raise ValueError(f"the model route is blocked: {preview['blocked_reason']}")
+    approved = body.get("approved") is True
+    if preview["requires_approval"] and not approved:
+        return {"needs_approval": True, "preview": preview, "sent": sent}
+    file = str(body.get("file") or "main.tex")
+    wd.resolve_inside(doc.folder, file)
+    if any(j.kind == "writing-assist" and j.status == "running" and j.project == doc.id for j in app.jobs.values()):
+        raise ValueError("a suggestion is already being prepared for this document")
+
+    def work(job: Job) -> None:
+        job.messages.append(f"Asking {preview['model'] or preview['profile']}…")
+        conn = app.db()
+        try:
+            gateway = app.make_gateway(conn)
+            job.report = wassist.run(conn, gateway, doc, wassist.prepare(
+                conn, doc, req.action, req.text, req.error, req.first_line), file, approved=approved)
+        finally:
+            conn.close()
+
+    job = app.start_job("writing-assist", doc.id, work)
+    return {**job.__dict__, "preview": preview, "sent": sent}

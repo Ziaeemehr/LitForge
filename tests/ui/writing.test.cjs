@@ -232,3 +232,111 @@ test('cite palette searches, inserts the key and offers the quote for keys under
   assert.equal(quote.children[0].href, '/api/papers/p1/pdf#page=4');
   assert.equal(quote.children[1].textContent, 'gain was 3.25');
 });
+
+function aiSetup(report, approval) {
+  let approvals = 0;
+  const env = setup({
+    get: url => url.startsWith('/api/jobs/job-ai') ? { status: 'done', report } : null,
+    post: (url, body) => {
+      if (url === '/api/write/assist') {
+        if (approval && !body.approved) return { needs_approval: true, sent: { characters: body.text.length, evidence: 0 },
+          preview: { model: 'big-cloud', provider: 'openrouter', remote: true, max_cost_usd: 0.0012 } };
+        return { id: 'job-ai', preview: { model: 'gemma', profile: 'local', remote: false }, sent: { characters: 3, evidence: 0 } };
+      }
+      if (url === '/api/write/assist/decide') return { status: body.accepted.length ? 'partial' : 'rejected' };
+      if (url === '/api/write/cite') return { key: 'k' };
+      return null;
+    }
+  });
+  env.ctx.window.confirm = msg => { approvals++; env.calls.push(['confirm', msg]); return approval !== 'deny'; };
+  env.approvals = () => approvals;
+  return env;
+}
+
+const REPORT = { id: 's1', task: 'write_rewrite', provider: 'ollama', model: 'gemma', note: 'shorter', flags: [],
+  original: 'one two three', citations: [],
+  hunks: [{ index: 0, start: 0, end: 3, old: 'one', new: '1', flags: [] },
+          { index: 1, start: 8, end: 13, old: 'three', new: '3', flags: ['number not in your text or the evidence: 3'] }] };
+
+test('AI rewrite shows hunks; flagged hunks start rejected; only accepted hunks are applied and recorded', async () => {
+  const { ctx, $, calls } = aiSetup(REPORT);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Intro: one two three.'; area.setSelectionRange(7, 20);
+  await ctx.runWriteAi('shorter', false);
+  const sent = calls.find(c => c[0] === '/api/write/assist')[1];
+  assert.equal(sent.text, 'one two three'); assert.equal(sent.approved, false);
+  assert.equal($('write-suggestion').hidden, false);
+  const hunks = $('write-suggestion-hunks').children;
+  assert.equal(hunks[0].children[0].textContent, 'one');
+  assert.equal(hunks[1].children[2].textContent, '⚠ number not in your text or the evidence: 3');
+  assert.match(hunks[1].children[3].textContent, /^Rejected/);
+  assert.equal(area.value, 'Intro: one two three.');  // nothing changes before applying
+  await ctx.applyWriteSuggestion();
+  assert.equal(area.value, 'Intro: 1 two three.');
+  assert.deepEqual([...calls.find(c => c[0] === '/api/write/assist/decide')[1].accepted], [0]);
+});
+
+test('AI suggestion is refused when the text changed meanwhile', async () => {
+  const { ctx, $, calls } = aiSetup(REPORT);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Intro: one two three.'; area.setSelectionRange(7, 20);
+  await ctx.runWriteAi('shorter', false);
+  area.value = 'Intro: ONE two three.';
+  await ctx.applyWriteSuggestion();
+  assert.equal(area.value, 'Intro: ONE two three.');
+  assert.ok(calls.some(c => c[0] === 'toast' && /changed since/.test(c[1])));
+  assert.ok(!calls.some(c => c[0] === '/api/write/assist/decide'));
+});
+
+test('cloud route asks for approval with what is sent; declining sends nothing', async () => {
+  const denied = aiSetup(REPORT, 'deny');
+  await denied.ctx.openWriteDoc('d1');
+  let area = denied.$('write-cm').children[0];
+  area.value = 'one two three'; area.setSelectionRange(0, 13);
+  await denied.ctx.runWriteAi('clearer', false);
+  assert.match(denied.calls.find(c => c[0] === 'confirm')[1], /13 characters.*big-cloud \(openrouter, cloud, at most \$0\.0012\)/);
+  assert.equal(denied.calls.filter(c => c[0] === '/api/write/assist').length, 1);
+  assert.ok(!denied.calls.some(c => c[0] === 'GET' && c[1].startsWith('/api/jobs/')));
+  assert.equal(denied.$('write-compile-state').textContent, 'Not sent.');
+  const ok = aiSetup(REPORT, true);
+  await ok.ctx.openWriteDoc('d1');
+  area = ok.$('write-cm').children[0];
+  area.value = 'one two three'; area.setSelectionRange(0, 13);
+  await ok.ctx.runWriteAi('clearer', false);
+  const posts = ok.calls.filter(c => c[0] === '/api/write/assist');
+  assert.deepEqual(posts.map(p => p[1].approved), [false, true]);
+});
+
+test('fix needs a clicked error and sends the lines around it', async () => {
+  const { ctx, $, calls } = aiSetup({ ...REPORT, task: 'write_fix', hunks: [], original: '' });
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = Array.from({ length: 40 }, (_, i) => 'line' + (i + 1)).join('\n');
+  await ctx.runWriteAi('fix', false);
+  assert.ok(calls.some(c => c[0] === 'toast' && /Click a compile error first/.test(c[1])));
+  ctx.W.lastError = { line: 20, file: 'main.tex', message: 'Undefined control sequence.' };
+  await ctx.runWriteAi('fix', false);
+  const assist = calls.find(c => c[0] === '/api/write/assist');
+  assert.ok(assist, JSON.stringify(calls.slice(-3)));
+  const sent = assist[1];
+  assert.equal(sent.first_line, 5);
+  assert.equal(sent.text.split('\n')[0], 'line5');
+  assert.equal(sent.text.split('\n').at(-1), 'line35');
+  assert.equal(sent.error, 'Undefined control sequence.');
+});
+
+test('accepted citations are registered for references.bib', async () => {
+  const report = { ...REPORT, task: 'write_cite', original: 'Gain was high.',
+    hunks: [{ index: 0, start: 13, end: 13, old: '', new: ' \\cite{lee2021}', flags: [] }],
+    citations: [{ key: 'lee2021', paper_id: 'p1', evidence_id: 'ev_1', page: 2, quote: 'gain was 3.25' }] };
+  const { ctx, $, calls } = aiSetup(report);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Gain was high.'; area.setSelectionRange(0, 14);
+  await ctx.runWriteAi('cite', false);
+  await ctx.applyWriteSuggestion();
+  assert.equal(area.value, 'Gain was high \\cite{lee2021}.');
+  assert.deepEqual({ ...calls.find(c => c[0] === '/api/write/cite')[1] }, { doc: 'd1', paper_id: 'p1', evidence_id: 'ev_1' });
+});

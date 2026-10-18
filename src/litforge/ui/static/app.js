@@ -2085,6 +2085,7 @@
   }
 
   function jumpToWriteLine(item) {
+    W.lastError = item;
     var target = item.file && item.file !== W.file ? openWriteFile(item.file) : Promise.resolve();
     return target.then(function () { if (W.editor) W.editor.gotoLine(item.line); });
   }
@@ -2336,6 +2337,147 @@
     if (/\\[a-zA-Z]*cite[a-zA-Z]*\{$/.test(before) && $('write-cite-panel').hidden) openWriteCite();
   }
 
+  var AI = { pending: null };
+
+  function writeAiRange(action) {
+    if (action === 'fix') {
+      var err = W.lastError;
+      if (!err || !err.line) return { problem: 'Click a compile error first, then choose "Fix this error".' };
+      if (err.file && err.file !== W.file) return { problem: 'Open ' + err.file + ' to fix this error.' };
+      var lines = W.editor.getText().split('\n').length;
+      var first = Math.max(1, err.line - 15), last = Math.min(lines, err.line + 15);
+      var from = W.editor.lineRange(first).from, to = W.editor.lineRange(last).to;
+      return { from: from, to: to, text: W.editor.getText().slice(from, to), error: err.message, first_line: first };
+    }
+    var sel = W.editor.selection();
+    if (!sel.text.trim()) return { problem: 'Select the text first.' };
+    return { from: sel.from, to: sel.to, text: sel.text };
+  }
+
+  function runWriteAi(action, approved) {
+    if (!W.doc || !W.editor || !action) return Promise.resolve();
+    var range = AI.range && approved ? AI.range : writeAiRange(action);
+    if (range.problem) { toast(range.problem); return Promise.resolve(); }
+    AI.range = range;
+    var body = { doc: W.doc.id, action: action, text: range.text, error: range.error || '', first_line: range.first_line || 1,
+      file: W.file, approved: !!approved };
+    $('write-compile-state').textContent = 'Preparing the request…';
+    return post('/api/write/assist', body).then(function (res) {
+      if (res.needs_approval) {
+        var p = res.preview;
+        var ok = window.confirm('Send ' + res.sent.characters + ' characters of your text' +
+          (res.sent.evidence ? ' and ' + res.sent.evidence + ' evidence quotes' : '') + ' to ' + p.model + ' (' +
+          p.provider + ', cloud' + (p.max_cost_usd != null ? ', at most $' + p.max_cost_usd.toFixed(4) : '') + ')?');
+        if (!ok) { $('write-compile-state').textContent = 'Not sent.'; return; }
+        return runWriteAi(action, true);
+      }
+      $('write-compile-state').textContent = 'Asking ' + (res.preview.model || res.preview.profile) +
+        (res.preview.remote ? ' (cloud)' : ' (local)') + ' · sending ' + res.sent.characters + ' characters' +
+        (res.sent.evidence ? ' and ' + res.sent.evidence + ' evidence quotes' : '') + '…';
+      return pollWriteAi(res, range);
+    }).catch(function (e) { $('write-compile-state').textContent = e.message; });
+  }
+
+  function pollWriteAi(job, range) {
+    return api('/api/jobs/' + encodeURIComponent(job.id)).then(function (j) {
+      if (j.status === 'running') {
+        return new Promise(function (resolve) { setTimeout(resolve, 800); }).then(function () { return pollWriteAi(job, range); });
+      }
+      if (j.status === 'failed') { $('write-compile-state').textContent = j.error || 'The model call failed'; return; }
+      $('write-compile-state').textContent = '';
+      showWriteSuggestion(j.report, range);
+    });
+  }
+
+  function showWriteSuggestion(s, range) {
+    AI.pending = { suggestion: s, range: range, accepted: {} };
+    s.hunks.forEach(function (h) { AI.pending.accepted[h.index] = !h.flags.length; });
+    var box = $('write-suggestion');
+    $('write-suggestion-title').textContent = { write_fix: 'Fix', write_rewrite: 'Rewrite', write_cite: 'Citations' }[s.task] || 'Suggestion';
+    $('write-suggestion-meta').textContent = s.provider + ':' + s.model + (s.note ? ' · ' + s.note : '') +
+      ' · nothing changes until you apply';
+    var parts = [];
+    s.flags.forEach(function (f) {
+      var p = document.createElement('p'); p.className = 'flag'; p.textContent = '⚠ ' + f; parts.push(p);
+    });
+    s.hunks.forEach(function (h) { parts.push(suggestionHunk(h)); });
+    s.citations.forEach(function (c) {
+      var q = document.createElement('p');
+      q.className = 'quote'; q.dir = 'auto';
+      q.textContent = c.key + ' · p.' + c.page + ' · “' + c.quote + '”';
+      parts.push(q);
+    });
+    var row = document.createElement('div');
+    row.className = 'row';
+    var apply = document.createElement('button');
+    apply.className = 'btn small'; apply.textContent = 'Apply accepted';
+    apply.onclick = applyWriteSuggestion;
+    var reject = document.createElement('button');
+    reject.className = 'btn small'; reject.textContent = 'Reject all';
+    reject.onclick = function () {
+      Object.keys(AI.pending.accepted).forEach(function (k) { AI.pending.accepted[k] = false; });
+      return applyWriteSuggestion();
+    };
+    row.appendChild(apply); row.appendChild(reject);
+    parts.push(row);
+    $('write-suggestion-hunks').replaceChildren.apply($('write-suggestion-hunks'), parts);
+    box.hidden = false;
+  }
+
+  function suggestionHunk(h) {
+    var div = document.createElement('div');
+    div.className = 'hunk';
+    var del = document.createElement('del'); del.textContent = h.old; del.dir = 'auto';
+    var ins = document.createElement('ins'); ins.textContent = h.new; ins.dir = 'auto';
+    if (h.old) div.appendChild(del);
+    if (h.new) div.appendChild(ins);
+    h.flags.forEach(function (f) {
+      var p = document.createElement('p'); p.className = 'flag'; p.textContent = '⚠ ' + f; div.appendChild(p);
+    });
+    var toggle = document.createElement('button');
+    toggle.className = 'btn small';
+    var label = function () { toggle.textContent = AI.pending.accepted[h.index] ? 'Accepted ✓ (click to reject)' : 'Rejected (click to accept)'; };
+    label();
+    toggle.onclick = function () { AI.pending.accepted[h.index] = !AI.pending.accepted[h.index]; label(); };
+    div.appendChild(toggle);
+    return div;
+  }
+
+  function appliedSuggestion(original, hunks, accepted) {
+    var out = '', pos = 0;
+    hunks.slice().sort(function (a, b) { return a.start - b.start; }).forEach(function (h) {
+      out += original.slice(pos, h.start) + (accepted[h.index] ? h.new : h.old);
+      pos = h.end;
+    });
+    return out + original.slice(pos);
+  }
+
+  function applyWriteSuggestion() {
+    var pending = AI.pending;
+    if (!pending) return Promise.resolve();
+    var s = pending.suggestion, range = pending.range;
+    var accepted = s.hunks.filter(function (h) { return pending.accepted[h.index]; }).map(function (h) { return h.index; });
+    if (accepted.length && W.editor.getText().slice(range.from, range.to) !== s.original) {
+      toast('The text changed since the request; ask again.');
+      return Promise.resolve();
+    }
+    var text = appliedSuggestion(s.original, s.hunks, pending.accepted);
+    if (accepted.length) W.editor.replace(range.from, range.to, text);
+    AI.pending = null; AI.range = null;
+    $('write-suggestion').hidden = true;
+    var used = s.citations.filter(function (c) { return text.indexOf(c.key) >= 0; });
+    return saveWriteNow().then(function () {
+      return used.reduce(function (chain, c) {
+        return chain.then(function () {
+          return post('/api/write/cite', { doc: W.doc.id, paper_id: c.paper_id, evidence_id: c.evidence_id });
+        });
+      }, Promise.resolve());
+    }).then(function () {
+      return post('/api/write/assist/decide', { doc: W.doc.id, suggestion: s.id, accepted: accepted });
+    }).then(function (r) { toast(r.status === 'rejected' ? 'Suggestion rejected' : 'Applied ' + accepted.length + ' change(s)'); })
+      .catch(function (e) { toast(e.message); });
+  }
+
   function wireWrite() {
     $('write-create').onclick = createWriteDoc;
     $('write-new-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') createWriteDoc(); });
@@ -2348,6 +2490,12 @@
     $('write-reload').onclick = reloadTheirs;
     $('write-keep').onclick = keepMine;
     $('write-cite').onclick = openWriteCite;
+    $('write-ai').onchange = function () { var action = $('write-ai').value; $('write-ai').value = ''; runWriteAi(action, false); };
+    $('write-suggestion-close').onclick = function () {  // closing rejects, so the record is complete
+      if (!AI.pending) { $('write-suggestion').hidden = true; return; }
+      Object.keys(AI.pending.accepted).forEach(function (k) { AI.pending.accepted[k] = false; });
+      applyWriteSuggestion();
+    };
     $('write-cite-tab-lib').onclick = function () { setWriteCiteTab('library'); };
     $('write-cite-tab-ev').onclick = function () { setWriteCiteTab('evidence'); };
     $('write-cite-q').addEventListener('input', function () {

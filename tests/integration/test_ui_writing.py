@@ -156,3 +156,69 @@ def test_cite_routes_and_bib_sync(server) -> None:
     assert call(base, f"/api/write/quote?doc={doc['id']}&key=nokey")[0] == 404
     assert call(base, "/api/write/cite", {"doc": doc["id"], "paper_id": "p1"},
                 headers={"Origin": "http://evil.example"})[0] == 403
+
+
+def _assist_server(tmp_path: Path, config_edit=None):
+    from http.server import ThreadingHTTPServer
+
+    from litforge.analysis.gateway import ModelGateway
+    from litforge.screening.llm import FakeLlm
+
+    paths = Paths(tmp_path / "data", exports_root=tmp_path / "exports")
+    config = load_config()
+    if config_edit:
+        config_edit(config)
+    fakes = {"local": FakeLlm(lambda m: {"replacement": "Short text.", "note": "shorter"}),
+             "remote": FakeLlm(lambda m: {"replacement": "Cloud text."})}
+    app = App(paths, config, make_gateway=lambda conn: ModelGateway(conn, config, providers=fakes))
+    conn = app.db()
+    create_project(conn, paths, "demo")
+    conn.close()
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, f"http://127.0.0.1:{httpd.server_address[1]}", fakes
+
+
+def test_assist_local_job_and_decide(tmp_path: Path) -> None:
+    httpd, base, fakes = _assist_server(tmp_path)
+    try:
+        doc = create(base)
+        status, job = call(base, "/api/write/assist", {"doc": doc["id"], "action": "shorter",
+                                                       "text": "A rather long piece of text.", "file": "main.tex"})
+        assert status == 200 and job["preview"]["remote"] is False and job["sent"]["characters"] == 28
+        report = wait_job(base, job["id"])["report"]
+        assert report["hunks"] and report["original"] == "A rather long piece of text."
+        status, decided = call(base, "/api/write/assist/decide", {"doc": doc["id"], "suggestion": report["id"],
+                                                                  "accepted": [0]})
+        assert status == 200 and decided["status"] == "accepted"
+        assert call(base, "/api/write/assist", {"doc": doc["id"], "action": "shorter", "text": "x",
+                                                "file": "../x.tex"})[0] == 400
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_assist_cloud_route_needs_approval(tmp_path: Path) -> None:
+    from litforge.config import ModelProfileConfig, TaskModelConfig
+    from litforge.llm.budget import Pricing
+
+    def cloud(config) -> None:
+        config.models.policy = "ask_before_cloud"
+        config.privacy.allow_cloud = True
+        config.models.profiles["remote"] = ModelProfileConfig(
+            provider="openai_compatible", model="big", remote=True,
+            pricing=Pricing(input_per_million_usd=1, output_per_million_usd=2))
+        config.models.tasks["write_rewrite"] = TaskModelConfig(profile="remote")
+
+    httpd, base, fakes = _assist_server(tmp_path, cloud)
+    try:
+        doc = create(base)
+        body = {"doc": doc["id"], "action": "clearer", "text": "Some text.", "file": "main.tex"}
+        status, res = call(base, "/api/write/assist", body)
+        assert status == 200 and res["needs_approval"] and res["preview"]["model"] == "big"
+        assert fakes["remote"].calls == 0
+        _, job = call(base, "/api/write/assist", {**body, "approved": True})
+        assert wait_job(base, job["id"])["status"] == "done" and fakes["remote"].calls == 1
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

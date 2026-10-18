@@ -92,7 +92,8 @@ class PrivacyConfig(BaseModel):
 
 ReasoningMode = Literal["off", "on", "auto"]
 TASK_NAMES = ("ask", "audit", "matrix_extract", "claim_extract", "claim_relation", "screen", "screen_fulltext",
-              "asset_analyze", "equation_compare", "gap_design", "console_plan", "page_rewrite")
+              "asset_analyze", "equation_compare", "gap_design", "console_plan", "page_rewrite",
+              "write_fix", "write_rewrite", "write_cite")
 
 
 def reasoning_mode(value: Any) -> Any:
