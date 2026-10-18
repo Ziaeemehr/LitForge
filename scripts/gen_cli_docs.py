@@ -1,4 +1,6 @@
 """Generate docs/cli.md from the CLI itself: python scripts/gen_cli_docs.py > docs/cli.md"""
+import sys
+
 import typer
 from typer.core import TyperArgument, TyperOption
 
@@ -72,4 +74,5 @@ if rest:
     out.append("## Other\n")
     for n in rest:
         emit(root.commands[n], ["litforge", n], 3, out)
+sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]  # Windows consoles
 print("\n".join(out))

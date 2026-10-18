@@ -28,10 +28,18 @@ def automatic_enabled(paths: Paths) -> bool:
     return load_settings(paths).get('update_check', True) is not False and os.getenv('LITFORGE_NO_UPDATE_CHECK') != '1'
 
 
-def _installer_command() -> str:
+def _quote(path: Path) -> str:
+    """Quote a path for the terminal of this platform (PowerShell on Windows, POSIX sh elsewhere)."""
+    return "'" + str(path).replace("'", "''") + "'" if platform.system() == 'Windows' else shlex.quote(str(path))
+
+
+def _installer_command(root: Path | None = None) -> str:
+    """The README install line, pointed at this installation so a custom folder is the one updated."""
     if platform.system() == 'Windows':
-        return f'powershell -ExecutionPolicy ByPass -c "irm {_INSTALL_URL}ps1 | iex"'
-    return f'curl -LsSf {_INSTALL_URL}sh | sh'
+        target = f'$env:LITFORGE_DIR={_quote(root)}; ' if root else ''
+        return f'{target}powershell -ExecutionPolicy ByPass -c "irm {_INSTALL_URL}ps1 | iex"'
+    target = f'LITFORGE_DIR={_quote(root)} ' if root else ''
+    return f'curl -LsSf {_INSTALL_URL}sh | {target}sh'
 
 
 def _cache_path(paths: Paths) -> Path:
@@ -104,7 +112,10 @@ def check_for_update(paths: Paths, *, force: bool = False) -> dict[str, Any]:
                 return cached
         root = _install_root()
         if root is None or not (root / '.git').exists():
-            result.update(status='not_git', message='Not a git install. Rerun the installer to update LitForge.')
+            result.update(status='not_git', command='', message=(
+                'This copy was installed without git, so it cannot update itself and the installer leaves it '
+                'unchanged. Download the new version from https://github.com/Ziaeemehr/LitForge and replace the '
+                'program files, keeping your data folder.'))
         else:
             deadline = time.monotonic() + CHECK_TIMEOUT_S
 
@@ -120,7 +131,7 @@ def check_for_update(paths: Paths, *, force: bool = False) -> dict[str, Any]:
 
             result['branch'] = git('branch', '--show-current')
             result['local_changes'] = bool(git('status', '--porcelain'))
-            git('fetch', '--quiet', '--no-tags', 'origin', 'main')
+            git('fetch', '--quiet', '--no-tags', '--refmap=', 'origin', 'main')  # --refmap=: write FETCH_HEAD only
             behind = int(git('rev-list', '--count', 'HEAD..FETCH_HEAD'))
             ahead = int(git('rev-list', '--count', 'FETCH_HEAD..HEAD'))
             subject, date = git('log', '-1', '--format=%s%x00%cI', 'FETCH_HEAD').split('\x00', 1)
@@ -133,13 +144,14 @@ def check_for_update(paths: Paths, *, force: bool = False) -> dict[str, Any]:
                 'available': f'An update is available: {behind} new changes — {subject} ({day}).',
                 'diverged': 'Local and remote history have diverged. Review local commits before updating.',
             }[status]
-            if status != 'up_to_date' and (result['branch'] != 'main' or result['local_changes']):
-                # The installer only fast-forwards a clean main checkout; show the git command instead.
-                quoted = ("'" + str(root).replace("'", "''") + "'" if platform.system() == 'Windows'
-                          else shlex.quote(str(root)))
-                result['command'] = f'git -C {quoted} pull --ff-only origin main'
-                message += (' The installer will refuse this checkout (non-main branch or local changes): '
-                            'commit or stash your changes first, then run the git command below.')
+            result['command'] = _installer_command(root)
+            if status != 'up_to_date' and result['branch'] != 'main':
+                # The installer pulls into whatever branch is checked out; switch to main first.
+                result['command'] = f'git -C {_quote(root)} switch main && git -C {_quote(root)} pull --ff-only'
+                message += f" This copy is on branch '{result['branch']}'; the command switches to main first."
+            elif status != 'up_to_date' and result['local_changes']:
+                message += (' This copy has local changes: the update keeps them, or stops without changing '
+                            'anything if they conflict.')
             result['message'] = message
     except Exception:
         # Includes missing git, offline remotes, timeouts and malformed repository/config metadata.

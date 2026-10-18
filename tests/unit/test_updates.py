@@ -80,9 +80,12 @@ def test_installer_refusal(checkout: tuple[Path, Path], paths: Paths, branch: st
         (clone / 'untracked.txt').write_text('keep me')
     result = updates.check_for_update(paths, force=True)
     assert result['branch'] == branch and result['local_changes'] is dirty
-    assert 'installer will refuse' in result['message']
-    assert result['command'].startswith('git -C ')
-    assert 'pull --ff-only origin main' in result['command'] and 'curl' not in result['command']
+    if branch != 'main':
+        assert "on branch 'feature'" in result['message']
+        assert result['command'].startswith('git -C ') and 'switch main' in result['command']
+        assert 'pull --ff-only' in result['command'] and 'curl' not in result['command']
+    else:  # the installer keeps local changes, or stops if they conflict
+        assert 'local changes' in result['message'] and 'curl' in result['command']
     assert git(clone, 'branch', '--show-current') == branch
     if dirty:
         assert (clone / 'untracked.txt').read_text() == 'keep me'
@@ -105,9 +108,17 @@ def test_up_to_date_checkout_only_says_so(checkout: tuple[Path, Path], paths: Pa
 def test_platform_commands(checkout: tuple[Path, Path], paths: Paths, monkeypatch: pytest.MonkeyPatch,
                            system: str, fragment: str) -> None:
     monkeypatch.setattr(updates.platform, 'system', lambda: system)
+    clone, _ = checkout
     result = updates.check_for_update(paths, force=True)
-    assert result['command'].startswith(fragment)
-    assert result['command'] in Path('README.md').read_text()
+    command = result['command']
+    # The README line, pointed at this installation (LITFORGE_DIR) so a custom folder is the one updated.
+    readme = Path('README.md').read_text()
+    if system == 'Windows':
+        assert command.startswith("$env:LITFORGE_DIR='" + str(clone) + "'; ")
+        assert command.split('; ', 1)[1] in readme
+    else:
+        assert command.startswith(fragment) and f'| LITFORGE_DIR={clone} sh' in command
+        assert command.replace(f'LITFORGE_DIR={clone} ', '') in readme
 
 
 def test_not_git_and_installed_package(paths: Paths, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -281,11 +292,7 @@ def test_fetch_leaves_other_refs_alone(checkout: tuple[Path, Path], paths: Paths
     git(writer, 'push', 'origin', 'main')
     assert updates.check_for_update(paths, force=True)['status'] == 'available'
     after = git(clone, 'for-each-ref', '--format=%(refname) %(objectname)')
-    def without_main(value: str) -> list[str]:
-        # origin/HEAD still points to origin/main, so its resolved object follows main.
-        return [line for line in value.splitlines()
-                if not line.startswith(('refs/remotes/origin/main ', 'refs/remotes/origin/HEAD '))]
-    assert without_main(refs) == without_main(after)
+    assert refs == after  # only FETCH_HEAD is written; origin/main is left where it was
     assert git(clone, 'symbolic-ref', 'refs/remotes/origin/HEAD') == symbolic_head
 
 

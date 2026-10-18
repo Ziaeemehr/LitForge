@@ -814,10 +814,12 @@ That button always checks, even when automatic checks are disabled.
 
 An available update adds a small dot to the sidebar's Settings button. Copy the displayed command,
 close LitForge, then run it in a terminal. **LitForge never runs the updater or `git pull` for you.**
-ZIP installs cannot compare Git history; rerun the installer to update them. On a non-main branch
-or with local changes, the installer will refuse: review and commit or stash changes first, then
-follow the displayed `git pull --ff-only origin main` instructions in the intended branch.
-Diverged histories require manual reconciliation before updating.
+The command points at this installation's folder (`LITFORGE_DIR=...`), so a copy installed in a
+custom folder updates itself, not `~/LitForge`. On a branch other than `main` it shows
+`git switch main && git pull --ff-only` instead. Local changes are kept; if they conflict, the update
+stops without changing anything. Diverged histories require manual reconciliation before updating.
+A copy installed without git (from the ZIP) cannot update itself, and the installer leaves it
+unchanged: download the new version and replace the program files, keeping your data folder.
 
 `litforge update` forces a check and prints the result and update command. For scripts,
 `litforge update --check` exits **0** when up to date (including a checkout that is only ahead),
