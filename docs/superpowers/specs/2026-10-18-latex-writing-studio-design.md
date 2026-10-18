@@ -64,6 +64,25 @@ citation, and squiggles from `check_text`/citation check, without going through 
 
 # Main plan: built-in editor
 
+## First version: essentials only (keep it light)
+
+The user asked for the editor to stay as light as possible, with only the essential features for now. The first
+version is exactly this list; everything else in W1–W4 below waits until this version is used in practice.
+
+| Area | In the first version | Deliberately left out for now |
+|---|---|---|
+| Documents | One folder per document: `main.tex`, `references.bib`, uploaded figures; two templates: English article and Persian article (`xepersian`) | More templates, multi-file projects with `\input` management, ZIP import/export |
+| Editing | CodeMirror with LaTeX highlighting, search/replace, undo, correct right-to-left text | Outline, command autocomplete, spell-check dictionaries, symbol palette, word count |
+| Saving | Auto-save to disk; restore one of the last versions (simple snapshots) | Git history UI, named versions, diff view |
+| Compile | One button; Tectonic (optional tool) or the system XeLaTeX; error list with jump to line | Choice of engine per file, draft mode, auto-recompile on typing |
+| Preview | The compiled PDF in the browser's own PDF viewer (no PDF.js bundle) | SyncTeX jumps, in-PDF search sync |
+| Citations | Search the library, insert `\cite{key}`; `references.bib` kept in sync; the quote behind a citation shown on request | Hover cards, citation check, support check (W2) |
+| Language model | Three actions on the selection, each shown as an accept/reject diff: fix compile error, rewrite (clearer / shorter / translate), suggest citations with quotes | Assistant chat, title/abstract, equation/table generators, completion while typing |
+| Safety | Local model by default; cloud only with approval; numbers and `\cite` keys not in the selection or evidence are flagged; compile with shell escape off, inside the document folder, with a time limit | — |
+
+Size: about one W1-lite plus three W3 actions (medium). The heavy parts of the full plan — PDF.js, SyncTeX, git
+history, the assistant panel — are exactly the ones postponed.
+
 Phases are independent deliverables; each gets its own implementation plan and the usual review rounds before
 merge. Build order: W0, the Persian/Tectonic spike, W1-lite, the first three W3 actions (fix error, rewrite
 selection, suggest citations), then the rest of W1, W2 and W3.
