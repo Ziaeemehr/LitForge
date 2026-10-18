@@ -656,7 +656,7 @@ def status(ctx: typer.Context, project: Annotated[str | None, typer.Option("--pr
 def export(
     ctx: typer.Context,
     project: ProjectOpt = None,
-    fmt: Annotated[str, typer.Option("--format", help="Export format (markdown)")] = "markdown",
+    fmt: Annotated[str, typer.Option("--format", help="Export format (markdown or bibtex)")] = "markdown",
     only: Annotated[
         str, typer.Option("--only", help="Which papers: all, relevant (marked ✓) or not-irrelevant (all but ✗)")
     ] = "all",
@@ -670,12 +670,21 @@ def export(
     conn = st.db()
     name, pid = _project(st, conn, project, required=True)
     assert name is not None and pid is not None
-    if fmt != "markdown":
-        typer.secho(f"format '{fmt}' not supported yet; available: markdown", fg="red", err=True)
+    if fmt not in {"markdown", "bibtex"}:
+        typer.secho(f"format '{fmt}' not supported yet; available: markdown, bibtex", fg="red", err=True)
         raise typer.Exit(2)
     if only not in MARK_SCOPES:
         typer.secho(f"--only must be one of: {', '.join(MARK_SCOPES)}", fg="red", err=True)
         raise typer.Exit(2)
+    if fmt == "bibtex":
+        from litforge.writing.bib import export_bibtex
+
+        ids = [str(r[0]) for r in conn.execute(
+            f"""SELECT p.id FROM project_papers pp JOIN papers p ON p.id=pp.paper_id
+                LEFT JOIN paper_marks m ON m.paper_id=p.id AND m.project_id=pp.project_id
+                WHERE pp.project_id=?{MARK_SCOPES[only]} ORDER BY p.year, p.title""", (pid,))]
+        typer.echo(export_bibtex(conn, ids), nl=False)
+        return
     if with_pdfs:
         _fetch(st, conn, pid, only)
     out, count = export_markdown(conn, st.paths, name, pid, only=only, config=st.config,
