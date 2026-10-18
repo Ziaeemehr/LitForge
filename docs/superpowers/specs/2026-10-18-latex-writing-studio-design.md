@@ -116,6 +116,57 @@ settings (local only / ask before cloud / budgets) and adds a per-document "no A
 - Comments and review mode for a co-author on the same machine/network. Real-time multi-user editing is out of
   scope.
 
+## Ideas taken from Overleaf (non-AI)
+
+Ranked by value for a single researcher working locally; "later" items are not part of the first version.
+
+| Overleaf feature | In the Writing Studio | When |
+|---|---|---|
+| Templates gallery (journals, theses, Persian theses) | A few bundled templates: article, thesis, Persian article/thesis (`xepersian`), a journal template the user adds by ZIP | W1 |
+| Reference manager sync (Zotero, Mendeley) | Not needed for the library itself; `references.bib` is generated from LitForge (W0). Import an existing `.bib` keeps the user's keys | W0 |
+| Autocomplete for `\cite`, `\ref`, `\label` and commands | CodeMirror completion from `references.bib`, labels in the document and a LaTeX command list | W1 (`\cite` W2) |
+| Outline / document structure panel | From `\section` etc.; click to jump | W1 |
+| Choose compiler and main file (pdfLaTeX, XeLaTeX, LuaLaTeX) | Per document: engine (Tectonic or system XeLaTeX/LuaLaTeX via `latexmk`) and main file | W1 |
+| Inline compile errors, "stop on first error", draft mode | Error list with jumps; draft/fast compile option | W1 |
+| PDF ↔ source sync (SyncTeX) | Double-click in PDF ↔ jump in source | W1 (may slip to W1.1) |
+| History with labelled versions, compare, restore | Git per document: auto-saves, named versions, diff, restore | W1 |
+| Track changes and comments | Model suggestions already arrive as accept/reject diffs (W3); comments on lines for the user's own notes | W3 / later |
+| Word count | Word count of the compiled text (excluding commands), also for Persian | W1 |
+| Symbol palette | Searchable math-symbol palette | later |
+| Visual (rich-text) editor | Not planned; a math/figure preview on hover instead | later |
+| Spell check with dictionaries | Browser spell check; English and Persian dictionaries | W1 |
+| Git / GitHub / Dropbox sync | Git remote sync (W4); Dropbox not planned | W4 |
+| Real-time collaboration, sharing links, chat | Out of scope (local-first, single user) | — |
+| Submit to journal | Out of scope | — |
+
+## Scope and feasibility
+
+The full plan is large, mostly because of W1 (a real editor with compile, preview and sync). It is feasible with
+the existing pieces (job runner, optional-tool installer, model gateway, evidence ledger), but it should be built
+as a sequence of small, usable releases, not all at once.
+
+Rough sizes (S ≈ a few days, M ≈ one to two weeks, L ≈ several weeks, each including review rounds):
+
+| Part | Size | Main risk |
+|---|---|---|
+| W0 citation keys, `.bib`, `.tex` export | S | none significant |
+| Spike: Tectonic + `xepersian` + Persian fonts | S | Tectonic may not support it; then system XeLaTeX |
+| W1-lite: editor, compile, PDF preview, error list, snapshots, templates | M | bundling CodeMirror and PDF.js without a build step |
+| W1 full: SyncTeX, autocomplete, outline, word count, ZIP import/export | M | SyncTeX with RTL text |
+| W2 evidence-aware citing | M | — |
+| W3 AI actions (start with 3: fix error, rewrite selection, suggest citations) | M | evaluation set and invented-fact guards |
+| W3 remaining actions (title/abstract, equation/table from image, assistant panel) | M–L | — |
+| W4 git remote sync | S–M | conflicts with Overleaf edits |
+
+**First usable version (recommended):** W0 → spike → W1-lite → the three most useful AI actions. That already gives
+"write in LitForge, cite from the library, fix errors and polish text with a local model", with less than half the
+total work. Everything else follows only if this version is used in practice.
+
+**Cheaper alternative, if the editor itself is the bottleneck:** keep writing in an existing editor (VS Code with
+LaTeX Workshop, TeXstudio or Overleaf) and make LitForge a companion: W0 export, a "cite" and "check citations"
+panel in the LitForge UI that edits the `.tex` file on disk, and the AI actions applied to a selected range of that
+file. This skips W1 almost entirely; the cost is a less integrated experience (two windows, no shared preview).
+
 ## Data model (sketch)
 
 - `citation_keys(paper_id PK, key UNIQUE, created_at, user_set)`.
