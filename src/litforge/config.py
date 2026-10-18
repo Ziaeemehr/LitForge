@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from litforge.llm.budget import Pricing
@@ -70,7 +71,7 @@ class VisionConfig(BaseModel):
     """Local vision model (Ollama) that rewrites pages with equations, tables or broken text as Markdown with
     LaTeX. qwen2.5vl:7b needs about 6 GB of GPU memory; pull with `ollama pull qwen2.5vl:7b`."""
 
-    model: str = "qwen2.5vl:7b"
+    model: str | None = "qwen2.5vl:7b"
     dpi: int = 150  # page image resolution sent to the model
     formula_dpi: int = 150  # page image resolution for Pix2Text (medium level)
     timeout_s: float = 300
@@ -82,6 +83,38 @@ class PrivacyConfig(BaseModel):
     require_confirmation_for_sensitive_content: bool = True
 
 
+ReasoningMode = Literal["off", "on", "auto"]
+TASK_NAMES = ("ask", "audit", "matrix_extract", "claim_extract", "claim_relation", "screen", "screen_fulltext",
+              "asset_analyze", "equation_compare", "gap_design", "console_plan", "page_rewrite")
+
+
+def reasoning_mode(value: Any) -> Any:
+    # YAML 1.1 reads unquoted on/off as booleans.
+    return ("on" if value else "off") if isinstance(value, bool) else value
+
+
+def validate_options(extra_body: dict[str, Any], headers: dict[str, str]) -> None:
+    reserved = {"model", "messages", "response_format", "max_tokens"}
+    credentials = ("auth", "token", "apikey", "secret", "password", "cookie", "credential", "session")
+    def check(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                name = str(key).lower()
+                normalized = name.replace("-", "").replace("_", "")
+                if name not in {"x-title", "http-referer"} and any(part in normalized for part in credentials):
+                    raise ValueError("credentials belong in api_key_env")
+                check(child)
+        elif isinstance(value, list):
+            for child in value:
+                check(child)
+    if reserved & extra_body.keys():
+        raise ValueError("extra_body cannot override model, messages, response_format or max_tokens")
+    check(extra_body)
+    check(headers)
+    if any("\r" in k + v or "\n" in k + v for k, v in headers.items()):
+        raise ValueError("invalid header")
+
+
 class ModelProfileConfig(BaseModel):
     provider: str
     model: str
@@ -89,20 +122,108 @@ class ModelProfileConfig(BaseModel):
     base_url: str | None = None
     api_key_env: str | None = None
     pricing: Pricing | None = None
+    vision: bool = False
+    reasoning: ReasoningMode = "off"
+    reasoning_param: Literal["none", "chat_template_kwargs", "openrouter", "reasoning_effort"] = "none"
+    reasoning_effort: Literal["low", "medium", "high"] = "medium"
+    reasoning_output_tokens: int = Field(default=4096, gt=0)
+    context_tokens: int | None = Field(default=None, gt=0)
+    max_output_tokens: int | None = Field(default=None, ge=0)
+    structured_output: Literal["json_schema", "json_object", "none"] = "json_schema"
+    extra_body: dict[str, Any] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
+    pricing_source: Literal["config", "openrouter"] = "config"
+    server: Literal["llamacpp"] | None = None
+    timeout_s: float = Field(default=120, gt=0, allow_inf_nan=False)
+    load_timeout_s: float = Field(default=900, gt=0, allow_inf_nan=False)
+
+    _reasoning = field_validator("reasoning", mode="before")(reasoning_mode)
+
+    @model_validator(mode="after")
+    def safe_options(self) -> ModelProfileConfig:
+        validate_options(self.extra_body, self.headers)
+        if ("reasoning_output_tokens" not in self.model_fields_set and not self.remote and
+                self.provider == "openai_compatible" and
+                (self.server == "llamacpp" or self.reasoning_param == "chat_template_kwargs")):
+            self.reasoning_output_tokens = 8192
+        return self
+
+
+class TaskModelConfig(BaseModel):
+    profile: str
+    reasoning: ReasoningMode | None = None
+    max_output_tokens: int | None = Field(default=None, ge=0)
+
+    _reasoning = field_validator("reasoning", mode="before")(reasoning_mode)
+
+
+class LlamaCppServerConfig(BaseModel):
+    managed: bool = False
+    command: str = "llama-server"
+    preset: str = "llamacpp-models.ini"
+    host: str = "127.0.0.1"
+    port: int = Field(default=8093, ge=1, le=65535)
+    models_max: int = Field(default=1, ge=1)
+    idle_unload_minutes: float = Field(default=15, ge=0, allow_inf_nan=False)
+    start_timeout_s: float = Field(default=60, gt=0, allow_inf_nan=False)
+
+    @field_validator("host")
+    @classmethod
+    def loopback(cls, host: str) -> str:
+        if host != "localhost" and not ipaddress.ip_address(host).is_loopback:
+            raise ValueError("managed llama.cpp host must be loopback")
+        return host
+
+    @property
+    def base_url(self) -> str:
+        host = f"[{self.host}]" if ":" in self.host else self.host
+        return f"http://{host}:{self.port}/v1"
+
+
+class SetupOwnedConfig(BaseModel):
+    profiles: list[str] = Field(default_factory=list)
+    tasks: list[str] = Field(default_factory=list)
+    server: Literal["llamacpp"] | None = None
 
 
 class ModelsConfig(BaseModel):
+    setup_owned: SetupOwnedConfig = Field(default_factory=SetupOwnedConfig)
+    vision_profile: str | None = None
     policy: Literal["local_only", "ask_before_cloud", "hybrid"] = "local_only"
     local: ModelProfileConfig = Field(
         default_factory=lambda: ModelProfileConfig(provider="ollama", model="qwen3:4b")
     )
     profiles: dict[str, ModelProfileConfig] = Field(default_factory=dict)
+    tasks: dict[str, TaskModelConfig] = Field(default_factory=dict)
+    servers: dict[Literal["llamacpp"], LlamaCppServerConfig] = Field(default_factory=dict)
+    setup_tier: Literal["large", "medium", "small", "cloud"] | None = None
+
+    @model_validator(mode="after")
+    def linked_servers(self) -> ModelsConfig:
+        for profile in [self.local, *self.profiles.values()]:
+            if profile.server:
+                if profile.server not in self.servers:
+                    raise ValueError("profile server is not configured")
+                if profile.remote or profile.provider != "openai_compatible":
+                    raise ValueError("server profiles must be local openai_compatible profiles")
+                endpoint = self.servers[profile.server].base_url
+                if profile.base_url is not None and profile.base_url.rstrip("/") != endpoint:
+                    raise ValueError("server profile base_url must match the loopback server")
+                profile.base_url = endpoint
+        return self
+
+    @field_validator("tasks")
+    @classmethod
+    def known_tasks(cls, tasks: dict[str, TaskModelConfig]) -> dict[str, TaskModelConfig]:
+        if set(tasks) - set(TASK_NAMES):
+            raise ValueError("unknown task; valid tasks: " + ", ".join(TASK_NAMES))
+        return tasks
 
 
 class BudgetConfig(BaseModel):
-    max_per_call_usd: float = 1
-    max_per_run_usd: float = 2
-    max_per_month_usd: float = 20
+    max_per_call_usd: float = Field(default=1, ge=0, allow_inf_nan=False)
+    max_per_run_usd: float = Field(default=2, ge=0, allow_inf_nan=False)
+    max_per_month_usd: float = Field(default=20, ge=0, allow_inf_nan=False)
 
 
 class ConsoleConfig(BaseModel):
@@ -110,6 +231,8 @@ class ConsoleConfig(BaseModel):
 
 
 class Config(BaseModel):
+    data_root: Path | None = Field(default=None, exclude=True)
+    config_path: Path | None = Field(default=None, exclude=True)
     parsing: ParsingConfig = Field(default_factory=ParsingConfig)
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
     discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
@@ -137,7 +260,8 @@ class Paths:
     def __init__(self, root: Path, exports_root: Path | None = None) -> None:
         self.root = root.expanduser().resolve()
         # Exports are meant to be opened by the user, so by default they live outside the data root.
-        default = os.environ.get("LITFORGE_EXPORT_ROOT") or "~/Downloads/LitForge"
+        default = (os.environ.get("LITFORGE_EXPORT_ROOT") or load_settings(self).get("exports_root")
+                   or "~/Downloads/LitForge")
         self.exports_root = (exports_root or Path(default)).expanduser().resolve()
 
     def default_exports(self, project: str) -> Path:
@@ -202,15 +326,20 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return out
 
 
-def load_config(path: Path | None = None) -> Config:
-    """Load defaults from configs/default.yaml, then merge an optional override file."""
+def load_config(path: Path | None = None, data_root: Path | None = None) -> Config:
+    """Merge defaults, data-directory settings, then explicit/environment overrides."""
     data: dict[str, Any] = {}
     if DEFAULT_CONFIG_PATH.exists():
         data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text()) or {}
+    user = data_root / "config.yaml" if data_root is not None else None
+    if user is not None and user.exists():
+        data = _deep_merge(data, yaml.safe_load(user.read_text()) or {})
     override = path or EnvSettings().config
     if override is not None:
         data = _deep_merge(data, yaml.safe_load(Path(override).read_text()) or {})
-    return Config.model_validate(data)
+    cfg = Config.model_validate(data)
+    cfg.data_root, cfg.config_path = data_root, override
+    return cfg
 
 
 def resolve_paths(data_dir: Path | None = None) -> Paths:

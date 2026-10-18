@@ -7,6 +7,7 @@ import io
 import json
 import sqlite3
 from collections.abc import Iterator
+from functools import partial
 from pathlib import Path
 from typing import Literal
 
@@ -21,7 +22,7 @@ from litforge.analysis.ledger import EvidenceSpan, get_spans, record_spans, to_p
 from litforge.analysis.markdown_safe import excerpt, inert
 from litforge.analysis.prompts import MATRIX_PROMPT_VERSION, matrix_messages
 from litforge.analysis.runs import canonical_json, finish_run, input_hash, link_evidence, start_run
-from litforge.analysis.validation import citations, image_only_numbers, missing_numbers, number
+from litforge.analysis.validation import EvidenceText, citations, image_only_numbers, missing_numbers, number
 from litforge.indexing.fts import current_runs, search
 from litforge.llm.base import LlmError, LlmUnavailable
 from litforge.llm.budget import BudgetExceeded
@@ -63,7 +64,7 @@ class CellDraft(BaseModel):
     value: CellValue = None
     unit: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)
-    note: str = ""
+    note: EvidenceText = ""
 
 
 class ValidatedCell(BaseModel):
@@ -71,7 +72,7 @@ class ValidatedCell(BaseModel):
     value: CellValue = None
     unit: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)
-    note: str = ""
+    note: EvidenceText = ""
 
 
 class MatrixCell(ValidatedCell):
@@ -220,7 +221,7 @@ def _work(conn: sqlite3.Connection, gateway: ModelGateway, matrix: Matrix, paper
     if paper_ids is not None and set(paper_ids) - runs.keys():
         raise ValueError("selected paper is outside the matrix project or has no current parse")
     selected = {p: r for p, r in runs.items() if paper_ids is None or p in paper_ids}
-    cfg = gateway.config.models.profiles.get(profile or "local", gateway.config.models.local)
+    cfg = gateway.resolve("matrix_extract", profile)[1]
     for paper, run in sorted(selected.items()):
         for column in matrix.columns:
             hits = search(conn, f"{column.label} {column.instruction} {matrix.question}",
@@ -234,10 +235,11 @@ def _work(conn: sqlite3.Connection, gateway: ModelGateway, matrix: Matrix, paper
             preview = None
             provider, model = cfg.provider, cfg.model
             if spans:
-                packet = to_packet(spans)
-                preview = gateway.preview("matrix_extract", packet,
-                                          matrix_messages(matrix.question, column.model_dump_json(), packet, spans),
-                                          profile=profile)
+                packet, messages = gateway.fit_evidence("matrix_extract", to_packet(spans),
+                    partial(matrix_messages, matrix.question, column.model_dump_json(), spans=spans),
+                    profile, schema=CellDraft.model_json_schema())
+                preview = gateway.preview("matrix_extract", packet, messages,
+                                          profile=profile, schema=CellDraft.model_json_schema())
                 provider, model = preview.provider, preview.model
             cache_key = input_hash([run["id"], column.column_hash, provider, model, MATRIX_PROMPT_VERSION])
             old = existing.get((paper, column.key))
@@ -286,10 +288,10 @@ def extract_matrix(conn: sqlite3.Connection, gateway: ModelGateway, matrix_id: s
                 try:
                     if budget:
                         raise BudgetExceeded("budget")
-                    packet = to_packet(work.spans)
-                    reply = gateway.call("matrix_extract", packet,
-                                         matrix_messages(matrix.question, work.column.model_dump_json(),
-                                                         packet, work.spans), CellDraft.model_json_schema(),
+                    packet, messages = gateway.fit_evidence("matrix_extract", to_packet(work.spans),
+                        partial(matrix_messages, matrix.question, work.column.model_dump_json(), spans=work.spans),
+                        profile, schema=CellDraft.model_json_schema())
+                    reply = gateway.call("matrix_extract", packet, messages, CellDraft.model_json_schema(),
                                          profile=profile, approved=approved, run_id=run_id,
                                          prompt_version=MATRIX_PROMPT_VERSION)
                     data, flags = validate_cell(CellDraft.model_validate(reply.content), work.column, packet)

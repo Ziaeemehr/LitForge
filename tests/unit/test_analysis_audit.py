@@ -8,6 +8,7 @@ from lens_fakes import gateway, seed
 
 from litforge.analysis.ask import ask, get_answer
 from litforge.analysis.audit import audit_answer, plan_calls
+from litforge.analysis.prompts import AUDIT_PROMPT_VERSION
 from litforge.analysis.review import review_queue
 
 
@@ -30,7 +31,7 @@ def test_verdict_storage_and_queue(conn: sqlite3.Connection, verdict: str) -> No
     call = conn.execute("SELECT * FROM model_calls WHERE task='audit'").fetchone()
     run = conn.execute("SELECT * FROM analysis_runs WHERE id=?", (call["run_id"],)).fetchone()
     assert run["task"] == "audit" and json.loads(run["config_json"])["answer_run"] == answer.run_id
-    assert call["prompt_version"] == "audit-v1"
+    assert call["prompt_version"] == AUDIT_PROMPT_VERSION
 
 
 def test_audit_sees_only_cited_spans(conn: sqlite3.Connection) -> None:

@@ -35,7 +35,7 @@ if hasattr(pymupdf, "no_recommend_layout"):
     pymupdf.no_recommend_layout()  # pymupdf_layout is a benchmark candidate, not a default
 
 # Bump when heuristics change so cached parses are invalidated.
-ALGORITHM_VERSION = "5"
+ALGORITHM_VERSION = "6"
 
 CAPTION_RE = re.compile(
     r"^\s*(?P<kind>fig(?:ure)?s?\.?|table|tab\.)\s*(?P<num>S?\d+[a-z]?)"
@@ -237,8 +237,17 @@ def _group_equations(blocks: list[Block], body_size: float, page_width: float) -
             return "L"
         return "R" if b.bbox[0] >= mid - tol else "F"
 
+    # Equation fragments alone cannot reveal the layout: a centred single-column
+    # equation can have pieces entirely in either half of the page.
+    prose = [b for b in blocks if b.kind == "text" and len(b.text) >= 60 and b.math < 0.2]
+    prose_sides = {side(b) for b in prose}
+    two_columns = (
+        {"L", "R"} <= prose_sides
+        and sum(len(b.text) for b in prose if side(b) != "F") >= 0.6 * sum(len(b.text) for b in prose)
+    )
+
     def near(a: Block, b: Block) -> bool:
-        if {side(a), side(b)} == {"L", "R"}:
+        if two_columns and {side(a), side(b)} == {"L", "R"}:
             return False
         dy = max(a.bbox[1], b.bbox[1]) - min(a.bbox[3], b.bbox[3])  # negative when rows overlap
         if dy > 0.9 * body_size:

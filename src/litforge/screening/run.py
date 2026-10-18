@@ -33,8 +33,10 @@ class ScreenReport(BaseModel):
     counts: dict[str, int] = Field(default_factory=dict)
 
 
-def screen_run(conn: sqlite3.Connection, llm: Llm, run_id: str, top: int,
-               progress: Callable[[str], None] | None = None, log: EventLog | None = None) -> ScreenReport:
+def screen_run(conn: sqlite3.Connection, llm: Llm | None, run_id: str, top: int,
+               progress: Callable[[str], None] | None = None, log: EventLog | None = None,
+               gateway: ModelGateway | None = None, profile: str | None = None,
+               approved: bool = False) -> ScreenReport:
     """Screen the run's `top` papers by priority. Unchanged results (same prompt, model, criteria and text)
     are kept; each paper is committed on its own, so an interrupted run resumes where it stopped."""
     if top < 1:
@@ -45,19 +47,23 @@ def screen_run(conn: sqlite3.Connection, llm: Llm, run_id: str, top: int,
     project_id = run["project_id"]
     if load_criteria(conn, project_id).is_empty():
         raise ValueError("no screening criteria: fill in the research question first")
-    llm.check()
-    config = Config()
-    config.models.local.model = llm.name
-    gateway = ModelGateway(conn, config, providers={"local": llm})
+    if gateway is None:
+        if llm is None:
+            raise ValueError("screening requires a gateway or LLM")
+        llm.check()
+        config = Config()
+        config.models.local.model = llm.name
+        gateway = ModelGateway(conn, config, providers={"local": llm})
     papers = [r[0] for r in conn.execute(
         "SELECT d.paper_id FROM discovery_results d JOIN papers p ON p.id=d.paper_id WHERE d.run_id=? "
         "ORDER BY COALESCE(d.priority,d.score) DESC,p.title LIMIT ?", (run_id, top))]
-    return screen_papers(conn, gateway, project_id, papers, progress=progress, log=log, discovery_run=run_id)
+    return screen_papers(conn, gateway, project_id, papers, progress=progress, log=log, discovery_run=run_id,
+                         profile=profile, approved=approved)
 
 
 def screen_papers(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, paper_ids: list[str],
                   *, progress: Callable[[str], None] | None = None, log: EventLog | None = None,
-                  discovery_run: str = "") -> ScreenReport:
+                  discovery_run: str = "", profile: str | None = None, approved: bool = False) -> ScreenReport:
     """Screen selected project papers through the supplied gateway, including newly imported papers."""
     criteria = load_criteria(conn, project_id)
     if criteria.is_empty():
@@ -71,7 +77,7 @@ def screen_papers(conn: sqlite3.Connection, gateway: ModelGateway, project_id: s
         "LEFT JOIN screening_results s ON s.project_id=? AND s.paper_id=p.id ORDER BY p.id", (project_id,))
         if r["id"] in selected}
     papers = [rows[pid] for pid in dict.fromkeys(paper_ids)]
-    model = gateway.config.models.local.model
+    model = gateway.resolve("screen", profile)[1].model
     say = progress or (lambda _m: None)
     report = ScreenReport(run_id=discovery_run, project_id=project_id, model=model, candidates=len(papers))
     chash, schema, counts = criteria_hash(criteria), response_schema(criteria), Counter[str]()
@@ -91,7 +97,8 @@ def screen_papers(conn: sqlite3.Connection, gateway: ModelGateway, project_id: s
                 try:
                     packet = EvidencePacket(items=[EvidenceItem(id="s1_" + p["id"], paper_id=p["id"], page=1,
                         text=f"{p['title'] or ''}\n{p['abstract'] or ''}".strip() or "No title or abstract")])
-                    raw = gateway.call("screen", packet, messages, schema, run_id=analysis_id,
+                    raw = gateway.call("screen", packet, messages, schema, profile=profile, approved=approved,
+                                       run_id=analysis_id,
                                        prompt_version=PROMPT_VERSION).content
                     decision = decide(raw, criteria, p["title"], p["abstract"])
                     break

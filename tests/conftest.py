@@ -168,3 +168,23 @@ def conn(paths: Paths):  # type: ignore[no-untyped-def]
     c = open_db(paths.db)
     yield c
     c.close()
+
+
+@pytest.fixture(autouse=True)
+def no_system_keychain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never consult the developer's actual keychain. Secret tests inject their own backend."""
+    from litforge.llm import secrets
+    def unavailable(args: list[str], value: str | None = None) -> str:
+        raise secrets.SecretMissing("test keychain is empty")
+    monkeypatch.setattr(secrets, "_run", unavailable)
+    # Windows tests inject Credentials/DLL explicitly; default resolution is offline everywhere.
+    monkeypatch.setattr(secrets.KeyStore, "_windows", lambda self: self.credentials or EmptyCredentials())
+
+
+class EmptyCredentials:
+    def read(self, name: str) -> None:
+        return None
+    def write(self, name: str, value: str) -> None:
+        raise AssertionError("Tests must inject a fake credential layer")
+    def delete(self, name: str) -> None:
+        raise AssertionError("Tests must inject a fake credential layer")

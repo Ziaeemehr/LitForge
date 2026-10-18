@@ -163,26 +163,12 @@
   // Unpaywall finds many more open-access copies, but needs the user's e-mail: ask for it here, where it helps.
   function showMail(mailto) {
     var el = $('missing-mail');
-    el.innerHTML = mailto
-      ? 'Also searching Unpaywall with your e-mail <b>' + esc(mailto) + '</b> · <a href="#" id="mail-edit">change</a>'
-      : 'LitForge can find more open-access copies through <b>Unpaywall</b>, which asks for your e-mail with each ' +
-        'request (no account; it is also sent to OpenAlex and Crossref, and saved only on this computer).<br>' +
-        '<input type="email" id="mail-input" placeholder="you@university.edu"><button class="btn small" id="mail-save">Save</button>';
-    if (mailto) {
-      $('mail-edit').onclick = function (e) {
-        e.preventDefault();
-        showMail(null);
-        $('mail-input').value = mailto;
-        $('mail-input').focus();
-      };
-      return;
-    }
-    $('mail-save').onclick = function () {
-      post('/api/settings', { mailto: $('mail-input').value }).then(function (r) {
-        showMail(r.mailto);
-        toast(r.mailto ? 'Saved; press "Search for these PDFs again"' : 'E-mail removed');
-      }).catch(function (e) { toast(e.message); });
-    };
+    el.replaceChildren();
+    var text = document.createElement('span');
+    text.textContent = mailto ? 'Contact e-mail for PDF discovery: ' + mailto + ' · ' :
+      'Add your contact e-mail in Settings to find more open-access copies with Unpaywall. ';
+    el.appendChild(text);
+    el.appendChild(modelButton('Settings', function () { $('missing').close(); showView('settings'); }));
   }
 
   function fetchMissing() {
@@ -456,9 +442,10 @@
   }
 
   function showView(view) {
+    if (view === 'models') view = 'settings';
     state.page = view;
-    if (history.replaceState) history.replaceState(null, '', /^(recents|library|ask|matrix|claims|gaps|console)$/.test(view) ? '#' + view : location.pathname);
-    ['new', 'recents', 'library', 'ask', 'matrix', 'claims', 'gaps', 'console'].forEach(function (v) { $(('view-' + v)).hidden = v !== view; });
+    if (history.replaceState) history.replaceState(null, '', /^(recents|library|ask|matrix|claims|gaps|console|settings)$/.test(view) ? '#' + view : location.pathname);
+    ['new', 'recents', 'library', 'ask', 'matrix', 'claims', 'gaps', 'console', 'settings'].forEach(function (v) { $(('view-' + v)).hidden = v !== view; });
     $('results').hidden = view !== 'results';
     document.querySelectorAll('.sidebar [data-view]').forEach(function (b) { b.classList.toggle('on', b.dataset.view === view); });
     document.querySelectorAll('#side-recent a').forEach(function (a) { a.classList.remove('on'); });
@@ -468,6 +455,7 @@
     if (view === 'ask' || view === 'matrix' || view === 'claims') enterLens(view);
     if (view === 'gaps') loadGaps();
     if (view === 'console') loadConsole();
+    if (view === 'settings') loadSettings();
   }
 
   function deleteRun() {
@@ -929,7 +917,11 @@
           (function poll() {
             api('/api/jobs/' + encodeURIComponent(job.id)).then(function (state) {
               if (request !== drawerRequest) return;
-              if (state.status === 'running') { setTimeout(poll, 500); return; }
+              if (state.status === 'running') {
+                if (state.messages && state.messages.length) results.replaceChildren(lensNode('p',
+                  state.messages[state.messages.length - 1], 'hint'));
+                setTimeout(poll, 500); return;
+              }
               button.disabled = false;
               results.replaceChildren();
               if (state.status !== 'done') {
@@ -1282,7 +1274,7 @@
   }
 
   function planConsole(request, approvedCloud) {
-    return post('/api/console/plan', { project: state.project, request: request,
+    return post('/api/console/plan', { project: state.project, request: request, profile: $('console-profile').value || null,
       approved_cloud: !!approvedCloud }).catch(function (error) {
       if (error.status !== 403 || approvedCloud) throw error;
       var plan = error.preview || {};
@@ -1329,19 +1321,20 @@
     var status = $('gaps-status');
     status.textContent = 'Planning proposal…';
     function start(isApproved) {
-      return post('/api/gaps/design', { gap_id: gapId, approved: isApproved }).catch(function (error) {
+      return post('/api/gaps/design', { gap_id: gapId, profile: $('gaps-profile').value || null, approved: isApproved }).catch(function (error) {
         if (error.status !== 403) throw error;
         var plan = error.preview || {};
         var cost = plan.max_cost_usd == null ? 'unknown cost' : '$' + Number(plan.max_cost_usd).toFixed(4);
         if (!window.confirm('Send project evidence to ' + (plan.provider || 'the configured provider') + ' (' +
             (plan.model || 'model') + ')? Estimated maximum cost: ' + cost + '.')) throw error;
-        return post('/api/gaps/design', { gap_id: gapId, approved: true });
+        return post('/api/gaps/design', { gap_id: gapId, profile: $('gaps-profile').value || null, approved: true });
       });
     }
     start(approved === true).then(function (job) {
       (function poll() {
         api('/api/jobs/' + encodeURIComponent(job.id)).then(function (result) {
-          if (result.status === 'running') { status.textContent = 'Designing a cited proposal…'; setTimeout(poll, 500); return; }
+          if (result.status === 'running') { status.textContent = result.messages && result.messages.length ?
+            result.messages[result.messages.length - 1] : 'Designing a cited proposal…'; setTimeout(poll, 500); return; }
           if (result.status !== 'done') { status.textContent = result.error || 'Proposal design failed.'; return; }
           loadGaps();
         }).catch(function (error) { status.textContent = error.message; });
@@ -1664,6 +1657,361 @@
     zone.querySelector('a').onclick = function (e) { e.preventDefault(); clear(); };
   }
 
+  /* ---------- Models settings ---------- */
+  var modelsInfo = null;
+  var modelProviders = {
+    openrouter: ['OpenRouter — one key for GPT, Claude, Gemini, DeepSeek, Qwen, Kimi', 'https://openrouter.ai/models'],
+    openai: ['OpenAI (GPT)', 'https://platform.openai.com/docs/models'],
+    anthropic: ['Anthropic (Claude)', 'https://docs.anthropic.com/en/docs/about-claude/models/overview'],
+    google: ['Google (Gemini)', 'https://ai.google.dev/gemini-api/docs/models'],
+    deepseek: ['DeepSeek', 'https://api-docs.deepseek.com/quick_start/pricing'],
+    qwen: ['Qwen (Alibaba Cloud)', 'https://www.alibabacloud.com/help/en/model-studio/models'],
+    kimi: ['Kimi (Moonshot)', 'https://platform.moonshot.ai/docs/models']
+  };
+  var modelTaskLabels = {
+    ask: 'Ask questions', audit: 'Audit answers', matrix_extract: 'Extract comparison matrix',
+    claim_extract: 'Extract claims', claim_relation: 'Compare claim relationships',
+    screen: 'Title and abstract screening', screen_fulltext: 'Full-text screening',
+    asset_analyze: 'Analyze figures and tables', equation_compare: 'Compare equations',
+    gap_design: 'Design research gaps', console_plan: 'Plan console workflows', page_rewrite: 'Rewrite pages'
+  };
+
+  function updateProviderModelsLink() {
+    var provider = modelProviders[$('models-provider').value] || modelProviders.openrouter;
+    $('models-provider-models').href = provider[1];
+    $('models-provider-models').textContent = 'Browse models ↗';
+  }
+
+
+  function modelButton(label, action) {
+    var button = document.createElement('button');
+    button.className = 'btn small'; button.textContent = label; button.onclick = action;
+    return button;
+  }
+
+  function loadModels() {
+    return api('/api/models').then(function (info) {
+      modelsInfo = info;
+      var hw = info.hardware, proposal = info.proposal;
+      var build = (hw.llama_version || '').match(/\bbuild[:\s]+b?(\d+)/i) ||
+        (hw.llama_version || '').match(/\bversion[:\s]+b?(\d+)(?![\d.])/i);
+      $('models-hardware').textContent = hw.os + ' · ' + (hw.arch || '') + ' · RAM ' + hw.ram_gb + ' GB' +
+        (hw.gpu_name ? ' · ' + hw.gpu_name + ' (' + hw.gpu_vram_gb + ' GB VRAM)' : '') +
+        (build ? ' · llama.cpp build ' + build[1] : '') + ' · Free disk ' + (hw.free_disk_gb || 0).toFixed(1) + ' GB';
+      $('models-current').textContent = 'Current setup: ' + (info.tier || 'original defaults') +
+        ' · Cloud ' + (info.cloud_enabled ? 'enabled (approval required)' : 'off');
+      $('models-recommendation').textContent = 'Recommended: ' + proposal.tier + ' · About ' + proposal.download_gb +
+        ' GB download / ' + proposal.memory_gb + ' GB memory. ' + proposal.notes;
+      $('models-vision').textContent = info.vision_enabled ? 'Image features enabled.' :
+        'Image features are off for this setup. Choose a vision profile or apply the medium/large tier to enable them.';
+      $('models-apply').disabled = false;
+      $('models-server').textContent = info.server.foreign ? 'Port is used by another server.' :
+        info.server.running ? 'llama-server running' + (info.server.owned ? ' (managed by LitForge)' : ' (external)') +
+          ' · ' + (info.server.preset_models || []).map(function (name) {
+            var m = info.server.models.find(function (entry) { return entry.id === name; }) || { id: name };
+            return m.id + ': ' + (typeof m.status === 'object' ? m.status.value : m.status || 'unknown');
+          }).join(' · ') : 'llama-server stopped';
+      $('models-tasks').textContent = JSON.stringify(info.tasks, null, 2);
+      $('models-profiles').replaceChildren();
+      info.profiles.forEach(function (p) {
+        var row = document.createElement('div'), label = document.createElement('span');
+        row.className = 'models-profile';
+        label.textContent = p.name + ' · ' + p.model + (p.remote ? ' (cloud)' : ' (local)') + (p.vision ? ' · images' : '');
+        row.appendChild(label);
+        row.appendChild(modelButton('Test', function () { testSettingsModel(p); }));
+        row.appendChild(modelButton('Assign tasks…', function () { assignSettingsTasks(p.name); }));
+        if (p.name !== 'local' && p.name !== 'local_vision') row.appendChild(modelButton('Remove', function () {
+          reviewModelsChange({ action: 'remove', name: p.name, delete_files: !p.remote && window.confirm('Also delete downloaded files owned by this profile?') });
+        }));
+        $('models-profiles').appendChild(row);
+      });
+      var provider = $('models-provider'), previous = provider.value;
+      provider.replaceChildren();
+      info.providers.forEach(function (name) {
+        var option = document.createElement('option'); option.value = name; option.textContent = (modelProviders[name] || [name])[0];
+        provider.appendChild(option);
+      });
+      provider.value = previous || info.providers[0];
+      provider.onchange = updateProviderModelsLink;
+      updateProviderModelsLink();
+      // Keep selections while status refreshes.
+      var selected = Array.from($('models-add-tasks').children).filter(function (label) {
+        return label.children[0] && label.children[0].checked;
+      }).map(function (label) { return label.children[0].value; });
+      $('models-add-tasks').replaceChildren();
+      (info.task_names || []).forEach(function (task) {
+        var label = document.createElement('label'), input = document.createElement('input');
+        var text = document.createElement('span');
+        label.className = 'check'; input.type = 'checkbox'; input.value = task;
+        input.checked = selected.indexOf(task) !== -1;
+        text.textContent = modelTaskLabels[task] || task.replace(/_/g, ' ');
+        label.appendChild(input); label.appendChild(text); $('models-add-tasks').appendChild(label);
+      });
+      $('models-cloud').textContent = info.cloud_enabled ? 'Turn cloud off' : 'Enable cloud…';
+      if (info.budget) {
+        ['call', 'run', 'month'].forEach(function (key) { $('budget-' + key).value = info.budget['max_per_' + key + '_usd']; });
+        $('settings-policy').value = info.policy;
+        $('settings-mailto').value = info.mailto || '';
+        $('settings-exports').value = info.exports_root || '';
+        renderTaskChecks('local-tasks', info.task_names || []);
+      }
+    }).catch(function (e) { $('models-status').textContent = e.message; });
+  }
+
+  function reviewModelsChange(body) {
+    return post('/api/models/preview', body).then(function (preview) {
+      $('models-diff').textContent = preview.notice + '\n\n' + preview.diff;
+      if (!window.confirm(preview.notice + '\n\n' + preview.diff + '\nApply these exact file changes?')) return;
+      return post('/api/models/apply', { token: preview.token, confirmed: true }).then(function () {
+        $('models-status').textContent = 'Saved model settings.';
+        refreshModelChoices();
+        return loadModels();
+      });
+    }).catch(function (e) { $('models-status').textContent = e.message; });
+  }
+
+  function testSettingsModel(profile) {
+    var approved = false;
+    if (profile.remote) {
+      approved = window.confirm('Send a fixed diagnostic prompt' + (profile.vision ? ' and a generated test image' : '') +
+        ' to ' + profile.name + '? This uses your API account and budget. No library evidence is included.');
+      if (!approved) return;
+    }
+    $('models-status').textContent = 'Testing ' + profile.name + '…';
+    post('/api/models/test', { profile: profile.name, vision: !!profile.vision, approved: approved }).then(function (job) {
+      (function tick() {
+        api('/api/jobs/' + job.id).then(function (j) {
+          $('models-status').textContent = j.status === 'running' ? j.messages[j.messages.length - 1] || 'Testing…' :
+            j.status === 'failed' ? j.error : JSON.stringify(j.report, null, 2);
+          if (j.status === 'running') setTimeout(tick, 1000);
+          else loadModels();
+        }).catch(function (e) { $('models-status').textContent = e.message; });
+      })();
+    }).catch(function (e) { $('models-status').textContent = e.message; });
+  }
+
+  function initModels() {
+    $('models-refresh').onclick = loadModels;
+    $('models-tier').onchange = function () {
+      $('models-apply').disabled = false;
+      if (this.value === 'cloud' && typeof searchCatalogue === 'function') searchCatalogue();
+    };
+    $('models-apply').onclick = function () { reviewModelsChange({ action: 'setup', tier: $('models-tier').value || null,
+      cheap: $('cloud-cheap').value || null, strong: $('cloud-strong').value || null }); };
+    $('models-cloud').onclick = function () { reviewModelsChange({ action: 'cloud', enabled: !modelsInfo.cloud_enabled }); };
+    $('models-add').onsubmit = function (e) {
+      e.preventDefault();
+      function price(id) { return $(id).value.trim() ? Number($(id).value) : null; }
+      reviewModelsChange({ action: 'add', provider: $('models-provider').value,
+        model: $('models-id').value.trim(), name: $('models-name').value.trim(),
+        price_in: price('models-price-in'), price_out: price('models-price-out'),
+        tasks: Array.from($('models-add-tasks').querySelectorAll('input:checked')).map(function (input) { return input.value; }),
+        vision: $('models-add-vision').checked, reasoning: $('models-reasoning').value });
+    };
+  }
+  /* ---------- End Models settings ---------- */
+
+  /* ---------- Settings ---------- */
+  var localRepo = null, activeDownload = null, catalogueGeneration = 0, localBackend = 'hf', settingsAssignment = null;
+
+  function settingsError(e) { $('models-status').textContent = e.message; }
+
+  function renderTaskChecks(id, tasks) {
+    var container = $(id), chosen = Array.from(container.querySelectorAll('input:checked')).map(function (i) { return i.value; });
+    container.replaceChildren();
+    tasks.forEach(function (task) {
+      var label = document.createElement('label'), input = document.createElement('input'), text = document.createElement('span');
+      label.className = 'check'; input.type = 'checkbox'; input.value = task; input.checked = chosen.indexOf(task) >= 0;
+      text.textContent = modelTaskLabels[task] || task;
+      label.appendChild(input); label.appendChild(text); container.appendChild(label);
+    });
+  }
+  function selectedLocalTasks() {
+    return Array.from($('local-tasks').querySelectorAll('input:checked')).map(function (input) { return input.value; });
+  }
+  function assignSettingsTasks(name) {
+    if (settingsAssignment) settingsAssignment.remove();
+    var panel = document.createElement('div'), checks = document.createElement('div');
+    settingsAssignment = panel;
+    checks.id = 'settings-assign-checks'; checks.className = 'task-checks'; panel.appendChild(checks);
+    $('models-profiles').appendChild(panel);
+    renderTaskChecks(checks.id, modelsInfo.task_names || []);
+    panel.appendChild(modelButton('Review assignments to ' + name, function () {
+      var tasks = Array.from(checks.querySelectorAll('input:checked')).map(function (input) { return input.value; });
+      reviewModelsChange({ action: 'assign', name: name, tasks: tasks });
+    }));
+  }
+
+  function loadKeys() {
+    return api('/api/keys').then(function (info) {
+      $('keys-list').replaceChildren(); $('keys-name').replaceChildren();
+      (info.keys || []).forEach(function (key) {
+        var row = document.createElement('div'), text = document.createElement('span'), option = document.createElement('option');
+        row.className = 'models-profile'; text.textContent = key.name + ' · ' + key.source; row.appendChild(text);
+        option.value = key.name; option.textContent = key.name; $('keys-name').appendChild(option);
+        if (info.available) row.appendChild(modelButton('Remove keychain entry', function () {
+          if (!window.confirm('Remove the system keychain entry for ' + key.name + '? Environment variables stay set.')) return;
+          api('/api/keys', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: key.name }) })
+            .then(loadKeys).catch(settingsError);
+        }));
+        $('keys-list').appendChild(row);
+      });
+      $('keys-save').disabled = !info.available;
+      $('keys-value').disabled = !info.available;
+      $('keys-status').textContent = info.available ? 'Environment values take precedence over the system keychain. Values are never shown.' :
+        'System keychain unavailable. Set keys as environment variables (on Linux, secret-tool enables keychain storage).';
+    }).catch(settingsError);
+  }
+
+  function renderCatalogue(id, entries) {
+    var select = $(id), previous = select.value;
+    select.replaceChildren();
+    var empty = document.createElement('option'); empty.value = '';
+    empty.textContent = id === 'cloud-cheap' ? 'Choose an image-capable model' : 'Use the cheap model for analysis too';
+    select.appendChild(empty);
+    entries.forEach(function (item) {
+      var option = document.createElement('option'); option.value = item.id;
+      var input = Number(item.input_per_million_usd), output = Number(item.output_per_million_usd), context = Number(item.context_length);
+      if (!Number.isFinite(input) || !Number.isFinite(output) || !Number.isFinite(context) || input < 0 || output < 0 || context <= 0) return;
+      option.textContent = item.name + ' · ' + item.id + ' · $' + input + ' in / $' + output + ' out per million · ' + context + ' context' +
+        (Array.isArray(item.input_modalities) && item.input_modalities.indexOf('image') >= 0 ? ' · accepts images' : '') + (item.label ? ' · ' + item.label : '');
+      select.appendChild(option);
+    });
+    if (entries.some(function (item) { return item.id === previous; })) select.value = previous;
+  }
+  function searchCatalogue() {
+    var generation = ++catalogueGeneration;
+    var query = '?q=' + encodeURIComponent($('catalogue-query').value.trim());
+    if ($('catalogue-max').value.trim()) query += '&max_input_price=' + encodeURIComponent($('catalogue-max').value);
+    return Promise.all([api('/api/models/catalogue' + query + '&vision=1'), api('/api/models/catalogue' + query)])
+      .then(function (results) {
+        if (generation !== catalogueGeneration) return;
+        renderCatalogue('cloud-cheap', results[0]); renderCatalogue('cloud-strong', results[1]);
+        if (!results[0].length) $('models-status').textContent = 'No image-capable catalogue models matched. Try another search.';
+      }).catch(settingsError);
+  }
+  function loadSettings() {
+    return Promise.all([loadModels(), loadKeys()]).then(function () {
+      if (modelsInfo && modelsInfo.proposal && modelsInfo.proposal.recommended_tier === 'cloud' && !$('cloud-cheap').value) return searchCatalogue();
+    });
+  }
+
+  function renderLocalRepos(repos) {
+    $('local-results').replaceChildren(); $('local-files').replaceChildren();
+    repos.forEach(function (repo) {
+      var row = document.createElement('div'), text = document.createElement('span'), link = document.createElement('a');
+      row.className = 'models-profile'; text.textContent = repo.id + ' · ' + Number(repo.downloads || 0) + ' downloads · ' + repo.badge + (repo.label ? ' · ' + repo.label : '');
+      row.appendChild(text);
+      // Build a trusted origin from a validated identifier; catalogue-supplied card URLs are not used.
+      if (/^[A-Za-z0-9_-][A-Za-z0-9._-]*\/[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(repo.id) && repo.id.indexOf('..') < 0) {
+        link.href = 'https://huggingface.co/' + repo.id; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      }
+      link.textContent = 'Model card ↗'; row.appendChild(link);
+      row.appendChild(modelButton('Choose files', function () { loadLocalFiles(repo.id); }));
+      $('local-results').appendChild(row);
+    });
+  }
+  function loadLocalFiles(repo) {
+    localRepo = repo;
+    $('local-files').textContent = 'Loading quantizations…';
+    return api('/api/models/local-files?repo=' + encodeURIComponent(repo)).then(function (tree) {
+      if (localRepo !== repo) return;
+      $('local-files').replaceChildren(); $('local-mmproj').replaceChildren();
+      var empty = document.createElement('option'); empty.value = ''; empty.textContent = 'Text only'; $('local-mmproj').appendChild(empty);
+      (tree.projectors || []).forEach(function (file) {
+        var option = document.createElement('option'); option.value = file.path;
+        option.textContent = file.path + ' · ' + (Number(file.size) / 1e9).toFixed(2) + ' GB'; $('local-mmproj').appendChild(option);
+      });
+      (tree.models || []).forEach(function (file) {
+        var row = document.createElement('div'), text = document.createElement('span'); row.className = 'models-profile';
+        text.textContent = file.path + ' · ' + (Number(file.size) / 1e9).toFixed(2) + ' GB · ' + file.fit.badge +
+          (file.fit.note ? ' · ' + file.fit.note : '') + (tree.vision ? ' · image projector available' : '') +
+          (!file.fit.disk_ok ? ' · insufficient disk space' : '');
+        row.appendChild(text); row.appendChild(modelButton('Download…', function () { previewDownload(repo, file.path); }));
+        $('local-files').appendChild(row);
+      });
+      if (!(tree.models || []).length) $('local-files').textContent = 'No verifiable main GGUF files found.';
+    }).catch(settingsError);
+  }
+  function previewDownload(repo, file) {
+    post('/api/models/download-preview', { repo: repo, file: file, mmproj: $('local-mmproj').value || null,
+      name: $('local-name').value.trim() || null, context_tokens: Number($('local-context').value), tasks: selectedLocalTasks() })
+      .then(function (preview) {
+        $('models-diff').textContent = preview.diff;
+        var fit = preview.fit, tooLarge = fit.badge === 'too large';
+        if (tooLarge && !window.confirm('This model is too large for this machine. Download anyway?')) return;
+        if (!window.confirm(fit.badge + ' · Needs about ' + fit.needed_gb.toFixed(2) + ' GB; budget ' + fit.budget_gb.toFixed(2) +
+            ' GB. ' + fit.note + '\n' + preview.notice + '\n\n' + preview.diff)) return;
+        return post('/api/models/download', { token: preview.token, confirmed: true, too_large_confirmed: tooLarge }).then(watchModelDownload);
+      }).catch(settingsError);
+  }
+  function watchModelDownload(job) {
+    activeDownload = job.id;
+    (function tick() {
+      api('/api/jobs/' + job.id).then(function (report) {
+        var info = report.report || {};
+        $('local-progress').textContent = report.status === 'failed' ? report.error :
+          (info.file || '') + ' · ' + (info.state || info.status || report.status) +
+          (info.total ? ' · ' + (info.bytes || info.completed || 0) + '/' + info.total + ' bytes' : '') +
+          (info.speed ? ' · ' + (info.speed / 1e6).toFixed(1) + ' MB/s · ETA ' + Math.ceil(info.eta_s || 0) + ' s' : '');
+        if (report.status === 'running') setTimeout(tick, 750);
+        else if (info.state === 'pulled' && window.confirm(info.diff + '\nRegister this Ollama profile?')) {
+          post('/api/models/apply', { token: info.token, confirmed: true }).then(loadSettings).catch(settingsError);
+        } else if (info.state === 'registered') { loadSettings(); refreshModelChoices(); }
+      }).catch(settingsError);
+    })();
+  }
+  function initSettings() {
+    $('keys-form').onsubmit = function (event) {
+      event.preventDefault();
+      var request = post('/api/keys', { name: $('keys-name').value, value: $('keys-value').value });
+      $('keys-value').value = '';
+      return request.then(function () { $('models-status').textContent = 'Key saved in system keychain.'; return loadKeys(); }).catch(settingsError);
+    };
+    $('catalogue-search').onsubmit = function (event) { event.preventDefault(); searchCatalogue(); };
+    $('settings-budget').onsubmit = function (event) {
+      event.preventDefault();
+      reviewModelsChange({ action: 'budget', policy: $('settings-policy').value, budget: {
+        max_per_call_usd: Number($('budget-call').value), max_per_run_usd: Number($('budget-run').value),
+        max_per_month_usd: Number($('budget-month').value) } });
+    };
+    $('settings-library').onsubmit = function (event) {
+      event.preventDefault();
+      reviewModelsChange({ action: 'library', mailto: $('settings-mailto').value, exports_root: $('settings-exports').value })
+        .then(function () { return api('/api/info'); }).then(function (info) { state.exportsRoot = info.exports_root; showPaths(); });
+    };
+    ['hf', 'ollama'].forEach(function (source) {
+      $('local-' + source).onclick = function () {
+        localBackend = source;
+        ['hf', 'ollama'].forEach(function (name) {
+          $('local-' + name).classList.toggle('on', name === source);
+          $('local-' + name).setAttribute('aria-pressed', String(name === source));
+        });
+        $('local-query').placeholder = source === 'hf' ? 'Search GGUF models' : 'Exact Ollama model name';
+      };
+    });
+    $('local-search').onsubmit = function (event) {
+      event.preventDefault();
+      var query = $('local-query').value.trim();
+      if (localBackend === 'ollama') {
+        if (window.confirm('Pull ' + query + ' through your local Ollama server?')) {
+          post('/api/models/pull-ollama', { name: query, tasks: selectedLocalTasks(), confirmed: true }).then(watchModelDownload).catch(settingsError);
+        }
+        return;
+      }
+      $('local-results').textContent = 'Searching public Hugging Face models…';
+      api('/api/models/local-search?q=' + encodeURIComponent(query) + '&show_all=' + ($('local-show-all').checked ? '1' : '0')).then(renderLocalRepos).catch(settingsError);
+    };
+    ['pause', 'resume', 'cancel'].forEach(function (action) {
+      $('download-' + action).onclick = function () {
+        if (!activeDownload) return;
+        post('/api/models/download-control', { id: activeDownload, action: action }).then(watchModelDownload).catch(settingsError);
+      };
+    });
+  }
+  /* ---------- End Settings ---------- */
+
+
   /* ---------- Evidence Lens ---------- */
 
   var lens = { profiles: [], project: null, answer: null, matrix: null, tab: 'answer', audit: false, busy: false, answerRequest: 0, matrixRequest: 0, claimRequest: 0 };
@@ -1714,19 +2062,20 @@
 
   function lensFidelityLabels(mode, fidelity, result) {
     fidelity = fidelity || {}; result = result || {};
+    var flags = fidelity.flags || [];
     if (mode === 'table') {
       var fraction = Number(fidelity.table_number_fraction);
       var labels = ['' + (Number.isFinite(fraction) ? Math.round(fraction * 100) : 0) +
         ' % of numbers found in page text'];
       labels.push('Units recognised: ' + ((fidelity.units_recognized || []).join(', ') || 'none'));
-      return labels;
+      return labels.concat(flags);
     }
     if (mode === 'chart') {
       var found = fidelity.legend_entries_found || [];
-      return ['Legend entries in caption: ' + found.length + ' of ' + (result.legend || []).length];
+      return ['Legend entries in caption: ' + found.length + ' of ' + (result.legend || []).length].concat(flags);
     }
     if (mode === 'equation') {
-      return ['Symbols found in text: ' + ((fidelity.symbols_found || []).join(', ') || 'none')];
+      return ['Symbols found in text: ' + ((fidelity.symbols_found || []).join(', ') || 'none')].concat(flags);
     }
     return [];
   }
@@ -1911,7 +2260,8 @@
       $('lens-preview-content').textContent = 'Profile: ' + plan.profiles.join(', ') + '\nProvider: ' + plan.providers.join(', ') +
         '\nModel: ' + plan.models.join(', ') + '\nCalls: ' + plan.number_of_calls + '\nEvidence spans: ' + plan.evidence_ids_count +
         '\nEstimated input tokens: ' + plan.estimated_input_tokens + '\nMaximum cost: ' +
-        (plan.max_cost_usd == null ? 'unknown' : '$' + plan.max_cost_usd.toFixed(4));
+        (plan.max_cost_usd == null ? 'unknown' : '$' + plan.max_cost_usd.toFixed(4)) +
+        ((plan.model_notices || []).length ? '\n' + plan.model_notices.join('\n') : '');
       dialog.returnValue = '';
       dialog.onclose = function () { resolve(dialog.returnValue === 'approved'); };
       $('lens-preview-confirm').onclick = function () { dialog.close('approved'); };
@@ -1941,7 +2291,7 @@
     $('lens-run-audit').disabled = true;
     post('/api/preview', body).then(function (plan) {
       if (plan.blocked_reasons.length) throw new Error('Action blocked: ' + plan.blocked_reasons.join(', '));
-      if (plan.remote || plan.requires_approval) return confirmLensPreview(plan);
+      if (plan.remote || plan.requires_approval || (plan.model_notices || []).length) return confirmLensPreview(plan);
       return null;
     }).then(function (approved) {
       if (approved === false || project !== state.project) { lensBusy(false); return; }
@@ -2094,7 +2444,9 @@
       lensBadges(box, [s.decision], s.stale ? ['Criteria changed'] : []);
       box.appendChild(lensNode('p', s.result.reason));
       ['inclusion', 'exclusion'].forEach(function (kind) {
-        (s.result[kind] || []).forEach(function (c) {
+        (s.result[kind] || []).forEach(function (c, index) {
+          var citation = ((s.result.criterion_evidence || {})[kind] || [])[index];
+          if (citation && citation.flags) lensBadges(box, [], citation.flags);
           box.appendChild(lensNode('p', c.criterion + ': ' + lensLabel(c.status)));
           if (c.evidence) box.appendChild(lensNode('blockquote', c.evidence));
           if (c.verified !== true && c.evidence) lensBadges(box, [], ['Quote not verified in cited span']);
@@ -2321,6 +2673,22 @@
     body.replaceChildren(tabs, overview, repro); select(false);
   }
 
+  function refreshModelChoices() {
+    api('/api/model-profiles').then(function (profiles) {
+      lens.profiles = profiles;
+      ['lens-profile', 'lens-matrix-profile', 'lens-claims-profile', 'lens-screen-profile', 'gaps-profile', 'console-profile'].forEach(function (id) {
+        var select = $(id), previous = select.value;
+        Array.from(select.children).forEach(function (option) { if (option.value) option.remove(); });
+        profiles.forEach(function (p) {
+          var option = lensNode('option', p.name + ' · ' + p.model + (p.remote ? ' (cloud)' : ''));
+          option.value = p.name; $(id).appendChild(option);
+        });
+        select.value = previous;
+      });
+      if (lens.answer) $('lens-ask-status').textContent = lensAnswerSummary(lens.answer);
+    }).catch(function (e) { toast(e.message); });
+  }
+
   function initLens() {
     $('gaps-refresh').onclick = function () { loadGaps(); };
     $('living-take').onclick = function () {
@@ -2354,16 +2722,7 @@
       }).catch(function (e) { toast(e.message); });
     };
 
-    api('/api/model-profiles').then(function (profiles) {
-      lens.profiles = profiles;
-      ['lens-profile', 'lens-matrix-profile', 'lens-claims-profile', 'lens-screen-profile'].forEach(function (id) {
-        profiles.forEach(function (p) {
-          var option = lensNode('option', p.name + ' · ' + p.model + (p.remote ? ' (cloud)' : ''));
-          option.value = p.name; $(id).appendChild(option);
-        });
-      });
-      if (lens.answer) $('lens-ask-status').textContent = lensAnswerSummary(lens.answer);
-    }).catch(function (e) { toast(e.message); });
+    refreshModelChoices();
     lensColumnEditor($('lens-columns'), true); lensColumnEditor($('lens-add-column'), false);
     $('lens-more-column').onclick = function () { lensColumnEditor($('lens-columns'), true); };
     $('lens-ask-form').onsubmit = function (e) {
@@ -2412,6 +2771,8 @@
   }
 
   function init() {
+    initModels();
+    initSettings();
     initLens();
     // Each open page checks in; when none does for a while, the server stops itself (stop_when_idle).
     // If the server is gone (it stopped while the computer slept, say), the page says so instead of failing quietly.
@@ -2425,11 +2786,12 @@
     $('pdfs-export-scope').textContent = scopeWords();
     $('pdfs-export').onchange = function () { store.set('pdfs-export', this.checked); setMode(state.mode); };
     setMode(store.get('mode', 'similar'));
+    if (location.hash === '#models') history.replaceState(null, '', '#settings');
     var linked = /^#run=([\w-]+)$/.exec(location.hash);  // a bookmarked search; never set automatically
-    showView(/^#(recents|library|ask|matrix|claims|gaps|console)$/.test(location.hash) ? location.hash.slice(1) : 'new');
+    showView(/^#(recents|library|ask|matrix|claims|gaps|console|settings)$/.test(location.hash) ? location.hash.slice(1) : 'new');
     if (linked) loadRun(linked[1]);
     window.addEventListener('hashchange', function () {
-      if (/^#(ask|matrix|claims|gaps|recents|library|console)$/.test(location.hash)) showView(location.hash.slice(1));
+      if (/^#(ask|matrix|claims|gaps|recents|library|console|settings)$/.test(location.hash)) showView(location.hash.slice(1));
     });
     $('sort').value = state.sort;
 
@@ -2543,12 +2905,41 @@
       if ($('export-fetch').checked || math !== 'off') {  // slow steps first: a background job
         var start = function () {
           setBusy(true);
-          post('/api/export', Object.assign(body, { fetch: $('export-fetch').checked, math: math, run_id: state.runId }))
+          post('/api/export', Object.assign(body, { fetch: body.fetch === undefined ? $('export-fetch').checked : body.fetch, math: math, run_id: state.runId }))
             .then(poll).catch(function (e) { setBusy(false); toast(e.message); });
         };
         if (math !== 'high') { start(); return; }
         api('/api/math-setup').then(function (st) {  // Ollama or the model missing: offer to set them up
-          if (st.ready) start(); else showMathSetup(st);
+          if (st.disabled) { toast(st.message); return; }
+          if (st.ready) {
+            if (st.remote) {
+              var previewPages = function () {
+                post('/api/export-preview', body).then(function (preview) {
+                  if (preview.blocked_reasons.length) { toast(preview.blocked_reasons.join('; ')); return; }
+                  if (!window.confirm(preview.image_description + ' to ' + st.model + ' for transcription. ' +
+                      'Estimated maximum cost $' + preview.max_cost_usd.toFixed(4) + '. Approve this run?')) return;
+                  body.approved = true; start();
+                }).catch(function (e) { setBusy(false); toast(e.message); });
+              };
+              if ($('export-fetch').checked) {
+                // Fetch first so the approval includes the exact currently uncached page-image count.
+                post('/api/fetch', body).then(function (job) {
+                  setBusy(true);
+                  (function waitForPDFs() {
+                    api('/api/jobs/' + job.id).then(function (progress) {
+                      if (progress.status === 'running') { setTimeout(waitForPDFs, 1000); return; }
+                      setBusy(false);
+                      if (progress.status === 'failed') { toast(progress.error); return; }
+                      body.fetch = false; previewPages();
+                    }).catch(function (e) { setBusy(false); toast(e.message); });
+                  })();
+                }).catch(function (e) { toast(e.message); });
+              } else previewPages();
+              return;
+            }
+            if (st.notice) toast(st.notice);
+            start();
+          } else showMathSetup(st);
         }).catch(function (e) { toast(e.message); });
         return;
       }
@@ -2629,6 +3020,7 @@
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.metaKey || e.ctrlKey) return;
       if (e.key === '?' && !document.querySelector('dialog[open]')) { openGuide(); e.preventDefault(); return; }
       if (document.querySelector('dialog[open]')) return;
+      if (e.key === ',') { showView('settings'); e.preventDefault(); return; }
       if (!state.data || state.page !== 'results') return;
       if (e.key === 'j' || e.key === 'ArrowDown') { select(state.sel + 1, $('drawer').classList.contains('open')); e.preventDefault(); }
       else if (e.key === 'k' || e.key === 'ArrowUp') { select(state.sel - 1, $('drawer').classList.contains('open')); e.preventDefault(); }

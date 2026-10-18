@@ -548,6 +548,7 @@ def test_asset_crop_and_analysis_endpoints_require_approval(lens_server: LensSer
             return {}
 
     vision = VisionFake()
+    server.app.config.models.profiles["paid"].vision = True
     server.app.make_gateway = lambda c: ModelGateway(
         c, server.app.config, providers={'local': vision, 'paid': vision})
     status, paper = server.call('/api/papers/p?project=demo')

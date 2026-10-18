@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from functools import partial
 
 from pydantic import BaseModel
 
@@ -13,11 +14,12 @@ from litforge.analysis.gateway import CallPreview, ModelGateway
 from litforge.analysis.ledger import to_packet
 from litforge.analysis.prompts import AUDIT_PROMPT_VERSION, audit_messages
 from litforge.analysis.runs import finish_run, get_run, link_evidence, start_run
+from litforge.analysis.validation import EvidenceText
 
 
 class AuditDraft(BaseModel):
     verdict: AuditVerdict
-    note: str
+    note: EvidenceText
 
 
 def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, run_id: str,
@@ -28,9 +30,10 @@ def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, run_id: str,
     for sentence in answer.sentences:
         spans = [s for s in answer.evidence if s.id in sentence.evidence_ids]
         if spans:
-            packet = to_packet(spans, sensitive=sensitive)
-            previews.append(gateway.preview("audit", packet, audit_messages(sentence.text, packet, spans),
-                                            profile=profile))
+            packet, messages = gateway.fit_evidence("audit", to_packet(spans, sensitive=sensitive),
+                partial(audit_messages, sentence.text, spans=spans), profile, schema=AuditDraft.model_json_schema())
+            previews.append(gateway.preview("audit", packet, messages,
+                                            profile=profile, schema=AuditDraft.model_json_schema()))
     return previews
 
 
@@ -47,8 +50,9 @@ def audit_answer(conn: sqlite3.Connection, gateway: ModelGateway, run_id: str, p
             spans = [s for s in answer.evidence if s.id in sentence.evidence_ids]
             model = None
             if spans:
-                packet = to_packet(spans, sensitive=sensitive)
-                reply = gateway.call("audit", packet, audit_messages(sentence.text, packet, spans),
+                packet, messages = gateway.fit_evidence("audit", to_packet(spans, sensitive=sensitive),
+                    partial(audit_messages, sentence.text, spans=spans), profile, schema=AuditDraft.model_json_schema())
+                reply = gateway.call("audit", packet, messages,
                                      AuditDraft.model_json_schema(), profile=profile, approved=approved,
                                      run_id=audit_id, prompt_version=AUDIT_PROMPT_VERSION)
                 draft = AuditDraft.model_validate(reply.content)

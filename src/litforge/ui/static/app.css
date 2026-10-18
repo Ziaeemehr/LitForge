@@ -446,3 +446,27 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .repro-section .repro-item p { margin: 0 0 .3rem; }
 .repro-citations { display: inline-flex; flex-wrap: wrap; margin-left: .4rem; }
 .repro-evidence-chip { font-size: .75rem; }
+
+/* Models settings share the existing theme variables and controls. */
+.models-profile { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .7rem 0; }
+.models-profile span { flex: 1; overflow-wrap: anywhere; }
+#view-settings pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
+#view-settings form { margin-bottom: 1rem; }
+
+#models-add input[type=text], #models-add input[type=number] { width: 100%; min-width: 0; box-sizing: border-box; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+#models-add .row2 > input { flex: 1; }
+#models-add-tasks { width: 100%; box-sizing: border-box; margin: 0 0 1rem; padding: .6rem; border: 1px solid var(--line); display: grid; gap: .5rem; }
+
+/* Settings use the same controls and palette at every screen width. */
+.side-foot { flex-wrap: wrap; }
+#view-settings { width: 100%; min-width: 0; }
+#view-settings .settings-card { padding: 16px; margin: 0 0 16px; min-width: 0; }
+#view-settings input:not([type=checkbox]), #view-settings select { width: 100%; min-width: 0; box-sizing: border-box; }
+#view-settings input:not([type=checkbox]) { padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+#view-settings select { white-space: normal; overflow-wrap: anywhere; }
+#view-settings .row2 { flex-wrap: wrap; }
+#view-settings .row2 > input, #view-settings .row2 > select { flex: 1 1 180px; }
+#view-settings h2 { margin-top: 0; }
+#view-settings .task-checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .5rem; margin: 1rem 0; }
+#view-settings .models-profile a { overflow-wrap: anywhere; }
+@media (max-width: 600px) { #view-settings .models-profile { align-items: flex-start; } #view-settings .models-profile span { flex-basis: 100%; } }

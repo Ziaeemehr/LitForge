@@ -22,6 +22,8 @@ class ModelCallRecord(BaseModel):
     error: str | None = None
     run_id: str | None = None
     prompt_version: str = ""
+    reasoning: str = "off"
+    dropped_evidence_ids: list[str] = Field(default_factory=list)
 
 
 def record_model_call(conn: sqlite3.Connection, record: ModelCallRecord) -> str:
@@ -30,11 +32,12 @@ def record_model_call(conn: sqlite3.Connection, record: ModelCallRecord) -> str:
         conn.execute(
             """INSERT INTO model_calls(
                id, provider, model, task, input_hash, evidence_ids_json, input_tokens, output_tokens,
-               latency_ms, cost_usd, status, error, created_at, run_id, prompt_version
-               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               latency_ms, cost_usd, status, error, created_at, run_id, prompt_version, reasoning,
+               dropped_evidence_ids_json
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (record_id, record.provider, record.model, record.task, record.input_hash,
              json.dumps(record.evidence_ids, separators=(",", ":")), record.input_tokens, record.output_tokens,
              record.latency_ms, record.cost_usd, record.status, record.error, now(),
-             record.run_id, record.prompt_version),
+             record.run_id, record.prompt_version, record.reasoning, json.dumps(record.dropped_evidence_ids)),
         )
     return record_id

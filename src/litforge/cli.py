@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from litforge.analysis.commands import register, run_ask
 from litforge.analysis.evaluation import evaluate_retrieval, load_benchmark
-from litforge.analysis.gateway import GatewayError
+from litforge.analysis.gateway import GatewayError, ModelGateway
 from litforge.analysis.ledger import record_spans
 from litforge.analysis.retrieve import retrieve_for_question
 from litforge.analysis.runs import finish_run, link_evidence, start_run
@@ -31,6 +31,7 @@ from litforge.export.markdown import export_markdown
 from litforge.indexing.fts import current_runs, index_run, search
 from litforge.ingest import ingest_paths
 from litforge.llm.budget import BudgetExceeded
+from litforge.llm.commands import register as register_models
 from litforge.llm.router import RoutingError
 from litforge.observability import EventLog
 from litforge.parsing.run import artifacts_for_project, parse_artifact
@@ -54,6 +55,7 @@ project_app = typer.Typer(help="Manage project workspaces.", no_args_is_help=Tru
 app.add_typer(project_app, name="project")
 eval_app = typer.Typer(help="Evaluate retrieval quality.", no_args_is_help=True)
 app.add_typer(eval_app, name="eval")
+register_models(app)
 
 
 @dataclass
@@ -115,13 +117,13 @@ def main(
     config: Annotated[Path | None, typer.Option("--config", help="YAML overriding configs/default.yaml")] = None,
 ) -> None:
     paths = resolve_paths(data_dir)
-    ctx.obj = State(paths=paths, config=load_config(config), log=EventLog(paths.logs))
+    ctx.obj = State(paths=paths, config=load_config(config, data_root=paths.root), log=EventLog(paths.logs))
 
 
 @app.command()
 def doctor(ctx: typer.Context, as_json: Annotated[bool, typer.Option("--json")] = False) -> None:
     """Check Python, parsers, SQLite FTS5, GPU, Ollama, disk and schema."""
-    checks = run_checks(_state(ctx).paths)
+    checks = run_checks(_state(ctx).paths, _state(ctx).config)
     if as_json:
         _emit_json(checks)
         return
@@ -589,10 +591,13 @@ def screen(
             typer.secho(f"no runs in '{name}' yet", fg="red", err=True)
             raise typer.Exit(2)
         run = str(row["id"])
+    gateway = (ModelGateway(conn, st.config) if model is None and
+               (profile is not None or "screen" in st.config.models.tasks) else None)
     try:
-        report = screen_run(conn, _make_llm(st.config, model), run,
+        report = screen_run(conn, _make_llm(st.config, model) if gateway is None else None, run,
                             st.config.screening.default_top if top is None else top,
-                            progress=None if as_json else typer.echo, log=st.log)
+                            progress=None if as_json else typer.echo, log=st.log,
+                            gateway=gateway, profile=profile if gateway else None, approved=approve)
     except (ValueError, LookupError, LlmError) as exc:
         typer.secho(str(exc), fg="red", err=True)
         raise typer.Exit(2) from exc
@@ -713,13 +718,13 @@ def enhance(
     level: Annotated[str, typer.Option(
         "--level", help="medium: Pix2Text reads the formulas, text from the PDF (fast; GPU if installed). "
                         "high: the local vision model rewrites whole pages (best; also fixes scanned text)")] = "high",
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+    approve: Annotated[bool, typer.Option("--approve")] = False,
+    preview: Annotated[bool, typer.Option("--preview")] = False,
 ) -> None:
     """Better math: rewrite pages with equations, tables or broken text (the next export uses them)."""
-    import os
-
     from litforge.parsing.formulas import FormulaEngine, Pix2TextEngine
-    from litforge.parsing.vision import OllamaVision, Vision, enhance_project
-    from litforge.screening.llm import LlmError
+    from litforge.parsing.vision import GatewayVision, Vision, enhance_project, plan_project
 
     st = _state(ctx)
     conn = st.db()
@@ -737,11 +742,15 @@ def enhance(
             engine = Pix2TextEngine()
             typer.echo(f"Pix2Text on the {engine.device.upper()}")
         else:
-            engine = OllamaVision(os.environ.get("LITFORGE_OLLAMA_URL") or st.config.screening.ollama_url,
-                                  st.config.vision)
+            engine = GatewayVision(ModelGateway(conn, st.config), profile, approve)
+            if preview:
+                calls = plan_project(conn, st.paths, pid, engine, only)
+                typer.echo(json.dumps({"image_description": f"{len(calls)} page images",
+                                       "calls": [call.model_dump() for call in calls]}, indent=1))
+                return
             engine.check()
         report = enhance_project(conn, st.paths, st.config, pid, engine, only, log=st.log, progress=typer.echo)
-    except (LlmError, RuntimeError) as exc:
+    except (ValueError, RuntimeError) as exc:
         typer.secho(str(exc), fg="red", err=True)
         raise typer.Exit(1) from exc
     typer.echo(f"{report.pages_improved} pages rewritten in {report.papers} papers"

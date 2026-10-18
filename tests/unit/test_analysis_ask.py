@@ -8,7 +8,7 @@ from lens_fakes import gateway, seed
 
 from litforge.analysis.ask import SentenceDraft, ask, get_answer, validate_sentences
 from litforge.analysis.ledger import to_packet
-from litforge.analysis.prompts import ask_messages
+from litforge.analysis.prompts import ASK_PROMPT_VERSION, ask_messages
 from litforge.analysis.runs import get_run
 
 
@@ -50,7 +50,7 @@ def test_prompt_storage_and_packet_validation(conn: sqlite3.Connection) -> None:
     assert answer.sentences[0].evidence_ids == [span.id] and fake.calls == 1
     assert get_answer(conn, answer.run_id) == answer
     call = conn.execute("SELECT * FROM model_calls").fetchone()
-    assert call["run_id"] == answer.run_id and call["prompt_version"] == "ask-v1"
+    assert call["run_id"] == answer.run_id and call["prompt_version"] == ASK_PROMPT_VERSION
     assert json.loads(get_run(conn, answer.run_id).config_json)["sensitive"]
     # A number outside the transmitted packet must not pass validation.
     long = span.model_copy(update={"text": "Results " + "word " * 500 + "9999"})

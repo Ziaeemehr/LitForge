@@ -36,6 +36,7 @@ class AnalysisRun(BaseModel):
     error: str | None
     started_at: str
     finished_at: str | None
+    dropped_evidence_ids_json: str = "[]"
 
 
 def start_run(conn: sqlite3.Connection, task: str, project_id: str | None, input_payload: dict[str, Any],

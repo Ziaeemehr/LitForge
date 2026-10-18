@@ -83,6 +83,14 @@ test('asset fidelity helper returns readable labels for tables, charts and equat
     { symbols_found: ['A'] }, {}))), ['Symbols found in text: A']);
 });
 
+test('cut off crop flags are visible for every asset mode', () => {
+  const { ctx } = setup();
+  for (const mode of ['table', 'chart', 'equation']) {
+    assert.ok(ctx.lensFidelityLabels(mode, { flags: ['cut_off_crop'] }, {}).includes('cut_off_crop'));
+    assert.ok(!ctx.lensFidelityLabels(mode, { flags: [] }, {}).includes('cut_off_crop'));
+  }
+});
+
 test('profile dropdowns show cloud labels and tabs support selection and keyboard navigation', async () => {
   const { ctx, $, tabs } = setup();
   ctx.initLens(); await flush();
@@ -243,4 +251,16 @@ test('Claims description stays in its header and Living review follows claims', 
   const claims = html.split('id="view-claims"')[1].split('</section>')[0];
   assert.match(claims, /class="viewhead">.*Possible causes are hypotheses\.<\/span><\/div>/);
   assert.ok(claims.indexOf('lens-claims-detail') < claims.indexOf('living-title'));
+});
+
+test('Screening displays a warning after a mismatched quote is cleared', () => {
+  const { ctx, $ } = setup();
+  ctx.lensScreeningDetail($('detail'), { fulltext_screening: {
+    decision: 'uncertain', result: { reason: '', inclusion: [
+      { criterion: 'Criterion', status: 'met', evidence: '', verified: false }], exclusion: [],
+      criterion_evidence: { inclusion: [{ flags: ['quote_not_in_evidence'] }] } }, evidence: [] } });
+  const texts = [];
+  function walk(el) { texts.push(el.textContent); el.children.forEach(walk); }
+  walk($('detail'));
+  assert.ok(texts.includes('Quote not in evidence'));
 });

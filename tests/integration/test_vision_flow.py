@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -68,3 +69,54 @@ def test_export_math_from_formulas(
     (out_dir / VISION).write_text(json.dumps({"pages": {"1": {"markdown": None}, "2": {"markdown": ""}}}))
     root, _ = export_markdown(conn, paths, "vis", project)
     assert f"math: {expected}\n" in next((root / "knowledge_base").glob("*.md")).read_text()
+
+
+def test_page_cache_keeps_provider_model_and_prompt_variants(
+    conn: sqlite3.Connection, paths: Paths, config: Config, project: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from litforge.parsing import vision as module
+
+    class NamedVision(FakeVision):
+        provider = "ollama"
+
+    first = NamedVision(_transcribe, name="same-model")
+    initial = enhance_project(conn, paths, config, project, first)
+    assert first.calls == initial.pages_improved > 0
+    other_provider = NamedVision(_transcribe, name="same-model")
+    other_provider.provider = "openai_compatible"
+    enhance_project(conn, paths, config, project, other_provider)
+    assert other_provider.calls == first.calls
+    enhance_project(conn, paths, config, project, first)
+    assert first.calls == initial.pages_improved
+    other_model = NamedVision(_transcribe, name="new-model")
+    enhance_project(conn, paths, config, project, other_model)
+    assert other_model.calls == first.calls
+    monkeypatch.setattr(module, "PROMPT_VERSION", "next")
+    enhance_project(conn, paths, config, project, first)
+    assert first.calls == 2 * initial.pages_improved
+
+
+def test_page_plan_matches_pending_images_and_uses_no_model_transport(
+    conn: sqlite3.Connection, paths: Paths, config: Config, project: str,
+) -> None:
+    from litforge.analysis.gateway import ModelGateway
+    from litforge.llm.openai_compatible import OpenAICompatibleClient
+    from litforge.parsing.vision import GatewayVision, plan_project
+
+    class Transport:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def request(self, url: str, headers: dict[str, str], body: dict[str, Any], timeout_s: float) -> dict[str, Any]:
+            self.calls.append(body)
+            return {"choices": [{"message": {"content": "# A page transcription"}}]}
+
+    transport = Transport()
+    client = OpenAICompatibleClient("http://local/v1", "vision", transport=transport)
+    engine = GatewayVision(ModelGateway(conn, config, {"local_vision": client}))
+    previews = plan_project(conn, paths, project, engine)
+    assert len(previews) > 0 and transport.calls == []
+    assert all(p.image_description == "1 page images" for p in previews)
+    enhance_project(conn, paths, config, project, engine)
+    assert len(transport.calls) == len(previews)
+    assert plan_project(conn, paths, project, engine) == []

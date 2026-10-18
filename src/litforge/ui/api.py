@@ -8,11 +8,13 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import uuid
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from litforge.analysis import ask as answers
 from litforge.analysis import audit as audits
@@ -21,8 +23,23 @@ from litforge.analysis import matrix as matrices
 from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.ledger import get_spans
 from litforge.analysis.review import review_queue
-from litforge.config import Config, Paths
+from litforge.config import TASK_NAMES, Config, Paths, contact_email, load_config, load_settings
 from litforge.export.markdown import default_export_dir
+from litforge.llm.hardware import Hardware, detect_hardware
+from litforge.llm.llamacpp_server import LlamaCppServer
+from litforge.llm.local_models import Download, HuggingFace, download_change, fit_check
+from litforge.llm.model_setup import (
+    CLOUD_NOTICE,
+    PROVIDERS,
+    ConfigChange,
+    api_model_change,
+    api_model_patch,
+    cloud_change,
+    config_change,
+    remove_model_change,
+    setup_proposal,
+)
+from litforge.llm.pricing import OpenRouterPricing
 from litforge.parsing.canonical import read_canonical, to_markdown
 from litforge.parsing.vision import read_page_markdown
 from litforge.projects import MARK_SCOPES, get_project_id
@@ -433,6 +450,7 @@ def lens_plan(conn: sqlite3.Connection, gateway: ModelGateway, request: LensRequ
                         sum(p.max_cost_usd or 0 for p in calls),
         'requires_approval': any(p.remote or p.requires_approval for p in calls),
         'blocked_reasons': sorted({p.blocked_reason for p in calls if p.blocked_reason}),
+        'model_notices': sorted({p.model_notice for p in calls if p.model_notice}),
     }
 
 
@@ -602,3 +620,170 @@ def living_panel(conn: sqlite3.Connection, project_id: str) -> dict[str, Any]:
                 "claims": len(s.data.claims), "answers": len(s.data.answers)}} for s in items],
             "latest": latest.model_dump() if latest else None,
             "report": delta_markdown(latest.delta, latest.signals) if latest and latest.delta else ""}
+
+
+class ModelsChangeRequest(BaseModel):
+    action: Literal["setup", "add", "remove", "cloud", "budget", "library", "assign"]
+    tier: Literal["large", "medium", "small", "cloud"] | None = None
+    cheap: str | None = None
+    strong: str | None = None
+    policy: Literal["local_only", "ask_before_cloud", "hybrid"] | None = None
+    budget: dict[str, float] | None = None
+    mailto: str | None = None
+    exports_root: str | None = None
+    delete_files: bool = Field(default=False, strict=True)
+    provider: str = ""
+    model: str = ""
+    name: str | None = None
+    price_in: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    price_out: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    tasks: list[str] = Field(default_factory=list)
+    vision: bool = Field(default=False, strict=True)
+    reasoning: Literal["on", "off"] = "off"
+    enabled: bool | None = Field(default=None, strict=True)
+
+
+class ModelsPanel:
+    """Settings previews are one-use and tied to the bytes the user reviewed."""
+
+    def __init__(self, paths: Paths, config: Config, *,
+                 hardware: Callable[[Path], Hardware] = detect_hardware,
+                 server: LlamaCppServer | None = None) -> None:
+        self.paths, self.config, self.hardware = paths, config, hardware
+        self.server = server or LlamaCppServer(paths.root)
+        self.pending: dict[str, ConfigChange] = {}
+        self._hardware: Hardware | None = None
+        self.catalogue = OpenRouterPricing(paths.model_cache)
+        self.hf = HuggingFace()
+        self.downloader = Download(paths.root)
+        self.download_pending: dict[str, dict[str, Any]] = {}
+
+    def _detect(self) -> Hardware:
+        if self._hardware is None:
+            self._hardware = self.hardware(self.paths.root)
+        return self._hardware
+
+    def info(self) -> dict[str, Any]:
+        proposal = setup_proposal(self.paths.root, self._detect())
+        cfg = self.config.models.servers.get("llamacpp")
+        return {"hardware": self._detect().model_dump(), "tier": self.config.models.setup_tier,
+                "profiles": [{**p, "vision": self.config.models.profiles.get(p["name"],
+                               self.config.models.local).vision} for p in model_profiles(self.config)],
+                "proposal": proposal.as_dict(), "providers": list(PROVIDERS), "task_names": list(TASK_NAMES),
+                "tasks": {k: v.model_dump(exclude_none=True) for k, v in self.config.models.tasks.items()},
+                "cloud_enabled": self.config.privacy.allow_cloud,
+                "budget": self.config.budget.model_dump(), "policy": self.config.models.policy,
+                "mailto": contact_email(self.paths, self.config), "exports_root": str(self.paths.exports_root),
+                "vision_enabled": bool(self.config.models.vision_profile or self.config.vision.model),
+                "server": self.server.status(cfg) if cfg else {"running": False, "models": []}}
+
+    def preview(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            body = ModelsChangeRequest.model_validate(body).model_dump()
+        except ValidationError:
+            raise ValueError("Invalid model settings fields; review provider, model, tasks and prices.") from None
+        action, notice = body.get("action"), ""
+        if action == "setup":
+            tier = body.get("tier")
+            if tier is not None and tier not in {"large", "medium", "small", "cloud"}:
+                raise ValueError("unknown tier")
+            proposal = setup_proposal(self.paths.root, self._detect(), tier, cheap=body.get("cheap"),
+                                      strong=body.get("strong"), catalogue=self.catalogue.catalogue()
+                                      if body.get("cheap") else None)
+            if not proposal.available:
+                raise ValueError(proposal.notes)
+            change, notice = proposal.change, proposal.notes
+        elif action == "add":
+            patch = api_model_patch(body["provider"], body["model"], name=body.get("name") or None,
+                                    price_in=body.get("price_in"), price_out=body.get("price_out"),
+                                    tasks=body.get("tasks"), vision=body.get("vision") is True,
+                                    reasoning=body.get("reasoning", "off"))
+            change = api_model_change(self.paths.root, patch)
+            notice = ("Set the provider key in API keys or your environment; "
+                      "cloud permission requires a separate confirmation.")
+        elif action == "remove":
+            if not body.get("name"):
+                raise ValueError("give a profile name")
+            change = remove_model_change(self.paths.root, body["name"], self.config, delete_files=body["delete_files"])
+        elif action == "cloud":
+            if not isinstance(body.get("enabled"), bool):
+                raise ValueError("enabled must be a boolean")
+            change, notice = cloud_change(self.paths.root, body["enabled"]), CLOUD_NOTICE
+        elif action == "budget":
+            from litforge.config import BudgetConfig
+            try:
+                raw_budget = body.get("budget") or {}
+                if set(raw_budget) - set(BudgetConfig.model_fields):
+                    raise ValueError("unknown budget field")
+                budget = BudgetConfig.model_validate({**self.config.budget.model_dump(), **raw_budget})
+            except ValueError:
+                raise ValueError("Budget limits must be finite nonnegative numbers") from None
+            change = config_change(self.paths.root, {"budget": budget.model_dump(),
+                                   "models": {"policy": body.get("policy") or self.config.models.policy}})
+        elif action == "assign":
+            name = body.get("name")
+            if name not in {"local", "local_vision", *self.config.models.profiles}:
+                raise ValueError("unknown profile")
+            tasks = body.get("tasks") or []
+            owned = self.config.models.setup_owned.model_dump()
+            owned["tasks"] = [t for t in owned["tasks"] if t not in tasks]
+            change = config_change(self.paths.root, {"models": {"tasks": {t: {"profile": name} for t in tasks},
+                                                               "setup_owned": owned}})
+        elif action == "library":
+            mailto = (body.get("mailto") or "").strip() or None
+            if mailto and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", mailto):
+                raise ValueError("not an e-mail address")
+            folder = (body.get("exports_root") or "").strip()
+            if folder and (any(ord(c) < 32 for c in folder) or not Path(folder).expanduser().is_absolute()):
+                raise ValueError("Choose an absolute export folder")
+            change = config_change(self.paths.root, {})
+            path = self.paths.settings
+            settings = {**load_settings(self.paths), "mailto": mailto,
+                        "exports_root": str(Path(folder).expanduser()) if folder else None}
+            change.before[path] = path.read_text() if path.exists() else None
+            change.after[path] = json.dumps(settings, indent=1) + "\n"
+            notice = "Contact e-mail is sent to OpenAlex, Crossref and Unpaywall. Existing project folders stay saved."
+        else:
+            raise ValueError("unknown model settings action")
+        # Bound memory while retaining the most recent preview only.
+        self.pending.clear()
+        token = uuid.uuid4().hex
+        self.pending[token] = change
+        return {"token": token, "diff": change.diff, "notice": notice}
+
+    def apply(self, token: str, confirmed: bool) -> None:
+        if not confirmed:
+            raise ValueError("confirm the reviewed file changes first")
+        if token not in self.pending:
+            raise ValueError("preview expired; review changes again")
+        change = self.pending.pop(token)
+        change.apply()
+        self.config = load_config(self.config.config_path, data_root=self.paths.root)
+        self.paths.exports_root = Paths(self.paths.root).exports_root
+
+
+    def prepare_download(self, body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            repo, filename = body["repo"], body["file"]
+            tree = self.hf.files(repo)
+            item = next(f for f in tree["models"] if f["path"] == filename)
+            mmproj_name = body.get("mmproj")
+            mmproj = next((f for f in tree["projectors"] if f["path"] == mmproj_name), None)
+            if mmproj_name and mmproj is None:
+                raise ValueError("Choose an image projector listed in this repository")
+            context = int(body.get("context_tokens", 16384))
+            fit = fit_check(self._detect(), item["size"], mmproj["size"] if mmproj else 0, context_tokens=context)
+            if not fit["disk_ok"]:
+                raise ValueError("Not enough free disk space")
+            path = self.downloader.path(repo, filename)
+            projector = self.downloader.path(repo, mmproj["path"]) if mmproj else None
+            change = download_change(self.paths.root, repo, path, mmproj=projector, name=body.get("name") or None,
+                                     tasks=body.get("tasks") or [], context_tokens=context, require_files=False)
+        except (KeyError, TypeError, StopIteration):
+            raise ValueError("Choose a main model file from the repository listing") from None
+        self.download_pending.clear()
+        token = uuid.uuid4().hex
+        self.download_pending[token] = {"repo": repo, "item": item, "mmproj": mmproj, "change": change, "fit": fit}
+        return {"token": token, "fit": fit, "diff": change.diff, "bytes": item["size"] +
+                (mmproj["size"] if mmproj else 0),
+                "notice": "Download and verify model weights, then apply these files."}

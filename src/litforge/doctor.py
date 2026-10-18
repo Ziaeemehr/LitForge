@@ -9,13 +9,14 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-import urllib.request
+import urllib.error
 from typing import Literal
 
 import pymupdf
 from pydantic import BaseModel
 
-from litforge.config import Paths
+from litforge.config import Config, ModelProfileConfig, Paths
+from litforge.llm.http import open_url
 from litforge.parsing.docling_parser import docling_available
 from litforge.storage.db import connect, fts5_available, latest_version, schema_version
 
@@ -46,7 +47,7 @@ def _gpu() -> Check:
 
 def _ollama(url: str) -> Check:
     try:
-        with urllib.request.urlopen(f"{url}/api/tags", timeout=2) as resp:  # noqa: S310 - local URL
+        with open_url(f"{url}/api/tags", timeout=2) as resp:  # noqa: S310 - local URL
             models = [m["name"] for m in json.load(resp).get("models", [])]
         detail = f"{url} reachable; models: {', '.join(models) or 'none pulled'}"
         return Check(name="ollama", level="ok" if models else "warn", detail=detail)
@@ -54,7 +55,43 @@ def _ollama(url: str) -> Check:
         return Check(name="ollama", level="warn", detail=f"{url} not reachable ({exc}); needed from screening phase")
 
 
-def run_checks(paths: Paths) -> list[Check]:
+def check_model_profile(name: str, profile: ModelProfileConfig) -> Check:
+    if profile.server:
+        try:
+            with open_url(f"{profile.base_url}/models", timeout=2) as response:  # noqa: S310
+                models = json.load(response).get("data", [])
+            model = next((m for m in models if m.get("id") == profile.model), None)
+            if model is None:
+                return Check(name=name, level="warn", detail=f"Foreign server at {profile.base_url}: "
+                             "preset model missing; change models.servers.llamacpp.port")
+            modalities = (model.get("architecture") or {}).get("input_modalities")
+            vision = "image" in modalities if isinstance(modalities, list) else None
+            mismatch = vision is not None and vision != profile.vision
+            return Check(name=name, level="warn" if mismatch else "ok",
+                         detail=f"llama.cpp router: vision={vision} (configured {profile.vision}), "
+                                f"status={model.get('status')}; context unavailable from router catalogue")
+        except (ValueError, AttributeError, TypeError, urllib.error.HTTPError):
+            return Check(name=name, level="warn",
+                         detail=f"Foreign server or incompatible router at {profile.base_url}; "
+                         "change models.servers.llamacpp.port")
+        except Exception:
+            return Check(name=name, level="warn", detail=f"llama.cpp router unavailable at {profile.base_url}")
+    url = (profile.base_url or "").rstrip("/").removesuffix("/v1") + "/props"
+    try:
+        with open_url(url, timeout=2) as response:  # noqa: S310 - configured local server
+            props = json.load(response)
+        vision = (props.get("modalities") or {}).get("vision")
+        context = props.get("n_ctx", (props.get("default_generation_settings") or {}).get("n_ctx"))
+        mismatch = (vision is not None and bool(vision) != profile.vision or
+                    context is not None and profile.context_tokens is not None and context < profile.context_tokens)
+        return Check(name=name, level="warn" if mismatch else "ok",
+                     detail=f"llama.cpp: vision={vision} (configured {profile.vision}), "
+                            f"n_ctx={context} (configured {profile.context_tokens})")
+    except Exception:
+        return Check(name=name, level="warn", detail="llama.cpp /props unavailable (optional)")
+
+
+def run_checks(paths: Paths, config: Config | None = None) -> list[Check]:
     checks = [
         Check(name="python", level="ok" if sys.version_info[:2] == (3, 12) else "warn",
               detail=platform.python_version()),
@@ -66,6 +103,11 @@ def run_checks(paths: Paths) -> list[Check]:
         _gpu(),
         _ollama(os.environ.get("LITFORGE_OLLAMA_URL", "http://localhost:11434")),
     ]
+    if config is not None:
+        for name, profile in {"local": config.models.local, **config.models.profiles}.items():
+            if (profile.provider == "openai_compatible" and not profile.remote and
+                    (profile.server or profile.reasoning_param == "chat_template_kwargs") and profile.base_url):
+                checks.append(check_model_profile(name, profile))
     try:
         paths.ensure()
         probe = paths.root / ".write_probe"

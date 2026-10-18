@@ -20,6 +20,7 @@ class EvidencePacket(BaseModel):
     items: list[EvidenceItem] = Field(min_length=1)
     sensitive: bool = False
     content_hash: str = ""
+    dropped_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def unique_ids(self) -> EvidencePacket:

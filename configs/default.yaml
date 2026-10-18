@@ -58,13 +58,17 @@ privacy:
   send_full_pdf: false
   require_confirmation_for_sensitive_content: true
 
+# `litforge models setup` writes opt-in model/server choices to <data>/config.yaml.
+# Users who never run setup keep these Ollama defaults; no managed server starts.
 models:
+  vision_profile: null
   policy: local_only
   local:
     provider: ollama
     model: qwen3:4b
     remote: false
   profiles: {}
+  tasks: {}
 
 budget:
   max_per_call_usd: 1

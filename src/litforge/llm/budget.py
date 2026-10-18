@@ -8,8 +8,8 @@ class BudgetExceeded(ValueError):
 
 
 class Pricing(BaseModel):
-    input_per_million_usd: float = Field(ge=0)
-    output_per_million_usd: float = Field(ge=0)
+    input_per_million_usd: float = Field(ge=0, allow_inf_nan=False)
+    output_per_million_usd: float = Field(ge=0, allow_inf_nan=False)
 
 
 class BudgetGuard:

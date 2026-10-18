@@ -36,7 +36,7 @@ from litforge.analysis import matrix as matrices
 from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.review import record_review
 from litforge.analysis.runs import get_run
-from litforge.config import Config, EnvSettings, Paths, contact_email, save_mailto
+from litforge.config import Config, EnvSettings, Paths, contact_email, load_config, save_mailto
 from litforge.console import planner
 from litforge.console.actions import ActionContext
 from litforge.discovery.fetch import fetch_open_access
@@ -46,10 +46,12 @@ from litforge.discovery.similar import run_similar
 from litforge.discovery.textsim import Embedder, load_embedder
 from litforge.export.markdown import default_export_dir, export_markdown
 from litforge.ingest import IngestResult
+from litforge.llm.local_models import fit_check, ollama_change, ollama_pull
+from litforge.llm.secrets import KeyStore
 from litforge.observability import EventLog
 from litforge.parsing.formulas import FormulaEngine, Pix2TextEngine, formulas_available
 from litforge.parsing.run import ParseResult
-from litforge.parsing.vision import OllamaVision, Vision, enhance_project
+from litforge.parsing.vision import GatewayVision, OllamaVision, Vision, enhance_project, plan_project
 from litforge.parsing.vision_setup import OllamaSetup
 from litforge.pipeline import add_pdfs
 from litforge.projects import MARK_SCOPES, ProjectNotFound, create_project, delete_project, get_project_id, set_active
@@ -90,8 +92,12 @@ class App:
                  make_gateway: Callable[[sqlite3.Connection], ModelGateway] | None = None) -> None:
         self.paths = paths
         self.config = config
+        self.models = api.ModelsPanel(paths, config)
+        self.keys = KeyStore(config)
+        self._job_context = threading.local()
         self.log = EventLog(paths.logs)
         self.jobs: dict[str, Job] = {}
+        self.model_downloads: dict[str, tuple[dict[str, Any], dict[str, str]]] = {}
         self.stop: Callable[[], None] | None = None  # set by serve(): shuts the server down
         self.last_seen = time.monotonic()  # when a page last checked in, see stop_when_idle()
         self._embedder: Embedder | None = None
@@ -99,12 +105,13 @@ class App:
         self._lock = threading.Lock()
         self.make_http = make_http or (lambda: HttpClient(
             cache_dir=paths.http_cache, cache_ttl_s=config.discovery.cache_ttl_days * 86400))
-        self.make_llm = make_llm or (lambda model: ollama_from_config(config.screening, model))
-        self.make_gateway = make_gateway or (lambda conn: ModelGateway(conn, config))
-        self.make_vision = make_vision or (lambda: OllamaVision(
-            os.environ.get("LITFORGE_OLLAMA_URL") or config.screening.ollama_url, config.vision))
+        self.make_llm = make_llm or (lambda model: ollama_from_config(self.config.screening, model))
+        self.make_gateway = make_gateway or (lambda conn: ModelGateway(
+            conn, self.config, ensure_server=self.models.server.ensure_running,
+            progress=getattr(self._job_context, "progress", None)))
+        self.make_vision = make_vision
         self.vision_setup = vision_setup or OllamaSetup(
-            os.environ.get("LITFORGE_OLLAMA_URL") or config.screening.ollama_url, config.vision.model)
+            os.environ.get("LITFORGE_OLLAMA_URL") or config.screening.ollama_url, config.vision.model or "disabled")
         self._make_formulas = make_formulas or Pix2TextEngine
         self._formulas: FormulaEngine | None = None
         paths.ensure()
@@ -112,6 +119,99 @@ class App:
         # Jobs live in memory: runs left 'running' by a previous server process will never finish.
         conn.execute("UPDATE discovery_runs SET status='interrupted' WHERE status='running'")
         conn.close()
+
+    def stop_models(self) -> None:
+        cfg = self.config.models.servers.get("llamacpp")
+        if cfg:
+            self.models.server.stop(cfg)
+
+    def model_test_job(self, body: dict[str, Any]) -> Job:
+        from litforge.llm.commands import diagnostic_call, key_status
+        profile = str(body["profile"])
+        vision, approved = body.get("vision") is True, body.get("approved") is True
+        conn = self.db()
+        try:
+            _, cfg = self.make_gateway(conn).resolve("asset_analyze" if vision else "ask", profile, vision)
+            if cfg.remote and (not approved or not self.config.privacy.allow_cloud):
+                raise ValueError("Cloud tests require cloud permission and separate approval of test prompts/images.")
+        finally:
+            conn.close()
+        def work(job: Job) -> None:
+            conn = self.db()
+            try:
+                gateway = self.make_gateway(conn)
+                _, cfg = gateway.resolve("asset_analyze" if vision else "ask", profile, vision)
+                job.messages.append(f"key: {key_status(cfg.api_key_env)}")
+                job.report = diagnostic_call(gateway, profile, vision, approved)
+            finally:
+                conn.close()
+        return self.start_job("model-test", "", work)
+
+    def download_job(self, body: dict[str, Any], *, plan: dict[str, Any] | None = None) -> Job:
+        if body.get("confirmed") is not True:
+            raise ValueError("Confirm the download and reviewed file changes first")
+        if plan is None:
+            plan = self.models.download_pending.get(str(body.get("token", "")))
+        if plan is None:
+            raise ValueError("Download preview expired; review it again")
+        if plan["fit"]["badge"] == "too large" and body.get("too_large_confirmed") is not True:
+            raise ValueError("Explicit confirmation required: model is too large for this machine")
+        self.models.download_pending.pop(str(body.get("token", "")), None)
+        state = {"action": ""}
+        selected_plan = plan
+        def work(job: Job) -> None:
+            job.report = {"state": "downloading"}
+            for item in [selected_plan["item"], *([selected_plan["mmproj"]] if selected_plan["mmproj"] else [])]:
+                def progress(info: dict[str, Any], filename: str = item["path"]) -> None:
+                    job.report = {"state": "downloading", "file": filename, **info}
+                path = self.models.downloader.run(selected_plan["repo"], item, progress=progress,
+                                                  control=lambda: state["action"])
+                if path is None:
+                    job.report = {"state": "paused" if state["action"] == "pause" else "cancelled"}
+                    return
+            if state["action"]:
+                job.report = {"state": "paused" if state["action"] == "pause" else "cancelled"}
+                return
+            selected_plan["change"].apply()
+            self.models.config = load_config(self.config.config_path, data_root=self.paths.root)
+            self.config = self.models.config
+            job.report = {"state": "registered", "verified": True}
+        job = self.start_job("model-download", "", work)
+        self.model_downloads[job.id] = (selected_plan, state)
+        return job
+
+    def download_control(self, body: dict[str, Any]) -> Job:
+        identifier, action = str(body.get("id", "")), body.get("action")
+        if identifier not in self.model_downloads or action not in {"pause", "cancel", "resume"}:
+            raise ValueError("Unknown model download/action")
+        plan, state = self.model_downloads[identifier]
+        job = self.jobs[identifier]
+        if action == "resume":
+            if job.status == "running" or (job.status != "failed" and (not job.report or
+                                                                       job.report.get("state") != "paused")):
+                raise ValueError("Wait for the download to pause before resuming")
+            return self.download_job({"confirmed": True, "too_large_confirmed": True}, plan=plan)
+        state["action"] = action
+        if action == "cancel" and job.status != "running":
+            for item in [plan["item"], *([plan["mmproj"]] if plan["mmproj"] else [])]:
+                target = self.models.downloader.path(plan["repo"], item["path"])
+                target.with_suffix(target.suffix + ".part").unlink(missing_ok=True)
+            job.report = {"state": "cancelled"}
+        return job
+
+    def ollama_pull_job(self, body: dict[str, Any]) -> Job:
+        if body.get("confirmed") is not True:
+            raise ValueError("Confirm the Ollama download first")
+        name = str(body.get("name", ""))
+        change = ollama_change(self.paths.root, name, tasks=body.get("tasks") or [])
+        def work(job: Job) -> None:
+            ollama_pull(name, base_url=self.config.screening.ollama_url,
+                        progress=lambda item: setattr(job, "report", item))
+            # The user reviews registration separately; public weights download needs no API key.
+            token = uuid.uuid4().hex
+            self.models.pending[token] = change
+            job.report = {"state": "pulled", "token": token, "diff": change.diff}
+        return self.start_job("ollama-pull", "", work)
 
     def formulas(self) -> FormulaEngine:
         """Pix2Text loads its models once and is reused across exports."""
@@ -159,6 +259,7 @@ class App:
         self.jobs[job.id] = job
 
         def target() -> None:
+            self._job_context.progress = job.messages.append
             try:
                 job.run_id = work(job)
                 job.status = "done"
@@ -518,7 +619,12 @@ class App:
         def work(job: Job) -> str | None:
             c = self.db()
             try:
-                screen_run(c, self.make_llm(model), run_id, top, progress=job.messages.append, log=self.log)
+                profile = str(body.get("profile") or "") or None
+                gateway = (self.make_gateway(c) if model is None and
+                           (profile is not None or "screen" in self.config.models.tasks) else None)
+                screen_run(c, self.make_llm(model) if gateway is None else None, run_id, top,
+                           progress=job.messages.append, log=self.log, gateway=gateway,
+                           profile=profile if gateway else None, approved=body.get("approved") is True)
             except LlmError as exc:
                 raise RuntimeError(str(exc)) from exc
             finally:
@@ -545,12 +651,22 @@ class App:
         if level == "medium" and self._make_formulas is Pix2TextEngine and not formulas_available():
             raise ValueError("better math (medium) needs Pix2Text: run `uv sync --extra formulas-gpu` "
                              "(NVIDIA GPU) or `uv sync --extra formulas` (CPU), then restart `litforge ui`")
-        engine: Vision | FormulaEngine | None = self.make_vision() if level == "high" else None
+        engine: Vision | FormulaEngine | None = self.make_vision() if level == "high" and self.make_vision else None
         if isinstance(engine, OllamaVision):
             try:
                 engine.check()  # fail now, on the page, if Ollama or the model is missing
-            except LlmError as exc:
+            except (RuntimeError, ValueError) as exc:
                 raise ValueError(f"better math (high): {exc}") from exc
+
+        if level == "high" and self.make_vision is None:
+            probe_conn = self.db()
+            try:
+                GatewayVision(self.make_gateway(probe_conn), body.get("profile"),
+                              body.get("approved") is True).check()
+            except (RuntimeError, ValueError) as exc:
+                raise ValueError(f"better math (high): {exc}") from exc
+            finally:
+                probe_conn.close()
 
         def work(job: Job) -> str | None:
             c = self.db()
@@ -560,7 +676,9 @@ class App:
                 if fetch:
                     self._fetch(c, job, pid, only, paper_ids)
                 if level != "off":
-                    tool = engine if engine is not None else self.formulas()
+                    tool = (engine if engine is not None else
+                            GatewayVision(self.make_gateway(c), body.get("profile"), body.get("approved") is True)
+                            if level == "high" else self.formulas())
                     vis = enhance_project(c, self.paths, self.config, pid, tool, only, paper_ids, self.log,
                                           progress=job.messages.append)
                     job.report["vision"] = {**dataclasses.asdict(vis), "level": level}
@@ -576,8 +694,32 @@ class App:
 
         return self.start_job("export" if export else "fetch", project, work)
 
+    def _uses_model_settings(self) -> bool:
+        return bool(self.config.models.vision_profile or self.config.models.setup_tier or
+                    "page_rewrite" in self.config.models.tasks or
+                    self.config.vision.model is None)
+
+    def math_setup_status(self) -> dict[str, Any]:
+        if not self._uses_model_settings():
+            return self.vision_setup.status().as_dict()
+        conn = self.db()
+        try:
+            gateway = self.make_gateway(conn)
+            _, cfg = gateway.resolve("page_rewrite", vision=True)
+            message = ""
+            if not cfg.vision:
+                message = "Image features are off for this setup. Choose a vision model in Settings."
+            elif cfg.remote and (not self.config.privacy.allow_cloud or self.config.models.policy == "local_only"):
+                message = "Cloud page images are disabled. Review cloud permission in Settings first."
+            return {"ready": not message, "disabled": bool(message), "message": message,
+                    "model": cfg.model, "remote": cfg.remote, "notice": gateway._model_notice(cfg)}
+        finally:
+            conn.close()
+
     def setup_job(self, body: dict[str, Any]) -> Job:
         """Get better math (high) ready: install and start Ollama, pull the vision model (the user agreed)."""
+        if self._uses_model_settings():
+            raise ValueError("Use Settings for this setup; no tools are installed here.")
         if any(j.kind == "setup" and j.status == "running" for j in self.jobs.values()):
             raise ValueError("the vision model is already being set up")
 
@@ -666,13 +808,28 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 return self._lens(path, query, None)
             conn = app.db()
             try:
+                if path == "/api/keys":
+                    return self._json(app.keys.status())
+                if path == "/api/models/catalogue":
+                    return self._json(app.models.catalogue.catalogue(vision=query.get("vision") == "1",
+                        max_input_price=float(query["max_input_price"]) if query.get("max_input_price") else None,
+                        q=query.get("q", "")))
+                if path == "/api/models/local-search":
+                    return self._json(app.models.hf.search(query.get("q", ""), show_all=query.get("show_all") == "1"))
+                if path == "/api/models/local-files":
+                    tree = app.models.hf.files(query.get("repo", ""))
+                    for item in tree["models"]:
+                        item["fit"] = fit_check(app.models._detect(), item["size"])
+                    return self._json(tree)
+                if path == "/api/models":
+                    return self._json(app.models.info())
                 if path == "/api/model-profiles":
                     return self._json(api.model_profiles(app.config))
                 if path == "/api/info":
                     return self._json({"exports_root": str(app.paths.exports_root),
                                        "math": {"medium": formulas_available(), "high": app.config.vision.model}})
                 if path == "/api/math-setup":
-                    return self._json(app.vision_setup.status().as_dict())
+                    return self._json(app.math_setup_status())
                 if path == "/api/projects":
                     return self._json(api.list_projects(conn, app.paths))
                 if path == "/api/runs":
@@ -681,7 +838,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 if path == "/api/library":
                     return self._json(api.library(conn))
                 if path == "/api/settings":
-                    return self._json({"mailto": contact_email(app.paths, app.config)})
+                    return self._json({"mailto": contact_email(app.paths, app.config),
+                                       "exports_root": str(app.paths.exports_root)})
                 if path == "/api/missing-pdfs":
                     pid = get_project_id(conn, query["project"])
                     return self._json(api.missing_pdfs(conn, pid, query.get("only", "all")))
@@ -722,6 +880,17 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 ctype += "; charset=utf-8"
             self._send(200, target.read_bytes(), ctype)
 
+        def do_DELETE(self) -> None:  # noqa: N802
+            if not self._same_origin():
+                return self._error(403, "cross-origin request refused")
+            if urlsplit(self.path).path != "/api/keys":
+                return self._error(404, "not found")
+            try:
+                app.keys.remove(self._body().get("name"))
+                self._json({"ok": True})
+            except ValueError:
+                self._error(400, "Could not remove key; use a known key name and check the system keychain")
+
         def do_POST(self) -> None:  # noqa: N802 - stdlib name
             if not self._same_origin():
                 return self._error(HTTPStatus.FORBIDDEN, "cross-origin request refused")
@@ -736,6 +905,38 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     q = {k: v[0] for k, v in parse_qs(url.query).items()}
                     return self._import(q.get("name", "refs.csv"), q.get("project") or "default", q.get("export_dir"))
                 body = self._body()
+                if url.path == "/api/keys":
+                    app.keys.set(body.get("name"), body.get("value"))
+                    return self._json({"ok": True})
+                if url.path == "/api/models/download-preview":
+                    return self._json(app.models.prepare_download(body))
+                if url.path == "/api/models/download":
+                    return self._json(app.download_job(body).__dict__)
+                if url.path == "/api/models/download-control":
+                    return self._json(app.download_control(body).__dict__)
+                if url.path == "/api/models/pull-ollama":
+                    return self._json(app.ollama_pull_job(body).__dict__)
+                if url.path == "/api/export-preview":
+                    conn = app.db()
+                    try:
+                        engine = GatewayVision(app.make_gateway(conn), body.get("profile"))
+                        pages = plan_project(conn, app.paths, get_project_id(conn, str(body["project"])),
+                                             engine, str(body.get("only", "all")), body.get("paper_ids"))
+                        return self._json({"page_images": len(pages),
+                            "image_description": f"{len(pages)} page images will be sent",
+                            "blocked_reasons": list(dict.fromkeys(p.blocked_reason for p in pages if p.blocked_reason)),
+                            "max_cost_usd": sum(p.max_cost_usd or 0 for p in pages)})
+                    finally:
+                        conn.close()
+                if url.path == "/api/models/preview":
+                    return self._json(app.models.preview(body))
+                if url.path == "/api/models/apply":
+                    app.models.apply(str(body.get("token", "")), body.get("confirmed") is True)
+                    app.config = app.models.config
+                    app.keys.names.update(KeyStore(app.config).names)
+                    return self._json({"ok": True})
+                if url.path == "/api/models/test":
+                    return self._json(app.model_test_job(body).__dict__)
                 if self._is_lens(url.path):
                     return self._lens(url.path, {}, body)
                 if url.path == "/api/similar":
@@ -809,7 +1010,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json({"ok": True})
                 if url.path == "/api/settings":
                     save_mailto(app.paths, body.get("mailto"))
-                    return self._json({"mailto": contact_email(app.paths, app.config)})
+                    return self._json({"mailto": contact_email(app.paths, app.config),
+                                       "exports_root": str(app.paths.exports_root)})
                 if url.path == "/api/math-setup":
                     return self._json(app.setup_job(body).__dict__)
                 if url.path == "/api/fetch":
@@ -918,14 +1120,17 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         project_id = get_project_id(conn, project_name) if project_name else None
                         gateway = app.make_gateway(conn)
                         cloud_approved = body.get("approved_cloud") is True
-                        planner_call = planner.preview_planner_call(gateway, request_text)
+                        profile = str(body.get("profile") or "") or None
+                        planner_call = planner.preview_planner_call(gateway, request_text, profile)
                         if planner_call.blocked_reason:
                             return self._json({"error": "Planner route is blocked.",
                                                "preview": planner_call.model_dump()}, 400)
                         if planner_call.requires_approval and not cloud_approved:
                             return self._json({"error": "Separate approval is required for the cloud planner route.",
                                                "preview": planner_call.model_dump()}, 403)
-                        plan_value = planner.plan(conn, gateway, request_text, project_id, cloud_approved)
+                        plan_value = (planner.plan(conn, gateway, request_text, project_id, cloud_approved, profile)
+                                      if profile else
+                                      planner.plan(conn, gateway, request_text, project_id, cloud_approved))
                         project_row = conn.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone() \
                             if project_id else None
                         context = ActionContext(conn, gateway, project_id,
@@ -1143,6 +1348,7 @@ def serve(paths: Paths, config: Config, host: str = "127.0.0.1", port: int = 876
     except KeyboardInterrupt:
         pass
     finally:
+        app.stop_models()
         httpd.server_close()
 
 

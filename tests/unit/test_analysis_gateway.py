@@ -32,7 +32,7 @@ def cfg() -> Config:
     config.models.policy = "hybrid"
     config.privacy.allow_cloud = True
     config.models.profiles["remote"] = ModelProfileConfig(
-        provider="openai_compatible", model="large", remote=True,
+        provider="openai_compatible", model="large", remote=True, vision=True,
         pricing=Pricing(input_per_million_usd=1, output_per_million_usd=2),
     )
     return config

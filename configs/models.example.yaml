@@ -1,0 +1,145 @@
+# Prefer `litforge models setup` to review a hardware-based setup in <data>/config.yaml.
+# `models add PROVIDER --model ID` adds an API profile; cloud permission stays separate.
+# Or copy the profiles you need; use litforge --config FILE models list.
+# Replace REPLACE_* with an exact model ID from the linked provider model list.
+# Remote examples intentionally omit pricing: copy current USD per-million prices into
+# pricing: {input_per_million_usd: ..., output_per_million_usd: ...} before use.
+# OpenRouter obtains its prices automatically; a failed lookup blocks remote calls.
+privacy:
+  allow_cloud: false
+models:
+  # Opt-in managed router. `models setup --tier large` writes its INI preset in the data root.
+  # Run setup first, or supply that preset yourself. All hosts must be loopback.
+  servers:
+    llamacpp:
+      managed: true
+      command: llama-server
+      preset: llamacpp-models.ini
+      host: 127.0.0.1
+      port: 8093
+      models_max: 1
+      idle_unload_minutes: 15
+      start_timeout_s: 60
+  vision_profile: gemma4
+  policy: local_only
+  tasks:
+    ask: {profile: gemma4, reasoning: "off"}
+    audit: {profile: gemma4, reasoning: "off"}
+    matrix_extract: {profile: local, reasoning: "off"}
+    screen: {profile: qwen3-4b, reasoning: "off"}
+    screen_fulltext: {profile: local}
+    asset_analyze: {profile: ollama_vision}
+    page_rewrite: {profile: ollama_vision}
+    console_plan: {profile: local}
+  profiles:
+    gemma4:
+      provider: openai_compatible
+      server: llamacpp  # base_url derives from the server host/port; model is the INI section
+      model: gemma4
+      vision: true
+      context_tokens: 16384
+      reasoning_param: chat_template_kwargs
+      timeout_s: 600  # normal calls, including JSON retries
+      reasoning_output_tokens: 8192
+      load_timeout_s: 900  # first download/load; startup health timeout is separate
+    qwen3-4b:
+      provider: openai_compatible
+      server: llamacpp
+      model: qwen3-4b
+      timeout_s: 600
+      context_tokens: 16384
+      reasoning_param: chat_template_kwargs
+    llamacpp_local:
+      provider: openai_compatible
+      base_url: http://127.0.0.1:8080/v1
+      model: REPLACE_LOADED_MODEL  # GET http://127.0.0.1:8080/v1/models
+      remote: false
+      reasoning_param: chat_template_kwargs
+      # Set vision: true only when your loaded model and projector support images.
+      # context_tokens: 8192  # match the server's n_ctx (litforge doctor)
+      max_output_tokens: 1024
+      reasoning_output_tokens: 4096
+    ollama_text:
+      provider: ollama
+      model: qwen3:4b  # ollama list; https://ollama.com/library
+      remote: false
+    ollama_vision:
+      provider: ollama
+      model: qwen2.5vl:7b  # https://ollama.com/library/qwen2.5vl
+      remote: false
+      vision: true
+    openrouter_text:
+      provider: openai_compatible
+      base_url: https://openrouter.ai/api/v1
+      model: REPLACE_PROVIDER/MODEL  # https://openrouter.ai/models
+      api_key_env: OPENROUTER_API_KEY
+      remote: true
+      reasoning_param: openrouter
+      pricing_source: openrouter
+      extra_body: {provider: {data_collection: deny, require_parameters: true}}
+      headers: {X-Title: LitForge}
+    openrouter_vision:
+      provider: openai_compatible
+      base_url: https://openrouter.ai/api/v1
+      model: REPLACE_VISION_PROVIDER/MODEL  # https://openrouter.ai/models (image input)
+      api_key_env: OPENROUTER_API_KEY
+      remote: true
+      vision: true
+      reasoning_param: openrouter
+      pricing_source: openrouter
+      extra_body: {provider: {data_collection: deny, require_parameters: true}}
+      headers: {X-Title: LitForge}
+    deepseek:
+      provider: openai_compatible
+      base_url: https://api.deepseek.com
+      model: REPLACE_DEEPSEEK_MODEL  # https://api-docs.deepseek.com/quick_start/pricing
+      api_key_env: DEEPSEEK_API_KEY
+      remote: true
+      structured_output: json_object
+    dashscope_qwen:
+      provider: openai_compatible
+      base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      model: REPLACE_QWEN_MODEL  # https://www.alibabacloud.com/help/en/model-studio/models
+      api_key_env: DASHSCOPE_API_KEY
+      remote: true
+      # Use the base URL for your key's region; see Model Studio's base URL overview.
+      structured_output: json_object
+    moonshot_kimi:
+      provider: openai_compatible
+      base_url: https://api.moonshot.ai/v1
+      model: REPLACE_KIMI_MODEL  # https://platform.moonshot.ai/docs/guide/start-using-kimi-api
+      api_key_env: MOONSHOT_API_KEY
+      remote: true
+      structured_output: json_object
+    openai:
+      provider: openai_compatible
+      base_url: https://api.openai.com/v1
+      model: REPLACE_OPENAI_MODEL  # https://platform.openai.com/docs/models
+      api_key_env: OPENAI_API_KEY
+      remote: true
+      reasoning_param: reasoning_effort
+    anthropic_openai_compat:
+      provider: openai_compatible
+      base_url: https://api.anthropic.com/v1
+      model: REPLACE_CLAUDE_MODEL  # https://platform.claude.com/docs/en/about-claude/models/overview
+      api_key_env: ANTHROPIC_API_KEY
+      remote: true
+      vision: true
+      structured_output: json_object  # LitForge also validates the returned JSON
+      extra_body: {temperature: 1}
+    gemini_openai_compat:
+      provider: openai_compatible
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai
+      model: REPLACE_GEMINI_MODEL  # https://ai.google.dev/gemini-api/docs/models
+      api_key_env: GEMINI_API_KEY
+      remote: true
+      vision: true
+      structured_output: json_object
+    university_vllm:
+      provider: openai_compatible
+      base_url: https://REPLACE_UNIVERSITY_HOST/v1
+      model: REPLACE_SERVED_MODEL  # ask your university administrator or GET /v1/models
+      api_key_env: UNIVERSITY_LLM_API_KEY
+      remote: true  # sends evidence off this computer, even on a university network
+      reasoning_param: chat_template_kwargs
+      # A vLLM instance on this computer can use remote: false and omit api_key_env.

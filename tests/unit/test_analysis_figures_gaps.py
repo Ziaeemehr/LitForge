@@ -380,3 +380,19 @@ def test_failed_analysis_runs_store_sanitised_errors(conn: sqlite3.Connection) -
         design_gap(conn, gateway, gap.id)
     errors = [r[0] for r in conn.execute("SELECT error FROM analysis_runs WHERE task='gap_design'")]
     assert errors and all("secret-model-output-123" not in (e or "") for e in errors)
+
+
+@pytest.mark.parametrize("count", [25, 26, 40, 101])
+def test_chart_points_are_bounded_after_validation(conn, paths, count) -> None:
+    seed(conn)
+    add_asset(conn, paths, "chart-limit", "control", "figure")
+    provider = FakeVisionProvider({"axes": {}, "legend": [], "cut_off": True,
+        "series": [{"name": "control", "points": [[i, i * 2] for i in range(count)]}]})
+    gateway = ModelGateway(conn, Config(), providers={"local_vision": provider})
+    result = analyze_asset(conn, gateway, paths, "chart-limit", "chart")
+    series = result.result["series"][0]
+    expected = list(range(count)) if count <= 25 else [i * (count - 1) // 24 for i in range(25)]
+    assert [p[0] for p in series["points"]] == expected
+    assert len(series["evidence_ids"]) == len(expected) == len(result.evidence)
+    assert ("points_downsampled" in result.fidelity.get("flags", [])) == (count > 25)
+    assert "cut_off_crop" in result.fidelity["flags"]

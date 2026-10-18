@@ -17,7 +17,7 @@ def test_brief_provenance_and_refusal(conn: sqlite3.Connection, tmp_path: Path) 
     out = tmp_path / "brief.md"
     assert write_brief(conn, answer.run_id, out=out) == out
     text = out.read_text()
-    for part in [span.id, "fake", "ask-v1", "lexical", "gain", "Audit", "Review", "p.1"]:
+    for part in [span.id, "fake", "ask-v2", "lexical", "gain", "Audit", "Review", "p.1"]:
         assert part in text
     conn.execute("UPDATE answer_sentences SET evidence_ids_json='[]' WHERE run_id=?", (answer.run_id,))
     with pytest.raises(ValueError, match="evidence|label"):
@@ -38,7 +38,7 @@ def test_brief_records_matrix_prompt(conn: sqlite3.Connection, tmp_path: Path) -
     fake.answer = lambda _: {"status": "not_reported"}
     extract_matrix(conn, gw, matrix.id)
     out = write_brief(conn, answer.run_id, matrix.id, out=tmp_path / "brief.md")
-    assert "matrix-v1" in out.read_text() and "(not_reported)" in out.read_text()
+    assert "matrix-v2" in out.read_text() and "(not_reported)" in out.read_text()
 
 
 @pytest.mark.parametrize("verdict", ["partial", "unsupported", "contradicted"])

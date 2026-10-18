@@ -20,6 +20,226 @@ uv run litforge export
   Model-written answers arrive in phase 1.
 - `export` writes Markdown notes to `~/Downloads/LitForge/my-review/markdown/` and each paper's PDF under a readable name to `~/Downloads/LitForge/my-review/pdfs/` (set `LITFORGE_EXPORT_ROOT` to change the base folder, or pick a folder per project in the web UI); `--only relevant` keeps just the papers marked ✓ (`--only not-irrelevant` drops the ✗ ones).
 
+## Settings, keys and cloud-light
+
+Open **⚙ Settings** in the sidebar footer, use **`,`** outside a text field, or bookmark `#settings`.
+This full-width page has cards for Models, API keys, Add API model, Cloud & budget, and Library & export.
+Models includes hardware, the recommended setup, local-server status, profile Test/Remove controls and task
+assignments. Every configuration write shows the exact diff and asks for confirmation. YAML comments are
+not preserved; the previous config is copied to `config.yaml.bak` as described below.
+
+**Library & export** contains the contact e-mail used for OpenAlex, Crossref and Unpaywall, and the default
+export folder. These retain the existing local `settings.json` settings behavior. A project's saved export
+folder continues to take precedence; `LITFORGE_EXPORT_ROOT` overrides the default folder and
+`LITFORGE_MAILTO` overrides the contact e-mail. Cloud permission, policy and per-call/run/month budget limits
+are editable in **Cloud & budget**, saved in `<data>/config.yaml` and checked on every model call.
+
+### API keys
+
+Enter the provider's named key in **API keys**. The password field clears immediately after submission;
+the UI shows only each key's name and source (`env`, `keychain`, or `missing`). Environment variables win over
+keychain entries. Removing a keychain entry leaves any environment variable set. Keys resolve for each
+provider call; LitForge does not save their values in its configuration, database, browser storage, logs or
+job reports. `HF_TOKEN` is optional for public Hugging Face searches and downloads.
+
+```bash
+litforge models key set OPENROUTER_API_KEY  # hidden prompt, no key on the command line
+litforge models key status
+litforge models key remove OPENROUTER_API_KEY
+litforge models test YOUR_PROFILE --approve  # reports key source; cloud test needs separate approval
+```
+
+macOS uses the login keychain through `/usr/bin/security` (writes send commands on stdin). Windows uses
+Credential Manager. Linux uses `secret-tool` when available; otherwise set keys as environment variables.
+LitForge installs no keychain tools. A keychain lock or access denial appears as **keychain error** in status and model tests; unlock it in the OS.
+Removing an absent keychain entry succeeds and reports **No keychain entry for NAME.**
+
+### Cloud-light for smaller machines
+
+Cloud-light is offered on every machine and recommended when hardware is classified as small. Search the
+live OpenRouter catalogue in Models and choose **Cheap model for extraction and images — must accept
+images**, plus an optional **Strong model for analysis**. Pickers show model IDs/names, prices per million
+tokens, context lengths and image support. Only models with text output are offered; paid models are sorted
+by input price, with `:free` variants last. Free variants are labelled **free — often rate-limited; may be
+unavailable with data_collection: deny**. There are no default cloud model IDs.
+The public catalogue shares the daily pricing cache. CLI equivalents:
+
+```bash
+litforge models catalogue --vision --max-price 1 --search YOUR_SEARCH
+litforge models catalogue --search YOUR_SEARCH
+litforge models setup --tier cloud --cheap YOUR_VISION_MODEL_ID --strong YOUR_ANALYSIS_MODEL_ID
+litforge models cloud on
+```
+
+Omit `--strong` to use one model for everything. Screening (`screen`, `screen_fulltext`) uses local Ollama
+`qwen3:4b` when installed; otherwise it uses `cloud_cheap`. Extraction, asset/equation analysis and page
+rewriting use image-capable `cloud_cheap`. Ask, Audit, claim relations, gap design and console planning use
+`cloud_strong`, or the cheap model when only one was chosen. Existing user-owned task assignments survive
+setup. Both cloud profiles use OpenRouter with `data_collection: deny` and `require_parameters: true`.
+
+The proposal estimates a typical matrix (20 papers × 10 columns, 1000 input and 100 output tokens per cell)
+and one page rewrite (1024 image-input estimate and 4000 output tokens), using catalogue prices. Actual cost
+varies with evidence, images and output. Setup sets `ask_before_cloud` and leaves cloud **off**; enabling it
+requires the separate **Enable cloud** confirmation. Whole-page image rewrites always require per-run
+approval, even with `hybrid` policy. The export preview says **N page images will be sent** and shows an
+estimated maximum cost; when fetching PDFs too, they are fetched before counting the images for approval.
+
+### Finding and downloading stronger local models
+
+In **Settings → Models → Find stronger local models**, search public Hugging Face GGUF repositories. Each
+result has downloads, a publisher badge and a model-card link. Repositories indicating embeddings, reranking,
+speech, image generation or classification are hidden by default; **Show all** (CLI `models search TEXT
+--show-all`) includes them with a **not a chat model** label. Badges identify official publishers, well-known
+quantizers, or **community — check the model card**; they are not a guarantee of model quality. Choose a
+quantization and, for images, its matching `mmproj` (check the card). Projectors and auxiliary MTP/draft files
+are excluded from the main model choices. No Hugging Face key is required for public models.
+
+Fit badges are rough: model + projector sizes + 0.25 MB KV cache per 1000 context tokens + 1 GB overhead.
+Apple's budget is 75% unified RAM; CPU-only is 60% RAM. NVIDIA first uses VRAM, then 60% RAM for partial
+offload, marked **slower: partly on CPU**. A tight badge means the last 10% of the available budget. **Too large** needs
+an additional explicit confirmation; insufficient free disk blocks the download. Choose context size and
+optional task checkboxes before reviewing the download and config diff.
+
+LitForge downloads to `<data>/models/PUBLISHER/REPO/FILE.gguf.part`, shows bytes/speed/ETA and supports
+**Pause**, **Resume** and **Cancel download**. Terminal progress updates one line with whole-second/minute
+ETA; redirected output reports at most once per 5% step. The per-file lock is removed on completion or exit. After an interruption, Resume or repeating the download resumes
+with HTTP Range. SHA-256 must match the Hugging Face LFS oid before atomic publication as `.gguf`; a checksum
+mismatch deletes the partial file. Download requests start only at validated Hugging Face HTTPS paths;
+Hugging Face's HTTPS weight-CDN redirects are restricted to its domains and never receive `HF_TOKEN`.
+A configured token is sent only to `huggingface.co`.
+
+On success, the reviewed change adds the absolute `model` (and optional `mmproj`) paths to
+`<data>/llamacpp-models.ini` and a local llama.cpp profile with the chosen context and image capability.
+Updating downloaded presets stops only LitForge’s owned router, so it reloads the preset on next use.
+LitForge starts the managed router when needed; install llama.cpp yourself if it is missing. Profiles can be
+assigned with the task checkboxes. Removing a downloaded profile offers to delete its owned model files;
+files referenced by another preset are retained. The **Ollama** tab pulls an exact name through local
+Ollama's streaming API, shows progress and offers to register an Ollama profile. CLI equivalents:
+
+```bash
+litforge models search YOUR_SEARCH
+litforge models files PUBLISHER/REPO
+litforge models download PUBLISHER/REPO MODEL.gguf --mmproj MMPROJ.gguf --name chosen --task ask
+litforge models pull-ollama YOUR_OLLAMA_MODEL_NAME
+litforge models remove chosen --delete-files
+```
+
+Downloads ask before starting. Ctrl+C pauses CLI downloads; repeat the command to resume. Existing verified
+files are reused. Setup still performs no downloads until first use, and no workflow installs tools.
+
+## Choosing models
+
+Defaults stay local: Ollama `qwen3:4b` for text and `vision.model` for images. Copy profiles from
+[models.example.yaml](../configs/models.example.yaml), then run `litforge --config YOUR.yaml models list`.
+
+Run `litforge models setup` (or open **⚙ Settings → Models** in the web UI) to detect hardware and review a setup.
+Nothing is installed or downloaded during setup. It shows the hardware, approximate sizes, exact paths and
+file diff, then asks before saving. `--tier large|medium|small|cloud` overrides the recommendation; `--yes` confirms
+the proposed files without a prompt. Missing backends are reported with installation instructions; when
+llama.cpp is missing and Ollama is installed, the large recommendation offers the medium tier instead.
+
+| Tier | Hardware condition | Setup | Approximate download / memory |
+| --- | --- | --- | --- |
+| large | Apple Silicon with at least 24 GB unified RAM, or NVIDIA with at least 16 GB VRAM and 32 GB RAM | llama.cpp router: Gemma 4 26B A4B Q4_0 for analysis and images; Qwen3 4B Q4_K_M for title/abstract and full-text screening | 20 GB / 24 GB |
+| medium | At least 12 GB unified memory, or NVIDIA VRAM + RAM totalling at least 12 GB | Ollama `qwen3:4b` for text, `qwen2.5vl:7b` for images | 8 GB / 12 GB |
+| small (optional local tier) | Other machines, including CPU-only machines | Ollama `qwen3:4b`; image features off | 3 GB / 4 GB |
+
+These are estimates, in binary GB (GiB), for the tested model choices. Large uses a 16384-token context,
+Gemma batch 2048 and ubatch 1152 (required for the full image budget), and one resident model at a time.
+Ask, Audit, Matrix, Claims, Relations, Gaps, Console, asset analysis, page rewriting and equation comparison
+use Gemma; screening uses Qwen. Hardware classified as small, including CPU-only systems with ample RAM,
+is offered cloud-light by default; the explicit small tier remains available for local-only use.
+
+Settings are saved in `<data>/config.yaml`. Loading merges `configs/default.yaml`, this user config, then
+`--config FILE` (or `LITFORGE_CONFIG`), so explicit overrides still win. Writers preserve unrelated keys and
+publish each file atomically. Existing users who never run setup retain the original defaults.
+
+Large also writes `<data>/llamacpp-models.ini`. LitForge starts `llama-server` on loopback on the first
+accepted call, with `--models-preset`, `--models-max 1` and a 15-minute idle-unload timer. Model weights download
+and load on first use; previews say so, and first-load requests allow 900 seconds by default
+(`load_timeout_s` on the profile). Ollama setup models are also pulled on first use if missing; Ollama must
+already be running. Setup never installs either backend. CLI controls are:
+
+```bash
+litforge models start
+litforge models status  # includes router models and their loaded/unloaded status
+litforge models stop
+```
+
+UI Quit, closing all tabs until the idle timeout, and Ctrl+C stop only a server LitForge started, verified
+by PID, process start identity and preset command argument. An external server is reused when its router lists
+the requested model and is never stopped. Conflicting listeners produce a port-setting error. See
+`models.servers.llamacpp` in [models.example.yaml](../configs/models.example.yaml) for the server settings.
+
+Managed llama.cpp setup uses port **8093** and a **600 second** request timeout per profile
+(`timeout_s`; the default for other profiles is 120). First model loading uses `load_timeout_s`.
+The large tier starts with reasoning off for every task. You can enable it per task with
+`reasoning: "on"`; local llama.cpp profiles default to an 8192 token reasoning output allowance.
+Turning reasoning on for long-evidence tasks can cost **minutes per call**, including retries.
+Image calls without an explicit profile or task assignment use `models.vision_profile` when set;
+otherwise they use the Ollama model in `vision.model`. Large setup sets `vision_profile: gemma4`
+and leaves `vision.model` untouched. Title/abstract screening uses the `screen` task assignment;
+without one it keeps the existing `screening.model` default, and `screen --model` overrides it.
+`models setup`, `models status` and `models list` print readable summaries; add `--json` for full JSON.
+
+Add an API model using its exact current model ID and prices (USD per million tokens):
+
+```bash
+litforge models add openai --model YOUR_MODEL_ID --name api_text --price-in 1 --price-out 4 --task ask
+litforge models add openrouter --model PROVIDER/MODEL_ID --name api_choice --task matrix_extract
+litforge models cloud on
+litforge models test api_text --approve
+litforge models remove api_text
+litforge models cloud off
+```
+
+Providers: `openrouter`, `openai`, `anthropic`, `google`, `deepseek`, `qwen`, `kimi`. Optional `--vision` and
+`--reasoning on|off` set capabilities. Non-OpenRouter profiles without both prices remain unusable; OpenRouter
+fetches current prices. Set the named provider key in your environment or **Settings → API keys**, never in YAML. Adding a model
+does not enable cloud access. `models cloud on` separately explains the evidence/images that leave the machine
+and asks for confirmation, then sets `allow_cloud: true` and `policy: ask_before_cloud`. Every remote diagnostic
+also needs its own approval. The Settings Models card offers the same review/apply flow, API form and profile tests.
+Per-action profile menus keep the cloud label and approval preview.
+
+| Provider | Use it for |
+| --- | --- |
+| Ollama | Simple local text and vision models; pull models with Ollama first. |
+| llama.cpp | Local GGUF models and thinking control; managed setup uses loopback port 8093. |
+| OpenRouter | A choice of hosted models with automatic daily pricing. |
+| DeepSeek | Hosted text extraction and reasoning. |
+| Qwen / DashScope | Hosted Qwen models; choose the endpoint matching your key's region. |
+| Kimi / Moonshot | Hosted Kimi models. |
+| OpenAI | Hosted models with schema output and reasoning effort control. |
+| Anthropic compatibility | Claude through its OpenAI-compatible endpoint; use `structured_output: none`. |
+| Gemini compatibility | Gemini through its OpenAI-compatible endpoint. |
+| University vLLM | An institution's model server; mark it remote if evidence leaves your computer. |
+
+Set `models.tasks` to choose a profile, optional reasoning mode and `max_output_tokens` per task. Explicit
+`--profile` or UI choices
+come first, then the task map, then `local` (or `models.vision_profile` for images, falling back to
+`local_vision`). Mark image models `vision: true`.
+Reasoning defaults to off; on uses `reasoning_output_tokens` (8192 for local llama.cpp, 4096 otherwise). Set `context_tokens` to match
+your server: evidence is trimmed in rank order, dropped IDs are recorded, and requests that cannot fit are refused.
+
+Remote profiles require `remote: true`, an `api_key_env`, current per-million prices (or
+`pricing_source: openrouter`), cloud permission, and a permitting policy. `litforge models pricing` shows source
+and cache age. `litforge models test PROFILE [--vision] [--approve]` sends a fixed diagnostic prompt;
+remote tests require approval. `litforge enhance --preview` counts uncached page images;
+`--profile` and `--approve` select and approve remote transcription. `litforge doctor` checks local llama.cpp
+capabilities and context. Provider documentation links are beside the profiles in the example config.
+
+Model setup records the profiles, task assignments and server it owns in `models.setup_owned`.
+Switching tiers removes those entries and stops an owned llama.cpp server when the new tier does not use it.
+User profiles and task assignments are retained; assigning a task with `models add` releases it from setup ownership.
+Existing entries without an ownership record are treated as user settings.
+
+Model configuration writes save the exact previous file as `config.yaml.bak` and add a header explaining
+that YAML comments are not preserved. The CLI and Settings page show this note with the proposed file diff.
+Human server status shows one line with only preset model names and load states; use `models status --json`
+for the raw router response. When `models.vision_profile` selects a replacement, the unused built-in
+Ollama vision profile is hidden from the model list.
+
+
 ## Relevance, importance and review priority
 
 Every result gets two scores, both between 0 and 1:
@@ -57,7 +277,8 @@ and unchanged papers are not sent to the model twice.
 LitForge's model layer can also target an OpenAI-compatible endpoint, including a university-hosted
 vLLM server. Cloud use is disabled by default. The gateway routes only explicit evidence packets,
 never complete PDF bytes, and supports hard per-call, per-run, and monthly budgets. API keys are read from
-environment variables named by the configuration; their values are not stored in the database or logs.
+environment variables named by the configuration, then from the system keychain. Their values are not stored
+in LitForge files, database rows, logs or job reports.
 Named remote profiles can be added under `models.profiles`; each profile declares its endpoint, model,
 and API-key environment-variable name. No remote profile is configured by default.
 
@@ -406,6 +627,13 @@ or a profile you pick. Remote calls use the normal preview, approval and budget 
 Transcribed cells, digitized chart points and equations are image-derived evidence, not text-reported
 values; matrix and Ask validation flags numbers supported only by image evidence. The glossary groups
 equation symbols by meaning.
+
+Re-parsing existing papers improves equation crops, especially centred equations in single-column papers;
+the updated PyMuPDF parser version invalidates older cached parses. Crop transcription preserves only visible
+content, uses `\cdots` at cut edges, and shows a `cut_off_crop` fidelity flag in the UI and CLI.
+Default output limits are 4,096 tokens for tables/charts, 1,024 for equations, 2,048 for claim extraction,
+and 8,192 for page rewrites (reduced to fit the profile's context). Task `max_output_tokens` overrides take
+priority over profile limits and these defaults. Charts request at most 25 points per series.
 
 ```bash
 litforge asset analyze ASSET_ID --mode table --preview

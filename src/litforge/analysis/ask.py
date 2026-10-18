@@ -15,7 +15,13 @@ from litforge.analysis.ledger import EvidenceSpan, record_spans, to_packet
 from litforge.analysis.prompts import ASK_PROMPT_VERSION, ask_messages
 from litforge.analysis.retrieve import retrieve_for_question
 from litforge.analysis.runs import canonical_json, finish_run, get_run, link_evidence, start_run
-from litforge.analysis.validation import citations, image_only_numbers, missing_numbers
+from litforge.analysis.validation import (
+    EvidenceText,
+    citations,
+    image_only_numbers,
+    missing_numbers,
+    strip_evidence_mentions,
+)
 from litforge.indexing.fts import SearchHit, current_runs
 from litforge.llm.evidence import EvidencePacket
 from litforge.storage.db import new_id, now, transaction
@@ -26,7 +32,7 @@ ReviewStatus = Literal["open", "accepted", "rejected", "edited"]
 
 
 class SentenceDraft(BaseModel):
-    text: str
+    text: EvidenceText
     kind: SentenceKind
     evidence_ids: list[str] = Field(default_factory=list)
     flags: list[str] = Field(default_factory=list)
@@ -44,7 +50,7 @@ class AnswerSentence(SentenceDraft):
     idx: int = 0
     flags: list[str] = Field(default_factory=list)
     audit_verdict: AuditVerdict | None = None
-    audit_note: str = ""
+    audit_note: EvidenceText = ""
     audit_model: str | None = None
     review_status: ReviewStatus = "open"
 
@@ -105,7 +111,7 @@ def validate_sentences(drafts: list[SentenceDraft], packet: EvidencePacket | Non
     result: list[AnswerSentence] = []
     invalid: list[str] = []
     for draft in drafts:
-        text = draft.text.strip()
+        text = strip_evidence_mentions(draft.text)
         if not text:
             continue
         ids, bad = citations(draft.evidence_ids, packet)
@@ -145,8 +151,9 @@ def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, question: str, p
     spans = _question_spans(conn, hits, question, project_id, paper_ids)
     if not spans:
         return []
-    packet = to_packet(spans, sensitive=sensitive)
-    return [gateway.preview("ask", packet, ask_messages(question, packet, spans), profile=profile)]
+    packet, messages = gateway.fit_evidence("ask", to_packet(spans, sensitive=sensitive),
+        lambda p: ask_messages(question, p, spans), profile, schema=AnswerDraft.model_json_schema())
+    return [gateway.preview("ask", packet, messages, profile=profile, schema=AnswerDraft.model_json_schema())]
 
 
 def ask(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_id: str | None = None,
@@ -161,8 +168,9 @@ def ask(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_
         link_evidence(conn, run_id, spans, [*(h.score for h in hits), *([None] * (len(spans) - len(hits)))])
         model, provider = "", ""
         if spans:
-            packet = to_packet(spans, sensitive=sensitive)
-            reply = gateway.call("ask", packet, ask_messages(question, packet, spans), AnswerDraft.model_json_schema(),
+            packet, messages = gateway.fit_evidence("ask", to_packet(spans, sensitive=sensitive),
+                lambda p: ask_messages(question, p, spans), profile, schema=AnswerDraft.model_json_schema())
+            reply = gateway.call("ask", packet, messages, AnswerDraft.model_json_schema(),
                                  profile=profile, approved=approved, run_id=run_id, prompt_version=ASK_PROMPT_VERSION)
             draft = AnswerDraft.model_validate(reply.content)
             model, provider = reply.model, reply.provider

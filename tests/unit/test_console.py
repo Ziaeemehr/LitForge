@@ -201,7 +201,7 @@ def test_exports_reject_paths_and_workflows_use_typed_validated_plans(conn: sqli
 
 
 def test_migration_17_creates_checkpoint_table(conn: sqlite3.Connection) -> None:
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 17
+    assert conn.execute("PRAGMA user_version").fetchone()[0] >= 17
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(console_runs)")}
     assert {"plan_json", "current_step", "results_json", "cancel_requested"} <= columns
 

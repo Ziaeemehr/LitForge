@@ -1,0 +1,69 @@
+{
+  "data": [
+    {
+      "id": "fixture/vision-cheap",
+      "name": "<img src=x onerror=alert(1)>",
+      "context_length": 32768,
+      "architecture": {
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "pricing": {
+        "prompt": "0.0000001",
+        "completion": "0.0000004"
+      }
+    },
+    {
+      "id": "fixture/strong",
+      "name": "Analysis",
+      "context_length": 65536,
+      "architecture": {
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "pricing": {
+        "prompt": "0.000001",
+        "completion": "0.000004"
+      }
+    },
+    {
+      "id": "bad",
+      "context_length": "NaN",
+      "pricing": {
+        "prompt": "NaN",
+        "completion": "-1"
+      },
+      "architecture": {
+        "output_modalities": [
+          "text"
+        ]
+      }
+    },
+    {
+      "id": "free",
+      "name": "Free text",
+      "context_length": 8192,
+      "architecture": {
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      }
+    }
+  ]
+}

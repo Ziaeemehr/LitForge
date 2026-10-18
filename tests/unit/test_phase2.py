@@ -49,7 +49,7 @@ def test_canonical_claims_cache_dedupe_and_reviews(conn: sqlite3.Connection) -> 
     assert conn.execute("SELECT status FROM claims WHERE id=?", (c.id,)).fetchone()[0] == "edited"
     extract_claims(conn, gw, "proj", force=True)
     assert conn.execute("SELECT text FROM claims WHERE id=?", (c.id,)).fetchone()[0] == "Edited claim."
-    assert conn.execute("SELECT COUNT(*) FROM model_calls WHERE run_id IS NULL OR prompt_version!='claims-v1'") \
+    assert conn.execute("SELECT COUNT(*) FROM model_calls WHERE run_id IS NULL OR prompt_version!='claims-v2'") \
         .fetchone()[0] == 0
 
 
@@ -188,7 +188,8 @@ def test_canonical_unicode_whitespace_and_trailing_punctuation(text: str, expect
 def test_clustering_boost_threshold_transitivity_and_label(conn: sqlite3.Connection) -> None:
     setup(conn)
     seed(conn, "t")
-    gw, _ = model(conn, lambda m: {"claims": [{"text": "Result " + evidence_id(m), "type": "finding",
+    gw, _ = model(conn, lambda m: {"claims": [{"text": "Result " + m[-1]["content"].split('paper="')[1].split('"')[0],
+                    "type": "finding",
                     "polarity": "positive", "outcome": " Gain. ", "evidence_ids": [evidence_id(m)]}]})
     extract_claims(conn, gw, "proj")
     conn.execute("UPDATE papers SET cited_by_count=500 WHERE id='q'")

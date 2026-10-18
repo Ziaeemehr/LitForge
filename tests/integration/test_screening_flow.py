@@ -281,3 +281,68 @@ def test_cli_screen_rejects_top_zero(conn: sqlite3.Connection, paths: Paths, mon
     monkeypatch.setattr(cli, "_make_llm", lambda config, model: FakeLlm(answer))
     result = CliRunner().invoke(cli.app, ["--data-dir", str(paths.root), "screen", "--project", "scr", "--top", "0"])
     assert result.exit_code == 2 and conn.execute("SELECT COUNT(*) FROM screening_results").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("entrypoint", ["cli", "ui"])
+def test_screen_uses_task_mapping_without_setup(conn, paths, monkeypatch, entrypoint) -> None:
+    from typer.testing import CliRunner
+
+    from litforge import cli
+    from litforge.analysis.gateway import ModelGateway
+    from litforge.config import Config
+    from litforge.ui.server import App
+
+    _, run_id, _ = make_run(conn, paths, PAPERS[:1])
+    (paths.root / "config.yaml").write_text('models:\n  tasks: {screen: {profile: routed}}\n'
+        '  profiles:\n    routed: {provider: ollama, model: mapped-model}\n')
+    cfg = Config.model_validate({"models": {"tasks": {"screen": {"profile": "routed"}},
+        "profiles": {"routed": {"provider": "ollama", "model": "mapped-model"}}}})
+    provider = FakeLlm(answer, name="mapped-model")
+    def gateway(c, config):
+        return ModelGateway(c, config, providers={"routed": provider})
+    if entrypoint == "cli":
+        monkeypatch.setattr(cli, "ModelGateway", gateway)
+        result = CliRunner().invoke(cli.app, ["--data-dir", str(paths.root), "screen", "--project", "scr"])
+        assert result.exit_code == 0, result.output
+    else:
+        application = App(paths, cfg, make_gateway=lambda c: gateway(c, cfg))
+        job = application.screen_job({"run_id": run_id, "top": 1})
+        import time
+        deadline = time.monotonic() + 5
+        while job.status in {"queued", "running"} and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert job.status == "done", job.error
+    assert provider.calls == 1
+    assert conn.execute("SELECT model FROM screening_results").fetchone()[0] == "mapped-model"
+
+
+@pytest.mark.parametrize("entrypoint", ["cli", "ui"])
+def test_screen_explicit_model_overrides_task_map(conn, paths, monkeypatch, entrypoint) -> None:
+    from typer.testing import CliRunner
+
+    from litforge import cli
+    from litforge.config import Config
+    from litforge.ui.server import App
+
+    _, run_id, _ = make_run(conn, paths, PAPERS[:1])
+    (paths.root / "config.yaml").write_text('models:\n  tasks: {screen: {profile: missing}}\n')
+    provider = FakeLlm(answer, name="explicit-ollama")
+    def legacy(config, model):
+        assert model == "explicit-ollama"
+        return provider
+    if entrypoint == "cli":
+        monkeypatch.setattr(cli, "_make_llm", legacy)
+        result = CliRunner().invoke(cli.app, ["--data-dir", str(paths.root), "screen", "--project", "scr",
+                                             "--model", "explicit-ollama"])
+        assert result.exit_code == 0, result.output
+    else:
+        application = App(paths, Config(models={"tasks": {"screen": {"profile": "missing"}}}),
+                          make_llm=lambda model: legacy(None, model))
+        job = application.screen_job({"run_id": run_id, "top": 1, "model": "explicit-ollama"})
+        import time
+        deadline = time.monotonic() + 5
+        while job.status in {"queued", "running"} and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert job.status == "done", job.error
+    assert provider.calls == 1
+    assert conn.execute("SELECT model FROM screening_results").fetchone()[0] == "explicit-ollama"

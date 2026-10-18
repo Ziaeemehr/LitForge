@@ -143,11 +143,11 @@ def _references(value: Any) -> list[str]:
 
 
 def plan(conn: sqlite3.Connection, gateway: ModelGateway, request_text: str,
-         project_id: str | None, approved_cloud: bool = False) -> Plan:
+         project_id: str | None, approved_cloud: bool = False, profile: str | None = None) -> Plan:
     if not request_text.strip():
         raise ValueError("request text must not be empty")
     schema, messages = planner_request(request_text)
-    reply = gateway.call(PLAN_TASK, _planner_packet(), messages, schema,
+    reply = gateway.call(PLAN_TASK, _planner_packet(), messages, schema, profile=profile,
                          approved=approved_cloud, prompt_version=PLAN_PROMPT_VERSION)
     return validate_plan(reply.content, request_text)
 
@@ -166,9 +166,9 @@ def planner_request(request_text: str) -> tuple[dict[str, Any], list[dict[str, s
     return schema, messages
 
 
-def preview_planner_call(gateway: ModelGateway, request_text: str) -> Any:
+def preview_planner_call(gateway: ModelGateway, request_text: str, profile: str | None = None) -> Any:
     schema, messages = planner_request(request_text)
-    return gateway.preview(PLAN_TASK, _planner_packet(), messages, max_output_tokens=2048)
+    return gateway.preview(PLAN_TASK, _planner_packet(), messages, profile=profile, schema=schema)
 
 
 def _primary_output(value: Any) -> Any:

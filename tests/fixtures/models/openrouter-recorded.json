@@ -1,0 +1,41 @@
+{
+  "data": [
+    {
+      "id": "deepseek/deepseek-v4.1-flash-1017",
+      "name": "DeepSeek: DeepSeek V4.1 Flash 1017",
+      "context_length": 1048576,
+      "architecture": {
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "pricing": {
+        "prompt": "0.00000015",
+        "completion": "0.0000006"
+      }
+    },
+    {
+      "id": "elorian/glimpse",
+      "name": "Elorian: Glimpse",
+      "context_length": 262144,
+      "architecture": {
+        "input_modalities": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "pricing": {
+        "prompt": "0.0000006",
+        "completion": "0.000003"
+      }
+    }
+  ]
+}

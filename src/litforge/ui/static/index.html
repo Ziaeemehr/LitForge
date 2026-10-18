@@ -25,7 +25,7 @@
   <div class="side-list" id="side-projects"></div>
   <h3 title="Your latest searches; click one to reopen it with its marks">Recent</h3>
   <div class="side-list" id="side-recent"></div>
-  <div class="side-foot"><button class="btn small" id="btn-help" title="Quick guide: how LitForge works (?)">? Guide</button>
+  <div class="side-foot"><button class="btn small" data-view="settings" title="Settings (,) — models, keys, cloud and library">⚙ Settings</button><button class="btn small" id="btn-help" title="Quick guide: how LitForge works (?)">? Guide</button>
     <button class="btn small" id="btn-theme" title="Theme: follow the system, light or dark"></button>
     <button class="btn small ghost" id="btn-quit" title="Stop LitForge on this computer. Open it again from its icon">⏻ Quit</button></div>
   <p class="side-note">Closing this page stops LitForge after about two minutes. ⏻ Quit stops it now.</p>
@@ -57,6 +57,116 @@
 </header>
 
 <main id="main">
+  <section id="view-settings" class="view" hidden>
+    <h1>Settings</h1>
+    <p class="hint">Manage models, API keys, cloud access and library preferences.</p>
+    <div class="card settings-card">
+      <h2>Models</h2>
+      <p id="models-hardware" class="hint"></p>
+      <p id="models-current"></p>
+      <p id="models-recommendation"></p>
+      <p id="models-vision" class="hint"></p>
+      <div class="row2">
+        <select id="models-tier" aria-label="Setup tier">
+          <option value="">Recommended tier</option><option value="large">Large</option>
+          <option value="medium">Medium</option><option value="small">Small (local)</option><option value="cloud">Cloud-light</option>
+        </select>
+        <button class="btn accent" id="models-apply">Apply setup…</button>
+        <button class="btn" id="models-refresh">Refresh status</button>
+      </div>
+      <div id="cloud-pickers">
+        <h3>Cloud-light model choices</h3>
+        <form id="catalogue-search" class="row2">
+          <input id="catalogue-query" type="search" placeholder="Search live catalogue" aria-label="Search cloud models">
+          <input id="catalogue-max" type="number" min="0" step="any" placeholder="Max input $/million" aria-label="Maximum input price">
+          <button class="btn" type="submit">Search catalogue</button>
+        </form>
+        <label class="f" for="cloud-cheap">Cheap model for extraction and images — must accept images</label>
+        <select id="cloud-cheap"><option value="">Choose an image-capable model</option></select>
+        <label class="f" for="cloud-strong">Strong model for analysis</label>
+        <select id="cloud-strong"><option value="">Use the cheap model for analysis too</option></select>
+        <p class="hint">Prices per million tokens; estimates appear in the setup preview. Cloud stays off until you enable it.</p>
+      </div>
+      <p id="models-server"></p>
+      <p class="hint">The managed server starts when needed and stops when LitForge quits. Models load on first use.
+        Setup shows every file change before saving; it never installs tools.</p>
+      <div id="models-profiles"></div>
+      <details><summary>Task assignments</summary><pre id="models-tasks"></pre></details>
+      <h3>Find stronger local models</h3>
+      <form id="local-search" class="row2">
+        <div class="tabs" role="group" aria-label="Local model source"><button id="local-hf" class="on" type="button" aria-pressed="true">Hugging Face GGUF</button><button id="local-ollama" type="button" aria-pressed="false">Ollama</button></div>
+        <input id="local-query" type="search" placeholder="Search GGUF models, or enter an Ollama model name" required aria-label="Local model search">
+        <button class="btn" type="submit">Find / pull…</button>
+      </form>
+      <label class="hint"><input id="local-show-all" type="checkbox"> Show all, including non-chat models</label>
+      <div id="local-results"></div>
+      <div id="local-files"></div>
+      <label class="f" for="local-name">Downloaded profile name (optional)</label><input id="local-name" type="text">
+      <label class="f" for="local-context">Context tokens</label><input id="local-context" type="number" min="1" max="2000000" value="16384">
+      <label class="f" for="local-mmproj">Image projector (optional, choose the matching mmproj from the model card)</label>
+      <select id="local-mmproj"><option value="">Text only</option></select>
+      <p class="hint">Fit is approximate: file + projector + 0.25 MB KV cache per 1000 context tokens + 1 GB overhead.
+        Apple: 75% unified RAM; CPU: 60% RAM; NVIDIA: VRAM, then 60% RAM for slower partial offload. Disk is checked before download.</p>
+      <div id="local-tasks" class="task-checks" role="group" aria-label="Assign downloaded model to tasks"></div>
+      <pre id="local-progress" role="status" aria-live="polite"></pre>
+      <div class="row2"><button class="btn" id="download-pause">Pause</button><button class="btn" id="download-resume">Resume</button><button class="btn" id="download-cancel">Cancel download</button></div>
+    </div>
+    <div class="card settings-card">
+      <h2>API keys</h2>
+      <p id="keys-status" class="hint">Keys resolve from the environment first, then the system keychain. Removing an entry leaves environment variables unchanged.</p>
+      <div id="keys-list"></div>
+      <form id="keys-form" autocomplete="off">
+        <label class="f" for="keys-name">Key name</label><select id="keys-name"></select>
+        <label class="f" for="keys-value">API key</label><input id="keys-value" type="password" autocomplete="new-password" required>
+        <button class="btn" type="submit" id="keys-save">Save in system keychain</button>
+      </form>
+    </div>
+    <div class="card settings-card">
+      <h2>Add API model</h2>
+      <form id="models-add">
+        <label class="f" for="models-provider">Provider</label><select id="models-provider" required></select>
+        <label class="f" for="models-id">Model ID · <a id="models-provider-models" href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer">Browse models ↗</a></label><input type="text" id="models-id" required placeholder="Exact model ID from your provider">
+        <label class="f" for="models-name">Profile name (optional)</label><input type="text" id="models-name">
+        <label class="f">USD per million tokens (both prices, or leave blank)</label>
+        <div class="row2"><input id="models-price-in" type="number" min="0" step="any" placeholder="Input" aria-label="Input price">
+          <input id="models-price-out" type="number" min="0" step="any" placeholder="Output" aria-label="Output price"></div>
+        <p class="hint">OpenRouter fetches pricing automatically. Other providers remain blocked until both prices are set.
+          Set the provider’s key in API keys above or in your environment.</p>
+        <p id="models-add-tasks-label" class="f">Tasks (optional)</p>
+        <fieldset id="models-add-tasks" aria-labelledby="models-add-tasks-label"></fieldset>
+        <label class="check"><input id="models-add-vision" type="checkbox">Supports images</label>
+        <label class="f" for="models-reasoning">Reasoning</label><select id="models-reasoning">
+          <option value="off">Off</option><option value="on">On</option></select>
+        <button class="btn" type="submit">Review API model…</button>
+      </form>
+    </div>
+    <div class="card settings-card">
+      <h2>Cloud &amp; budget</h2>
+      <button class="btn" id="models-cloud">Enable cloud…</button>
+      <form id="settings-budget">
+        <label class="f" for="settings-policy">Policy</label><select id="settings-policy">
+          <option value="local_only">Local only</option><option value="ask_before_cloud">Ask before cloud</option><option value="hybrid">Hybrid</option></select>
+        <label class="f" for="budget-call">Maximum USD per call</label><input id="budget-call" type="number" min="0" step="any" required>
+        <label class="f" for="budget-run">Maximum USD per run</label><input id="budget-run" type="number" min="0" step="any" required>
+        <label class="f" for="budget-month">Maximum USD per month</label><input id="budget-month" type="number" min="0" step="any" required>
+        <button class="btn" type="submit">Review budget &amp; policy…</button>
+      </form>
+    </div>
+    <div class="card settings-card">
+      <h2>Library &amp; export</h2>
+      <form id="settings-library">
+        <label class="f" for="settings-mailto">Contact e-mail</label><input id="settings-mailto" type="email" placeholder="you@university.edu">
+        <p class="hint">Used for OpenAlex, Crossref and Unpaywall requests; no account required.</p>
+        <label class="f" for="settings-exports">Default export folder</label><input id="settings-exports" type="text" placeholder="Absolute folder path">
+        <p class="hint">Existing project folders keep their saved choice.</p>
+        <button class="btn" type="submit">Review library settings…</button>
+      </form>
+    </div>
+    <div class="card settings-card">
+      <details><summary>File changes</summary><pre id="models-diff"></pre></details>
+      <pre id="models-status" role="status" aria-live="polite"></pre>
+    </div>
+  </section>
   <section id="view-new" class="view">
     <div class="card composer">
       <div class="tabs">
@@ -243,6 +353,8 @@
   <section id="view-gaps" class="view" hidden>
     <div class="viewhead"><h2>Gaps</h2><span class="meta">Deterministic candidates from claims and study matrices</span>
       <button class="btn accent" id="gaps-refresh">Refresh candidates</button></div>
+    <label for="gaps-profile">Model profile</label>
+    <select id="gaps-profile"><option value="">Configured default</option></select>
     <p class="hint" id="gaps-status" role="status" aria-live="polite"></p>
     <div class="card lens-panel lens-rows" id="gaps-list"></div>
   </section>
@@ -252,6 +364,8 @@
       <span class="meta">A typed plan, previewed before explicit approval</span></div>
     <div class="card lens-panel console-panel">
       <form id="console-form">
+        <label class="f" for="console-profile">Planner model profile</label>
+        <select id="console-profile"><option value="">Configured default</option></select>
         <label class="f" for="console-request">What would you like to do?</label>
         <textarea id="console-request" rows="4" required
           placeholder="Compare methods in papers published since 2020 and answer the review question"></textarea>
@@ -450,7 +564,7 @@
         Remote actions show their evidence count and cost before you confirm sending.</p>
       <h3>Keyboard</h3>
       <p class="keys"><kbd>j</kbd> <kbd>k</kbd> next / previous · <kbd>Enter</kbd> open · <kbd>r</kbd> mark ✓ ·
-        <kbd>x</kbd> mark ✗ · <kbd>Esc</kbd> close · <kbd>?</kbd> this guide</p>
+        <kbd>x</kbd> mark ✗ · <kbd>Esc</kbd> close · <kbd>?</kbd> this guide · <kbd>,</kbd> Settings</p>
       <p class="hint">Hover any button to see what it does. <b>⏻ Quit</b> at the bottom of the sidebar stops LitForge;
         open it again from its icon.</p>
     </section>
