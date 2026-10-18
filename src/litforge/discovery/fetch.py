@@ -239,9 +239,14 @@ def _pdf_identity(conn: sqlite3.Connection, row: sqlite3.Row, body: bytes
         other_record_doi(conn, str(row["id"]), None, [doi]) for doi in dois
     )):
         return first_page, None
-    arxiv = str(row["arxiv_id"] or "").strip()
-    if arxiv and re.search(r"(?i)arxiv:\s*" + re.escape(re.sub(r"v\d+$", "", arxiv)), first_page):
-        return first_page, None  # the PDF prints the selected record's own arXiv id
+    arxiv = re.sub(r"v\d+$", "", str(row["arxiv_id"] or "").strip())
+    metadata_other = metadata_doi is not None and metadata_doi != own_doi and other_record_doi(
+        conn, str(row["id"]), own_doi, [metadata_doi]) is not None
+    # Only arXiv's own margin stamp ("arXiv:2401.01234v2 [q-bio.NC]") identifies the copy; the id inside
+    # a citation does not, and PDF metadata naming another library record always wins.
+    if arxiv and not metadata_other and re.search(
+            r"(?i)arxiv:\s*" + re.escape(arxiv) + r"(?:v\d+)?\s+\[[\w.-]+\]", first_page):
+        return first_page, None
     own_score = _title_score(row["title"], meta.title.value, first_page)
     own_title = own_score >= 0.92
     for doi in dois:
@@ -405,6 +410,8 @@ def fetch_open_access(
         label_text = "preprint downloaded" if version == "submitted" else f"{version} version downloaded"
         if version == "submitted":
             label_text += "; the published version is not openly available"
+        if elsewhere:  # PDFs of other records found before this one are reported, not lost
+            label_text += "; " + "; ".join(elsewhere)
         version_label = format_version_label(version, candidate.url)
         if version == "submitted" and candidate.declared_version == "accepted":
             version_label = f"{version_label} (author-updated)" if version_label else version_label

@@ -151,6 +151,25 @@ def test_another_records_pdf_is_attached_there_and_the_next_candidate_is_tried(
     assert owners == ['other', 'selected']
     assert conn.execute("SELECT COUNT(*) FROM project_papers WHERE paper_id='other'").fetchone()[0] == 0
     assert report.downloaded == 2
+    note = next(item["reason"] for item in report.items if item["paper_id"] == 'selected')
+    assert "attached to that library record" in note
+
+
+def test_a_cited_arxiv_id_does_not_identify_the_pdf(
+    conn: sqlite3.Connection, paths: Paths, config: Config,
+) -> None:
+    paper(conn, 'selected', 'Published neural population dynamics')
+    paper(conn, 'other', 'A distinct investigation of bird migration')
+    conn.execute("UPDATE papers SET arxiv_id='2401.07777', oa_url='https://pub.example/right.pdf' "
+                 "WHERE id='selected'")
+    # Another record's publisher PDF (metadata DOI) that merely cites the selected paper's arXiv id.
+    wrong = pdf_bytes('A distinct investigation of bird migration\nBuilding on arXiv:2401.07777 (2024).',
+                      doi='10.5555/other')
+    right = pdf_bytes('Published neural population dynamics\nDOI: 10.5555/selected')
+    transport = FakeTransport([('arxiv.org/pdf/2401.07777', ok(wrong)), ('pub.example/right.pdf', ok(right))])
+    fetch_open_access(conn, paths, config, http(transport), 'proj', only='all', paper_ids=['selected'])
+    owners = dict(conn.execute("SELECT paper_id, sha256 FROM artifacts WHERE status='ok'").fetchall())
+    assert set(owners) == {'selected', 'other'}
 
 
 @pytest.mark.parametrize('via', ['landing', 'redirect'])
