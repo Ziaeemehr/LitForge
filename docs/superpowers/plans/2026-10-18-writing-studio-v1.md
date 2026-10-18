@@ -66,6 +66,24 @@ to ship or download, and whether a bibliography tool beyond BibTeX is needed.
 
 **Done when:** a written result with the exact commands, versions, sizes and timings.
 
+**Result (2026-10-19, macOS arm64):**
+- Tectonic 0.17.0 (`tectonic-0.17.0-aarch64-apple-darwin.tar.gz`, 21.7 MB, SHA-256
+  `a3f1cac7c5678f01661a92212f58480ae3b0634115d880dbc59e2953ded45667`, matches the GitHub release digest).
+- `tectonic --untrusted --keep-logs -o .build main.tex` (V1 interface; `.build` must exist) compiled a `xepersian`
+  document with Vazirmatn v33.003 (OFL, loaded with `Path=fonts/`), mixed Persian/English, `\cite` + BibTeX, a
+  table and an equation. Cold run 100 s (package download into `~/Library/Caches/TectonicProject.Tectonic`,
+  43 MB); warm run 0.7 s; `-C` (only cached) recompiles offline in 0.8 s. BibTeX runs automatically; no extra
+  bibliography tool needed. Only warning: no italic Vazirmatn shape (substituted).
+- **Decision:** Tectonic is the default engine for both templates; system `latexmk -xelatex` is the alternative.
+  The Persian template ships Vazirmatn Regular/Bold in the document's `fonts/` folder.
+- **Sandbox finding:** `--untrusted` stops `\write18` and `\openout` outside the output folder, but **does not stop
+  reads**: `\input{../outside.txt}` and `\input{/etc/hosts}` were read. Mitigation in Task 3: on macOS wrap the
+  engine in `sandbox-exec` with a profile that denies `file-read*` under the home folder, `/private/etc`,
+  `/private/tmp` and `/Volumes` except the document folder, the engine, its cache and font folders (tested: the
+  `/etc/hosts` read is refused); on Linux use `bwrap` when installed; otherwise a pre-compile scan refuses
+  `\input`/`\include`/`\openin`/`\includegraphics` with absolute or `..` paths, and the UI says the sandbox is
+  partial.
+
 ### Task 1: Citation keys and BibTeX (W0)
 
 **Files:** create src/litforge/writing/__init__.py, src/litforge/writing/bib.py, migration

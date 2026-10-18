@@ -293,6 +293,9 @@ journal submission integrations.
   mixed Persian/English template, compile both with the chosen engine, and check that SyncTeX, search and the
   editor handle right-to-left text. If Tectonic cannot compile `xepersian` reliably, the Persian templates use the
   system XeLaTeX (TeX Live/MacTeX) and Settings says so; this is decided by a spike before W1 starts.
+  **Spike result (2026-10-19):** Tectonic 0.17.0 compiles `xepersian` with Vazirmatn cleanly (warm 0.7 s,
+  offline with `-C`), so it is the default engine. `--untrusted` does not restrict file reads; compile adds an OS
+  sandbox (`sandbox-exec` on macOS, `bwrap` on Linux) or a path scan (details in the v1 plan, Task 0).
 - Language-model help in Persian: grammar/rewrite/translation actions must work on Persian text (prompt and
   evaluation set include Persian paragraphs); LaTeX commands inside Persian text must survive edits unchanged.
 - Where the writing studio lives in the UI (a new top-level view per project) and how it relates to briefs
