@@ -432,7 +432,7 @@ litforge export -p my-review --format bibtex > references.bib
 **Compile safety.** Shell escape is off and a document cannot write outside its folder. Tectonic's own
 "untrusted" mode does not stop a document from *reading* other files, so on macOS compiling runs inside the
 system sandbox (`sandbox-exec`) and on Linux inside `bwrap` when it is installed; there the document can read only
-its own folder, the engine and its package cache. On Windows, and on Linux without `bwrap`, LitForge refuses
+its own folder, the engine and its package cache, and only Tectonic may use the network (to fetch LaTeX packages). `latexmkrc` files are refused, since latexmk would run them as code. On Windows, and on Linux without `bwrap`, LitForge refuses
 documents that name files outside their folder, but a determined document could still read other files: the
 Write view says "partial sandbox" then, so compile only documents you trust.
 

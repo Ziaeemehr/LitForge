@@ -198,24 +198,32 @@ def _sb_quote(path: Path | str) -> str:
     return '"' + str(path).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def macos_profile(folder: Path, readable: list[Path], writable: list[Path]) -> str:
-    """Deny reads of the user's files except the document, the engine and its caches; deny writes elsewhere."""
-    home = Path.home().resolve()
-    tmp = Path(tempfile.gettempdir()).resolve()
-    denied = [home, Path("/private/tmp"), Path("/Volumes"), Path("/private/etc"), Path("/private/var/root")]
-    allowed = [folder, *readable, *writable, home / "Library" / "Fonts", Path("/private/etc/ssl"),
-               Path("/private/etc/hosts"), Path("/private/etc/resolv.conf"), Path("/private/etc/localtime")]
+def macos_profile(folder: Path, readable: list[Path], writable: list[Path], scratch: Path,
+                  network: bool = True) -> str:
+    """Deny reads of user files (all home folders, temp folders, volumes) except the document, the engine, its
+    cache and fonts; allow writes only to the build folder, the cache and a private temp folder. The network is
+    left on only for Tectonic, which downloads LaTeX packages on first use."""
+    denied = [Path("/Users"), Path("/private/tmp"), Path("/private/var/folders"), Path("/Volumes"),
+              Path("/private/etc"), Path("/private/var/root")]
+    allowed = [folder, *readable, *writable, scratch, Path.home().resolve() / "Library" / "Fonts",
+               Path("/private/etc/ssl"), Path("/private/etc/hosts"), Path("/private/etc/resolv.conf"),
+               Path("/private/etc/localtime")]
     lines = ["(version 1)", "(allow default)",
              "(deny file-read* " + " ".join(f"(subpath {_sb_quote(p)})" for p in denied) + ")",
              "(allow file-read* " + " ".join(f"(subpath {_sb_quote(p)})" for p in allowed) + ")",
              "(deny file-write* (require-not (require-any " + " ".join(
-                 f"(subpath {_sb_quote(p)})" for p in [*writable, tmp, Path("/dev")]) + ")))"]
+                 f"(subpath {_sb_quote(p)})" for p in [*writable, scratch]) +
+             ' (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))))']
+    if not network:
+        lines.append("(deny network*)")
     return "\n".join(lines) + "\n"
 
 
-def bwrap_argv(folder: Path, readable: list[Path], writable: list[Path]) -> list[str]:
+def bwrap_argv(folder: Path, readable: list[Path], writable: list[Path], network: bool = True) -> list[str]:
     argv = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
             "--tmpfs", str(Path.home()), "--die-with-parent", "--unshare-pid"]
+    if not network:
+        argv.append("--unshare-net")
     for path in readable:
         argv += ["--ro-bind", str(path), str(path)]
     argv += ["--ro-bind", str(folder), str(folder)]
@@ -228,6 +236,9 @@ def scan_paths(doc: Document) -> list[LogItem]:
     """Refuse commands that name a file outside the document folder (absolute paths, `..`, `~`)."""
     problems = []
     for item in list_files(doc):
+        if Path(item["name"]).name.lower() in {"latexmkrc", "_latexmkrc"} or item["name"].endswith(".rc"):
+            problems.append(LogItem("latexmk configuration files run code and are not allowed", item["name"], None))
+            continue
         if item["kind"] != "text" or Path(item["name"]).suffix.lower() not in TEXT_SUFFIXES:
             continue
         text = (doc.folder / item["name"]).read_text(encoding="utf-8", errors="replace")
@@ -269,7 +280,8 @@ def _command(doc: Document, paths: Paths, engine: str, main: str) -> tuple[list[
         if command is None:
             raise CompileError("latexmk and xelatex were not found; install TeX Live or MacTeX")
         env.update(openout_any="p", openin_any="p", shell_escape="f")
-        argv = [command, "-xelatex", "-no-shell-escape", "-interaction=nonstopmode", "-halt-on-error",
+        # -norc: a latexmkrc in the folder is Perl code and must not run.
+        argv = [command, "-norc", "-xelatex", "-no-shell-escape", "-interaction=nonstopmode", "-halt-on-error",
                 "-file-line-error", "-outdir=.build", main]
         return argv, env, []
     raise CompileError(f"unknown engine {engine}")
@@ -299,12 +311,14 @@ def compile_document(doc: Document, paths: Paths, engine: str | None = None, *, 
     if engine == "xelatex":
         writable = [build]
     with tempfile.TemporaryDirectory(prefix="litforge-compile-") as scratch:
+        env["TMPDIR"] = scratch  # a private temp folder; the shared one stays unreadable
         if kind == "macos":
             profile = Path(scratch) / "profile.sb"
-            profile.write_text(macos_profile(folder, readable, writable), encoding="utf-8")
+            profile.write_text(macos_profile(folder, readable, writable, Path(scratch).resolve(),
+                                             network=engine == "tectonic"), encoding="utf-8")
             argv = ["/usr/bin/sandbox-exec", "-f", str(profile), *argv]
         elif kind == "bwrap":
-            argv = bwrap_argv(folder, readable, writable) + argv
+            argv = bwrap_argv(folder, readable, writable, network=engine == "tectonic") + argv
         try:
             completed = _run_command(argv, env=env, timeout=timeout_s, merge_output=True, cwd=folder)
         except subprocess.TimeoutExpired as exc:

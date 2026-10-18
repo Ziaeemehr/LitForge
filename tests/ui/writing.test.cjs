@@ -340,3 +340,11 @@ test('accepted citations are registered for references.bib', async () => {
   assert.equal(area.value, 'Gain was high \\cite{lee2021}.');
   assert.deepEqual({ ...calls.find(c => c[0] === '/api/write/cite')[1] }, { doc: 'd1', paper_id: 'p1', evidence_id: 'ev_1' });
 });
+
+test('applying hunks counts code points like Python (emoji before the change)', () => {
+  const { ctx } = setup();
+  const original = 'نتیجه 😀 خوب است';
+  const hunks = [{ index: 0, start: 8, end: 11, old: 'خوب', new: 'عالی' }];
+  assert.equal(ctx.appliedSuggestion(original, hunks, { 0: true }), 'نتیجه 😀 عالی است');
+  assert.equal(ctx.appliedSuggestion(original, hunks, {}), original);
+});

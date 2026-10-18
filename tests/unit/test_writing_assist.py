@@ -203,3 +203,10 @@ def test_cite_action_flags_changed_wording_and_added_commands(env) -> None:
     result = wa.run(conn, gw, doc, wa.prepare(conn, doc, "cite", text), "main.tex")
     assert "LaTeX commands added: \\end" in result["flags"]
     assert any("wording changed" in f for h in result["hunks"] for f in h["flags"])
+
+
+def test_hunk_offsets_are_code_points_with_emoji() -> None:
+    old, new = "نتیجه 😀 خوب است و مهم", "نتیجه 😀 عالی است و مهم"
+    hunks = wa.diff_hunks(old, new)
+    assert old[hunks[0]["start"]:hunks[0]["end"]] == "خوب"
+    assert wa.applied_text(old, hunks, [0]) == new

@@ -222,3 +222,11 @@ def test_assist_cloud_route_needs_approval(tmp_path: Path) -> None:
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_dns_rebinding_host_refused(server) -> None:
+    base, _ = server
+    doc = create(base)
+    assert call(base, f"/api/write/file?doc={doc['id']}&name=main.tex", headers={"Host": "evil.example"})[0] == 403
+    assert call(base, "/api/write/save", {"doc": doc["id"], "name": "main.tex", "text": "x", "hash": None},
+                headers={"Host": "evil.example:80", "Origin": "http://evil.example:80"})[0] == 403

@@ -952,14 +952,24 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
         def _screen_info(self) -> dict[str, Any]:
             return {"model": app.config.screening.model, "default_top": app.config.screening.default_top}
 
+        def _local_host(self) -> bool:
+            """Refuse DNS rebinding: a page on evil.example rebound to 127.0.0.1 sends Host: evil.example."""
+            raw = self.headers.get("Host")
+            if raw is None:  # browsers always send Host; other local clients may not
+                return True
+            bound = str(getattr(getattr(self, "server", None), "server_address", ("",))[0])
+            return urlsplit("//" + raw).hostname in {"127.0.0.1", "localhost", "::1", bound}
+
         def _same_origin(self) -> bool:
             """Reject cross-site requests that would otherwise reach a localhost API."""
             origin = self.headers.get("Origin")
-            return origin is None or urlsplit(origin).netloc == self.headers.get("Host")
+            return self._local_host() and (origin is None or urlsplit(origin).netloc == self.headers.get("Host"))
 
         # ---- routing ----
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib name
+            if not self._local_host():
+                return self._error(HTTPStatus.FORBIDDEN, "unknown host")
             url = urlsplit(self.path)
             query = {k: v[0] for k, v in parse_qs(url.query).items()}
             try:

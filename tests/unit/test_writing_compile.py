@@ -135,11 +135,12 @@ def test_missing_engine_message(env, monkeypatch) -> None:
 
 def test_macos_profile_denies_home_and_allows_document(tmp_path: Path) -> None:
     folder = tmp_path / "doc"
-    profile = wc.macos_profile(folder, [tmp_path / "engine"], [folder / ".build"])
+    profile = wc.macos_profile(folder, [tmp_path / "engine"], [folder / ".build"], tmp_path / "scratch", network=False)
     deny_read, allow_read = (line for line in profile.splitlines() if "file-read" in line)
-    assert str(Path.home().resolve()) in deny_read and "/private/etc" in deny_read
+    assert '"/Users"' in deny_read and "/private/var/folders" in deny_read and "/private/etc" in deny_read
+    assert "(deny network*)" in profile and '(literal "/dev/null")' in profile
     assert str(folder) in allow_read and str(tmp_path / "engine") in allow_read
-    assert "file-write" in profile and str(folder / ".build") in profile.splitlines()[-1]
+    assert str(folder / ".build") in next(line for line in profile.splitlines() if "file-write" in line)
 
 
 def test_bwrap_hides_home(tmp_path: Path) -> None:
@@ -198,3 +199,13 @@ def test_parse_log_warnings() -> None:
         "LaTeX Font Warning: Font shape `TU/Vazirmatn(0)/m/it' undefined\n)")
     assert [w.line for w in warnings] == [31, 14, None]
     assert "smith2020" in warnings[1].message
+
+
+def test_latexmkrc_refused_and_norc(env) -> None:
+    conn, paths, doc, record, _ = env
+    (doc.folder / "latexmkrc").write_text('system("touch /tmp/x");')
+    result = wc.compile_document(doc, paths, "xelatex")
+    assert not result.ok and "latexmk" in result.errors[0].message and not record.exists()
+    (doc.folder / "latexmkrc").unlink()
+    wc.compile_document(doc, paths, "xelatex")
+    assert "-norc" in json.loads(record.read_text())["argv"]

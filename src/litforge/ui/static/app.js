@@ -2444,13 +2444,14 @@
     return div;
   }
 
+  // Hunk offsets come from Python and count code points; JS strings count UTF-16 units (an emoji is two).
   function appliedSuggestion(original, hunks, accepted) {
-    var out = '', pos = 0;
+    var chars = Array.from(original), out = '', pos = 0;
     hunks.slice().sort(function (a, b) { return a.start - b.start; }).forEach(function (h) {
-      out += original.slice(pos, h.start) + (accepted[h.index] ? h.new : h.old);
+      out += chars.slice(pos, h.start).join('') + (accepted[h.index] ? h.new : h.old);
       pos = h.end;
     });
-    return out + original.slice(pos);
+    return out + chars.slice(pos).join('');
   }
 
   function applyWriteSuggestion() {
@@ -2504,7 +2505,11 @@
     });
     $('write-upload').onchange = function () { uploadWriteFigure($('write-upload').files[0]); $('write-upload').value = ''; };
     window.addEventListener('beforeunload', function (e) {
-      if (W.doc && W.dirty) { saveWriteNow(); e.preventDefault(); e.returnValue = ''; }
+      if (W.doc && W.dirty && !W.conflictHash) {  // keepalive lets the save finish while the page closes
+        fetch('/api/write/save', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ doc: W.doc.id, name: W.file, text: W.editor.getText(), hash: W.hash }) });
+        e.preventDefault(); e.returnValue = '';
+      }
     });
   }
   /* ---------- End Write ---------- */
