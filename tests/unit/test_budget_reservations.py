@@ -118,13 +118,48 @@ def test_reservation_owner_recovery(conn: sqlite3.Connection, config: Config,
                   "2000-01-01T00:00:00+00:00" if owner == "expired" else now()))
     gateway = ModelGateway(conn, config, {"remote": Provider(conn)})
     assert gateway.preview("t", PACKET, MESSAGES, profile="remote", max_output_tokens=100_000).blocked_reason == (
-        "over budget" if owner == "live" else None)
-    if owner == "live":
+        "over budget" if owner != "dead" else None)
+    if owner != "dead":
         with pytest.raises(BudgetExceeded):
             gateway.call("t", PACKET, MESSAGES, SCHEMA, profile="remote", run_id="r", max_output_tokens=100_000)
     else:
         gateway.call("t", PACKET, MESSAGES, SCHEMA, profile="remote", run_id="r", max_output_tokens=100_000)
         assert conn.execute("SELECT COUNT(*) FROM model_call_reservations").fetchone()[0] == 0
+
+
+def test_remote_preview_ignores_dead_reservation_without_writing(
+        conn: sqlite3.Connection, paths: Paths, config: Config, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(recovery, "_alive", lambda _: False)
+    conn.execute("INSERT INTO model_call_reservations(id,cost_usd,created_at,owner_pid,owner_started_at) "
+                 "VALUES ('dead',10,?,123,?)", (now(), now()))
+    before = list(conn.iterdump())
+    with sqlite3.connect(f"{paths.db.as_uri()}?mode=ro", uri=True, isolation_level=None) as readonly:
+        readonly.row_factory = sqlite3.Row
+        gateway = ModelGateway(readonly, config)
+        assert gateway.preview("t", PACKET, MESSAGES, profile="remote").blocked_reason is None
+        assert gateway._spend("r") == (0, 0)
+    assert list(conn.iterdump()) == before
+
+
+def test_reservation_records_process_identity(conn: sqlite3.Connection, config: Config) -> None:
+    gateway = ModelGateway(conn, config)
+    gateway._reserve(config.models.profiles["remote"].pricing, 10, 10, "r")
+    row = conn.execute("SELECT * FROM model_call_reservations").fetchone()
+    assert row["owner_pid"] == os.getpid()
+    assert row["owner_process_started_at"] == recovery.process_started_at(os.getpid())
+
+
+def test_reused_pid_releases_reservation(conn: sqlite3.Connection, config: Config,
+                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(recovery, "process_started_at", lambda _: "new-process")
+    conn.execute("INSERT INTO model_call_reservations "
+                 "(id,cost_usd,created_at,owner_pid,owner_started_at,owner_process_started_at) "
+                 "VALUES ('reused',10,?,?,?,'old-process')", (now(), os.getpid(), now()))
+    gateway = ModelGateway(conn, config)
+    assert gateway.preview("t", PACKET, MESSAGES, profile="remote").blocked_reason is None
+    assert conn.execute("SELECT COUNT(*) FROM model_call_reservations").fetchone()[0] == 1
+    recovery.repair_model_reservations(conn)
+    assert conn.execute("SELECT COUNT(*) FROM model_call_reservations").fetchone()[0] == 0
 
 
 def test_reconciliation_rereads_concurrent_actual_spend(conn: sqlite3.Connection, paths: Paths,

@@ -335,14 +335,21 @@ class App:
 
     def shutdown(self, timeout: float = 5) -> None:
         """Cancel all jobs, terminate owned process trees, then wait before stopping models."""
+        deadline = time.monotonic() + max(0, timeout)
         with self._workers_lock:
             self._closing.set()
             workers = list(self._workers.values())
             for _, control in workers:
                 control.cancelled.set()
-        for _, control in workers:
-            control.terminate_processes()
-        deadline = time.monotonic() + timeout
+        stoppers = [stop for _, control in workers for stop in control.process_stoppers()]
+        for stop in stoppers:
+            stop(False)
+        # All groups share one grace period, including groups whose leader exits on SIGTERM.
+        grace = min(deadline, time.monotonic() + 1)
+        for worker, _ in workers:
+            worker.join(max(0, grace - time.monotonic()))
+        for stop in stoppers:
+            stop(True)
         for worker, _ in workers:
             worker.join(max(0, deadline - time.monotonic()))
         self.stop_models()

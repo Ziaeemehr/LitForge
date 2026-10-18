@@ -58,18 +58,17 @@ def _windows_job(process: subprocess.Popen[bytes]) -> Iterator[Callable[[], None
         kernel.CloseHandle(job)
 
 
-def _terminate_tree(process: subprocess.Popen[bytes], kill_tree: Callable[[], None] | None = None) -> None:
-    """Give the entire session a grace period, then kill even if its leader has exited."""
+def _signal_tree(process: subprocess.Popen[bytes]) -> None:
     if os.name == 'nt':
         with suppress(ProcessLookupError, OSError):
             process.send_signal(signal.CTRL_BREAK_EVENT)  # type: ignore[attr-defined]
     else:
-        with suppress(ProcessLookupError):
+        with suppress(ProcessLookupError, PermissionError):  # macOS: EPERM once the group is gone
             os.killpg(process.pid, signal.SIGTERM)
-    deadline = time.monotonic() + 1
-    with suppress(subprocess.TimeoutExpired):
-        process.wait(timeout=1)
-    time.sleep(max(0, deadline - time.monotonic()))
+
+
+def _kill_tree(process: subprocess.Popen[bytes], kill_tree: Callable[[], None] | None = None) -> None:
+    """Kill descendants even if their group leader has exited."""
     if os.name == 'nt':
         if kill_tree is not None:
             kill_tree()
@@ -77,9 +76,8 @@ def _terminate_tree(process: subprocess.Popen[bytes], kill_tree: Callable[[], No
             subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)
     else:
-        with suppress(ProcessLookupError):
+        with suppress(ProcessLookupError, PermissionError):  # macOS: EPERM once the group is gone
             os.killpg(process.pid, signal.SIGKILL)
-    process.wait()
 
 
 def _read_tail(stream: BinaryIO) -> str:
@@ -103,14 +101,20 @@ def _run_command(argv: list[str], *, env: dict[str, str], timeout: float,
                                    stderr=stderr, **options)
         kill_tree = None
         terminate_lock = threading.Lock()
-        terminated = False
+        signalled = False
+        killed = threading.Event()
 
-        def terminate() -> None:
-            nonlocal terminated
+        def terminate(force: bool) -> None:
+            nonlocal signalled
             with terminate_lock:
-                if not terminated:
-                    _terminate_tree(process, kill_tree)
-                    terminated = True
+                if killed.is_set():
+                    return
+                if force:
+                    _kill_tree(process, kill_tree)
+                    killed.set()
+                elif not signalled:
+                    _signal_tree(process)
+                    signalled = True
 
         try:
             if os.name == 'nt':
@@ -118,7 +122,11 @@ def _run_command(argv: list[str], *, env: dict[str, str], timeout: float,
             with track_process(process.pid, terminate):
                 process.wait(timeout=timeout)
         except BaseException as exc:
-            terminate()
+            terminate(False)
+            # Shutdown can escalate all trees against its shared deadline and wake this cleanup.
+            killed.wait(1)
+            terminate(True)
+            process.wait()
             if isinstance(exc, subprocess.TimeoutExpired):
                 exc.stderr = _read_tail(stderr).encode('utf-8')
             raise

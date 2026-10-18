@@ -32,7 +32,7 @@ from litforge.export.markdown import default_export_dir
 from litforge.screening.fulltext import screen_fulltext
 from litforge.screening.run import screen_papers
 from litforge.storage.db import new_id, now
-from litforge.storage.recovery import repair_abandoned_runs
+from litforge.storage.recovery import process_started_at, repair_abandoned_runs
 
 
 class WatchRun(BaseModel):
@@ -134,8 +134,10 @@ def refresh_project(conn: sqlite3.Connection, gateway: ModelGateway, sources: So
     before_id = snapshots[0].id if snapshots else take_snapshot(conn, project_id, "Before refresh")
     before = get_snapshot(conn, before_id)
     run_id, started = new_id(), now()
-    conn.execute("INSERT INTO watch_runs(id,project_id,before_snapshot,status,started_at,owner_pid,owner_started_at) "
-                 "VALUES (?,?,?,'running',?,?,?)", (run_id, project_id, before_id, started, os.getpid(), started))
+    conn.execute("INSERT INTO watch_runs(id,project_id,before_snapshot,status,started_at,"
+                 "owner_pid,owner_started_at,owner_process_started_at) "
+                 "VALUES (?,?,?,'running',?,?,?,?)", (run_id, project_id, before_id, started, os.getpid(), started,
+                                                    process_started_at(os.getpid())))
     partial = False
     try:
         # Capture these before replay creates additional discovery_runs rows.

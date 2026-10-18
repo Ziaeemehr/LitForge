@@ -28,7 +28,7 @@ from litforge.llm.pricing import OpenRouterPricing, PriceInfo
 from litforge.llm.router import CloudApprovalRequired, ModelProfile, ModelRequest, ModelRouter, RoutingError
 from litforge.screening.llm import OllamaClient
 from litforge.storage.db import new_id, now, transaction
-from litforge.storage.recovery import repair_model_reservations
+from litforge.storage.recovery import owner_alive, process_started_at, repair_model_reservations
 
 LOCAL_VISION = "local_vision"  # default route for image calls: the configured local vision model
 
@@ -151,16 +151,18 @@ class ModelGateway:
         spent_run = 0.0
         if run_id is not None:
             spent_run = float(self.conn.execute(
-                "SELECT COALESCE(SUM(cost_usd),0) FROM ("
-                "SELECT cost_usd FROM model_calls WHERE run_id=? UNION ALL "
-                "SELECT cost_usd FROM model_call_reservations WHERE run_id=?)", (run_id, run_id),
+                "SELECT COALESCE(SUM(cost_usd),0) FROM model_calls WHERE run_id=?", (run_id,),
             ).fetchone()[0])
         month = datetime.now(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
         spent_month = float(self.conn.execute(
-            "SELECT COALESCE(SUM(cost_usd),0) FROM ("
-            "SELECT cost_usd FROM model_calls WHERE julianday(created_at)>=julianday(?) UNION ALL "
-            "SELECT cost_usd FROM model_call_reservations)", (month,),
+            "SELECT COALESCE(SUM(cost_usd),0) FROM model_calls WHERE julianday(created_at)>=julianday(?)", (month,),
         ).fetchone()[0])
+        # Previews may use a read-only connection. Ignore stale reservations without repairing them.
+        for row in self.conn.execute("SELECT * FROM model_call_reservations").fetchall():
+            if owner_alive(row["owner_pid"], row["owner_process_started_at"]):
+                spent_month += row["cost_usd"]
+                if run_id is not None and row["run_id"] == run_id:
+                    spent_run += row["cost_usd"]
         return spent_run, spent_month
 
     def _reserve(self, price: Pricing | None, estimated: int, cap: int, run_id: str | None) -> str:
@@ -170,8 +172,10 @@ class ModelGateway:
             cost = self._guard().check(price, estimated, cap, *self._spend(run_id))
             timestamp = now()
             self.conn.execute(
-                "INSERT INTO model_call_reservations(id,run_id,cost_usd,created_at,owner_pid,owner_started_at) "
-                "VALUES (?,?,?,?,?,?)", (reservation_id, run_id, cost, timestamp, os.getpid(), timestamp))
+                "INSERT INTO model_call_reservations"
+                "(id,run_id,cost_usd,created_at,owner_pid,owner_started_at,owner_process_started_at) "
+                "VALUES (?,?,?,?,?,?,?)", (reservation_id, run_id, cost, timestamp, os.getpid(), timestamp,
+                                          process_started_at(os.getpid())))
         return reservation_id
 
     def _finish_call(self, record: ModelCallRecord, reservation_id: str | None, price: Pricing | None) -> None:
@@ -270,8 +274,6 @@ class ModelGateway:
             cost = None if price is None else BudgetGuard._cost(price, estimated, cap)
             if blocked is None:
                 try:
-                    with transaction(self.conn, immediate=True):
-                        repair_model_reservations(self.conn)
                     self._guard().check(price, estimated, cap, *self._spend())
                 except BudgetExceeded:
                     blocked = "missing pricing" if price is None else "over budget"

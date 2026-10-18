@@ -79,6 +79,15 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
     for version, name, sql in available_migrations():
         if version <= current:
             continue
+        if version == 23:
+            # 0021/0022 were amended before release; existing branch v22 DBs still need these columns.
+            statements = []
+            for statement in sql.split(";"):
+                match = re.fullmatch(r"\s*ALTER TABLE (\w+) ADD COLUMN (\w+) TEXT\s*", statement)
+                if match and match[2] in {r[1] for r in conn.execute(f"PRAGMA table_info({match[1]})")}:
+                    continue
+                statements.append(statement)
+            sql = ";".join(statements)
         # executescript commits implicitly, so wrap the script and the version bump together.
         conn.executescript(f"BEGIN;\n{sql}\nPRAGMA user_version = {version};\nCOMMIT;")
         applied.append(name)

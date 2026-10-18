@@ -5,6 +5,7 @@ import io
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -18,7 +19,7 @@ from lens_fakes import evidence_id, seed
 from typer.testing import CliRunner
 
 from litforge import cli
-from litforge.analysis import figures, living, snapshots
+from litforge.analysis import ask, figures, living, matrix, snapshots
 from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.matrix import MatrixColumn, create_matrix
 from litforge.config import Config
@@ -30,6 +31,8 @@ from litforge.indexing.fts import search
 from litforge.parsing.mineru_parser import _run_command
 from litforge.screening.criteria import Criteria, save_criteria
 from litforge.screening.llm import FakeLlm
+from litforge.screening.run import preview_run
+from litforge.storage import recovery
 from litforge.storage.db import now
 from litforge.ui import server
 
@@ -269,11 +272,82 @@ def test_startup_recovers_only_abandoned_owners(conn, paths, entrypoint, owner):
         assert result.exit_code == 0, result.output
     old = conn.execute("SELECT status,error FROM watch_runs WHERE id='old'").fetchone()
     console = planner.get_run(conn, run)
-    if owner == "live":
+    if owner != "dead":
         assert old["status"] == "running" and console.status == "running"
     else:
         assert old["status"] == "error" and "interrupted" in old["error"]
         assert console.status == "failed" and "interrupted" in console.error
+
+
+@pytest.mark.parametrize("identity,expected", [("same", "running"), ("reused", "failed"), (None, "running")])
+def test_run_recovery_compares_process_identity(conn, monkeypatch, identity, expected):
+    run = abandoned_runs(conn)
+    monkeypatch.setattr(recovery, "process_started_at", lambda _: identity)
+    for table in ("watch_runs", "console_runs"):
+        conn.execute(f"UPDATE {table} SET owner_pid=?,owner_started_at='2000-01-01',"
+                     "owner_process_started_at='same'", (os.getpid(),))
+    recovery.repair_abandoned_runs(conn)
+    assert planner.get_run(conn, run).status == expected
+    assert conn.execute("SELECT status FROM watch_runs").fetchone()[0] == (
+        "error" if expected == "failed" else "running")
+
+
+@pytest.mark.parametrize("preview", ["screen", "ask", "matrix"])
+def test_feature_previews_ignore_dead_reservations_on_readonly_db(conn, paths, monkeypatch, preview):
+    seed(conn)
+    save_criteria(conn, "proj", Criteria(question="Results"))
+    conn.execute("INSERT INTO discovery_runs(id,project_id,kind,status,started_at) "
+                 "VALUES ('d','proj','search','done',?)", (now(),))
+    conn.execute("INSERT INTO discovery_results(run_id,paper_id,score,n_hits,new_to_project) "
+                 "VALUES ('d','p',1,1,1)")
+    mid = create_matrix(conn, "proj", "m", "Results", [MatrixColumn(
+        key="result", label="Result", instruction="Results", type="text")])
+    conn.execute("INSERT INTO model_call_reservations(id,cost_usd,created_at,owner_pid,owner_started_at) "
+                 "VALUES ('dead',100,?,123,?)", (now(), now()))
+    monkeypatch.setattr(recovery, "_alive", lambda _: False)
+    before = list(conn.iterdump())
+    with sqlite3.connect(f"{paths.db.as_uri()}?mode=ro", uri=True, isolation_level=None) as readonly:
+        readonly.row_factory = sqlite3.Row
+        gateway = ModelGateway(readonly, cloud_config("screen"))
+        if preview == "screen":
+            calls = preview_run(readonly, gateway, "d", 10, profile="remote")["calls"]
+        elif preview == "ask":
+            calls = [c.model_dump() for c in ask.plan_calls(readonly, gateway, "Results", profile="remote")]
+        else:
+            calls = [c.model_dump() for c in matrix.plan_calls(readonly, gateway, mid.id, profile="remote")]
+        assert calls and all(c["blocked_reason"] is None for c in calls)
+    assert list(conn.iterdump()) == before
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
+def test_shutdown_deadline_shared_by_eight_helpers(paths, tmp_path, monkeypatch):
+    app = server.App(paths, Config())
+    monkeypatch.setattr(app, "stop_models", lambda: None)
+    pidfiles = [tmp_path / f"helper-{i}.pid" for i in range(8)]
+    for pidfile in pidfiles:
+        code = ("import os,signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
+                f"open({str(pidfile)!r},'w').write(str(os.getpid())); time.sleep(120)")
+        app.start_job("helper", "", lambda _, code=code: _run_command(
+            [sys.executable, "-c", code], env=dict(os.environ), timeout=120))
+    try:
+        deadline = time.monotonic() + 5
+        while not all(p.exists() for p in pidfiles) and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert all(p.exists() for p in pidfiles)
+        began = time.monotonic()
+        app.shutdown(timeout=.01)
+        assert time.monotonic() - began < 1.5
+        for worker, _ in app._workers.values():
+            worker.join(2)
+        assert all(not worker.is_alive() for worker, _ in app._workers.values())
+        for pidfile in pidfiles:
+            with pytest.raises(ProcessLookupError):
+                os.kill(int(pidfile.read_text()), 0)
+    finally:
+        for pidfile in pidfiles:
+            if pidfile.exists():
+                with suppress(ProcessLookupError):
+                    os.killpg(int(pidfile.read_text()), signal.SIGKILL)
 
 
 def test_refresh_recovers_before_ui_reject_check(conn, paths, monkeypatch):

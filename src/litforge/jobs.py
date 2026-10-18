@@ -15,17 +15,15 @@ class JobControl:
     def __init__(self) -> None:
         self.cancelled = threading.Event()
         self._lock = threading.Lock()
-        self.processes: dict[int, Callable[[], None]] = {}
+        self.processes: dict[int, Callable[[bool], None]] = {}
 
     def check(self) -> None:
         if self.cancelled.is_set():
             raise JobCancelled("cancelled: server shutdown")
 
-    def terminate_processes(self) -> None:
+    def process_stoppers(self) -> list[Callable[[bool], None]]:
         with self._lock:
-            callbacks = list(self.processes.values())
-        for terminate in callbacks:
-            terminate()
+            return list(self.processes.values())
 
 
 _context = threading.local()
@@ -48,28 +46,28 @@ def check_cancelled() -> None:
 
 
 @contextmanager
-def track_process(pid: int, terminate: Callable[[], None]) -> Iterator[None]:
+def track_process(pid: int, terminate: Callable[[bool], None]) -> Iterator[None]:
     control = getattr(_context, "control", None)
     if control is None:
         yield
         return
-    # Shutdown and the command's own exception cleanup may race. Terminate a tree once.
+    # Retain a signalled tree through escalation even if its group leader exits first.
     lock = threading.Lock()
-    terminated = False
+    signalled = False
     active = True
 
-    def stop() -> None:
-        nonlocal terminated
+    def stop(force: bool) -> None:
+        nonlocal signalled
         with lock:
-            if active and not terminated:
-                terminate()
-                terminated = True
+            if active or signalled:
+                terminate(force)
+                signalled = True
 
     with control._lock:
         control.processes[pid] = stop
     try:
         if control.cancelled.is_set():
-            stop()
+            stop(True)
         control.check()
         yield
         control.check()

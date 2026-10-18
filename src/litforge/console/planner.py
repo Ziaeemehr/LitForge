@@ -27,7 +27,7 @@ from litforge.console.actions import (
 from litforge.discovery.run import Sources
 from litforge.llm.evidence import EvidencePacket
 from litforge.storage.db import new_id, now
-from litforge.storage.recovery import repair_abandoned_runs
+from litforge.storage.recovery import process_started_at, repair_abandoned_runs
 
 PLAN_TASK = "console_plan"
 PLAN_PROMPT_VERSION = "console-plan-v1"
@@ -325,7 +325,8 @@ def execute_run(
     results = run.results
     stamp = now()
     conn.execute("UPDATE console_runs SET status='running',cancel_requested=0,error=NULL,updated_at=?,"
-                 "owner_pid=?,owner_started_at=? WHERE id=?", (stamp, os.getpid(), stamp, run_id))
+                 "owner_pid=?,owner_started_at=?,owner_process_started_at=? WHERE id=?",
+                 (stamp, os.getpid(), stamp, process_started_at(os.getpid()), run_id))
     project_name_row = (conn.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone()
                         if project_id is not None else None)
     context = ActionContext(conn, gateway, project_id,
