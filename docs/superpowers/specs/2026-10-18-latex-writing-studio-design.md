@@ -87,6 +87,29 @@ Settings (e.g. a small local model for grammar, a stronger one for drafting):
 - Prompts are versioned like the other prompts; an evaluation set (paragraph + expected properties) measures
   meaning preservation, invented facts and citation validity per model.
 
+#### Parity with Overleaf AI (checked 2026-10-18)
+
+Overleaf (with Writefull) offers these in its editor; the Writing Studio covers each, locally where possible and
+grounded in the library where Overleaf is not:
+
+| Overleaf feature | Writing Studio equivalent | Difference |
+|---|---|---|
+| AI assistant (chat with the document, LaTeX help, runs tools) | Side-panel assistant over the open document **and** the project's evidence; answers cite library quotes | Can answer "what does the literature say" from verified evidence; local model by default |
+| Error Assist (explain compile errors, suggest fix) | "Fix LaTeX error" action on the compile log | Sends only error + nearby lines, to a local model by default |
+| Language suggestions (grammar/fluency, inline) | Grammar action plus optional inline hints from a small local model | No text leaves the machine unless a cloud model is chosen |
+| Rewrite tools: paraphrase, make concise, make scientific, split/join sentences | Same actions on the selection, as diffs | Numbers/citations guarded |
+| Generate title and abstract | Title/abstract from the document's sections | Abstract claims checked against the document's own text |
+| TeXGPT (natural language → LaTeX) | "Write LaTeX for…" action (figures, tables, environments, macros) | — |
+| Equation generator (from text or an image) | Equation from text, or from an image/PDF crop using the existing vision and formula readers (MinerU, Pix2Text) | Can take the equation straight from a cited paper's page |
+| Table generator (from a prompt or an image) | Table from text, from an image, or from a library paper's parsed table / the study matrix | Values come from the parsed table, not re-typed |
+| Synonyms in context | Synonym suggestions for the selected word | Local |
+| Citation check / citation suggestions (via Dimensions) | W2 citation check and cite suggestions from the user's own library and evidence ledger | Suggestions come with the exact supporting quote |
+| Sentence completion (Supercomplete) | Optional, off by default, local model only, never sends text while typing to a cloud model | Opt-in per document |
+| Summarize / explain (removed from Overleaf, still in Writefull) | Explain/summarise selection as a side note | Not inserted into the manuscript |
+
+Overleaf also lets users and institutions turn all AI off; the Writing Studio follows the existing model
+settings (local only / ask before cloud / budgets) and adds a per-document "no AI" switch.
+
 ### W4. Sync and collaboration (later, optional)
 
 - Git remote sync for a writing document (works with Overleaf's git integration on paid plans, or any git host).
@@ -126,7 +149,12 @@ journal submission integrations.
   system `latexmk`, and say which engine compiled the PDF.
 - Long documents and model context limits: actions stay selection-scoped; drafting uses an evidence packet, not
   the whole manuscript.
-- Persian/RTL text in LaTeX needs XeLaTeX + `xepersian` and suitable fonts: verify Tectonic supports the templates
-  the user needs, and ship one tested Persian template.
+- Persian is a requirement, not an option: documents use XeLaTeX with `xepersian` (bidi) and Persian fonts
+  (e.g. XB Niloofar / Vazirmatn, bundled or downloaded with consent). W1 must ship a tested Persian template and a
+  mixed Persian/English template, compile both with the chosen engine, and check that SyncTeX, search and the
+  editor handle right-to-left text. If Tectonic cannot compile `xepersian` reliably, the Persian templates use the
+  system XeLaTeX (TeX Live/MacTeX) and Settings says so; this is decided by a spike before W1 starts.
+- Language-model help in Persian: grammar/rewrite/translation actions must work on Persian text (prompt and
+  evaluation set include Persian paragraphs); LaTeX commands inside Persian text must survive edits unchanged.
 - Where the writing studio lives in the UI (a new top-level view per project) and how it relates to briefs
   (a brief can be "opened in Writing Studio").
