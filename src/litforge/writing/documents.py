@@ -1,0 +1,335 @@
+"""Writing Studio documents: plain folders under the project, atomic saves, snapshots and figures."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import sqlite3
+import threading
+import time
+from dataclasses import dataclass
+from importlib import resources
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+from litforge.config import Paths
+from litforge.projects import get_project_id
+from litforge.storage.db import new_id, now, transaction
+
+TEMPLATES = {"article": "English article", "persian": "Persian article (xepersian)"}
+TEXT_SUFFIXES = {".tex", ".bib", ".sty", ".cls", ".bst", ".txt", ".md"}
+FIGURE_SUFFIXES = {".png", ".jpg", ".jpeg", ".pdf", ".eps", ".svg"}
+MAX_FIGURE_BYTES = 25 * 1024 * 1024
+MAX_TEXT_BYTES = 5 * 1024 * 1024
+SNAPSHOT_EVERY_S = 120
+SNAPSHOT_KEEP = 30
+_SAFE_PART = re.compile(r"^[^\x00-\x1f/\\:*?\"<>|]+$")
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+class DocumentError(ValueError):
+    pass
+
+
+class SaveConflict(DocumentError):
+    """The file changed on disk since the editor read it."""
+
+    def __init__(self, current_hash: str | None) -> None:
+        super().__init__("the file changed since it was opened; reload it or keep your version")
+        self.current_hash = current_hash
+
+
+@dataclass(frozen=True)
+class Document:
+    id: str
+    project_id: str
+    project: str
+    name: str
+    slug: str
+    template: str
+    engine: str
+    folder: Path
+    created_at: str
+    updated_at: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "project": self.project, "name": self.name, "slug": self.slug,
+                "template": self.template, "engine": self.engine, "created_at": self.created_at,
+                "updated_at": self.updated_at}
+
+
+def _lock(doc_id: str) -> threading.Lock:
+    with _locks_guard:
+        return _locks.setdefault(doc_id, threading.Lock())
+
+
+def text_hash(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def writing_root(paths: Paths, project: str) -> Path:
+    return paths.project_dir(project) / "writing"
+
+
+def _slug(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:50].rstrip("-")
+    return slug or "document"
+
+
+def resolve_inside(folder: Path, name: str, *, allow_hidden: bool = False) -> Path:
+    """Resolve a relative file name inside `folder`; refuses absolute paths, `..`, odd characters and symlinks."""
+    if not name or "\\" in name or "\x00" in name:
+        raise DocumentError("invalid file name")
+    rel = PurePosixPath(name)
+    if rel.is_absolute() or any(part in {"", ".", ".."} for part in rel.parts) or len(rel.parts) > 4:
+        raise DocumentError("the file must be inside the document folder")
+    if not allow_hidden and any(part.startswith(".") for part in rel.parts):
+        raise DocumentError("hidden files are managed by LitForge")
+    if not all(_SAFE_PART.match(part) for part in rel.parts):
+        raise DocumentError("invalid file name")
+    root = folder.resolve()
+    current = root
+    for part in rel.parts:
+        current = current / part
+        if current.is_symlink():
+            raise DocumentError("symbolic links are not followed")
+    target = (root / Path(*rel.parts)).resolve()
+    if not target.is_relative_to(root):
+        raise DocumentError("the file must be inside the document folder")
+    return target
+
+
+def _row_to_doc(paths: Paths, row: sqlite3.Row) -> Document:
+    return Document(id=row["id"], project_id=row["project_id"], project=row["project"], name=row["name"],
+                    slug=row["slug"], template=row["template"], engine=row["engine"],
+                    folder=writing_root(paths, row["project"]) / row["slug"], created_at=row["created_at"],
+                    updated_at=row["updated_at"])
+
+
+_SELECT = """SELECT d.*, p.name AS project FROM writing_documents d JOIN projects p ON p.id=d.project_id"""
+
+
+def get_document(conn: sqlite3.Connection, paths: Paths, doc_id: str) -> Document:
+    row = conn.execute(_SELECT + " WHERE d.id=?", (doc_id,)).fetchone()
+    if row is None:
+        raise LookupError("document not found")
+    return _row_to_doc(paths, row)
+
+
+def list_documents(conn: sqlite3.Connection, paths: Paths, project: str) -> list[Document]:
+    pid = get_project_id(conn, project)
+    rows = conn.execute(_SELECT + " WHERE d.project_id=? ORDER BY d.updated_at DESC", (pid,)).fetchall()
+    return [_row_to_doc(paths, r) for r in rows]
+
+
+def create_document(conn: sqlite3.Connection, paths: Paths, project: str, name: str,
+                    template: str = "article") -> Document:
+    name = name.strip()
+    if not name or len(name) > 200:
+        raise DocumentError("give the document a name (at most 200 characters)")
+    if template not in TEMPLATES:
+        raise DocumentError(f"template must be one of {sorted(TEMPLATES)}")
+    pid = get_project_id(conn, project)
+    root = writing_root(paths, project)
+    root.mkdir(parents=True, exist_ok=True)
+    base = _slug(name)
+    doc_id = new_id()
+    ts = now()
+    with transaction(conn, immediate=True):
+        taken = {str(r[0]) for r in conn.execute("SELECT slug FROM writing_documents WHERE project_id=?", (pid,))}
+        slug, n = base, 1
+        while slug in taken or (root / slug).exists():
+            n += 1
+            slug = f"{base}-{n}"
+        folder = root / slug
+        source = resources.files("litforge.writing") / "templates" / template
+        with resources.as_file(source) as src:
+            shutil.copytree(src, folder, ignore=shutil.ignore_patterns("__pycache__", "__init__.py"))
+        (folder / "figures").mkdir(exist_ok=True)
+        (folder / "references.bib").touch()
+        (folder / ".snapshots").mkdir(exist_ok=True)
+        conn.execute(
+            """INSERT INTO writing_documents(id, project_id, name, slug, template, engine, created_at, updated_at)
+               VALUES (?,?,?,?,?,'tectonic',?,?)""", (doc_id, pid, name, slug, template, ts, ts))
+    return get_document(conn, paths, doc_id)
+
+
+def rename_document(conn: sqlite3.Connection, paths: Paths, doc_id: str, name: str) -> Document:
+    name = name.strip()
+    if not name or len(name) > 200:
+        raise DocumentError("give the document a name (at most 200 characters)")
+    get_document(conn, paths, doc_id)
+    conn.execute("UPDATE writing_documents SET name=?, updated_at=? WHERE id=?", (name, now(), doc_id))
+    return get_document(conn, paths, doc_id)
+
+
+def set_engine(conn: sqlite3.Connection, paths: Paths, doc_id: str, engine: str) -> Document:
+    if engine not in {"tectonic", "xelatex"}:
+        raise DocumentError("engine must be tectonic or xelatex")
+    get_document(conn, paths, doc_id)
+    conn.execute("UPDATE writing_documents SET engine=? WHERE id=?", (engine, doc_id))
+    return get_document(conn, paths, doc_id)
+
+
+def delete_document(conn: sqlite3.Connection, paths: Paths, doc_id: str) -> Path:
+    """Move the document folder to the project's trash folder and forget the row."""
+    doc = get_document(conn, paths, doc_id)
+    trash = paths.project_dir(doc.project) / "trash"
+    trash.mkdir(parents=True, exist_ok=True)
+    target = trash / f"{doc.slug}-{time.strftime('%Y%m%d-%H%M%S')}"
+    with _lock(doc.id):
+        if doc.folder.exists():
+            os.replace(doc.folder, target)
+        conn.execute("DELETE FROM writing_documents WHERE id=?", (doc.id,))
+    return target
+
+
+def list_files(doc: Document) -> list[dict[str, Any]]:
+    out = []
+    root = doc.folder.resolve()
+    for path in sorted(root.rglob("*")):
+        rel = path.relative_to(root)
+        if any(p.startswith(".") for p in rel.parts) or path.is_symlink() or not path.is_file():
+            continue
+        suffix = path.suffix.lower()
+        kind = "text" if suffix in TEXT_SUFFIXES else "figure" if suffix in FIGURE_SUFFIXES else "other"
+        out.append({"name": rel.as_posix(), "kind": kind, "size": path.stat().st_size})
+    return out
+
+
+def read_file(doc: Document, name: str) -> tuple[str, str]:
+    """Return (text, hash) of a text file in the document."""
+    path = resolve_inside(doc.folder, name)
+    if path.suffix.lower() not in TEXT_SUFFIXES:
+        raise DocumentError("only text files open in the editor")
+    data = path.read_bytes()
+    return data.decode("utf-8", errors="replace"), text_hash(data)
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        with open(tmp, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def save_file(conn: sqlite3.Connection, doc: Document, name: str, text: str, expected_hash: str | None) -> str:
+    """Write the file atomically. `expected_hash` is the hash the editor read; None creates a new file.
+    Raises SaveConflict when the file on disk is not what the editor read."""
+    path = resolve_inside(doc.folder, name)
+    if path.suffix.lower() not in TEXT_SUFFIXES:
+        raise DocumentError("only text files can be saved")
+    data = text.encode("utf-8")
+    if len(data) > MAX_TEXT_BYTES:
+        raise DocumentError("the file is too large")
+    with _lock(doc.id):
+        current = text_hash(path.read_bytes()) if path.exists() else None
+        if current != expected_hash:
+            if current == text_hash(data):
+                return current  # the same text is already saved (a retried request)
+            raise SaveConflict(current)
+        _atomic_write(path, data)
+        conn.execute("UPDATE writing_documents SET updated_at=? WHERE id=?", (now(), doc.id))
+        _maybe_snapshot(doc)
+    return text_hash(data)
+
+
+def upload_figure(doc: Document, name: str, data: bytes) -> str:
+    base = PurePosixPath(name.replace("\\", "/")).name
+    stem, dot, suffix = base.rpartition(".")
+    if not dot or f".{suffix.lower()}" not in FIGURE_SUFFIXES:
+        raise DocumentError("figures must be PNG, JPEG, PDF, EPS or SVG")
+    clean = re.sub(r"[^A-Za-z0-9_-]+", "-", stem).strip("-") or "figure"
+    if len(data) > MAX_FIGURE_BYTES:
+        raise DocumentError("the figure is larger than 25 MB")
+    rel = f"figures/{clean}.{suffix.lower()}"
+    _atomic_write(resolve_inside(doc.folder, rel), data)
+    return rel
+
+
+# ---- snapshots ------------------------------------------------------------------------------------------
+
+
+def _snapshot_dir(doc: Document) -> Path:
+    path = doc.folder / ".snapshots"
+    if path.is_symlink():
+        raise DocumentError("symbolic links are not followed")
+    path.mkdir(exist_ok=True)
+    return path
+
+
+def _text_files(doc: Document) -> list[str]:
+    return [f["name"] for f in list_files(doc) if f["kind"] == "text"]
+
+
+def create_snapshot(doc: Document, note: str = "") -> str:
+    snap_id = time.strftime("%Y%m%dT%H%M%S") + f"-{time.time_ns() % 1_000_000_000:09d}"
+    target = _snapshot_dir(doc) / snap_id
+    target.mkdir()
+    files = _text_files(doc)
+    for name in files:
+        dest = target / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(resolve_inside(doc.folder, name), dest)
+    (target / ".meta.json").write_text(json.dumps({"created_at": now(), "note": note, "files": files},
+                                                  ensure_ascii=False), encoding="utf-8")
+    _rotate(doc)
+    return snap_id
+
+
+def _maybe_snapshot(doc: Document) -> None:
+    snaps = list_snapshots(doc)
+    if snaps and time.time() - snaps[0]["mtime"] < SNAPSHOT_EVERY_S:
+        return
+    create_snapshot(doc, "auto")
+
+
+def _rotate(doc: Document) -> None:
+    for snap in list_snapshots(doc)[SNAPSHOT_KEEP:]:
+        shutil.rmtree(_snapshot_dir(doc) / snap["id"], ignore_errors=True)
+
+
+def list_snapshots(doc: Document) -> list[dict[str, Any]]:
+    out = []
+    for path in _snapshot_dir(doc).iterdir():
+        meta_file = path / ".meta.json"
+        if path.is_symlink() or not meta_file.is_file():
+            continue
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        out.append({"id": path.name, "created_at": meta.get("created_at"), "note": meta.get("note", ""),
+                    "files": meta.get("files", []), "mtime": meta_file.stat().st_mtime})
+    out.sort(key=lambda s: s["id"], reverse=True)
+    return out
+
+
+def restore_snapshot(conn: sqlite3.Connection, doc: Document, snap_id: str) -> list[str]:
+    """Bring back a snapshot's text files; the current text is snapshotted first so nothing is lost."""
+    if not re.fullmatch(r"\d{8}T\d{6}-\d{9}", snap_id):
+        raise DocumentError("unknown snapshot")
+    source = _snapshot_dir(doc) / snap_id
+    if not (source / ".meta.json").is_file() or source.is_symlink():
+        raise DocumentError("unknown snapshot")
+    meta = json.loads((source / ".meta.json").read_text(encoding="utf-8"))
+    with _lock(doc.id):
+        create_snapshot(doc, f"before restoring {snap_id}")
+        restored = []
+        for name in meta.get("files", []):
+            src = resolve_inside(source, name)
+            if src.is_file():
+                _atomic_write(resolve_inside(doc.folder, name), src.read_bytes())
+                restored.append(name)
+        conn.execute("UPDATE writing_documents SET updated_at=? WHERE id=?", (now(), doc.id))
+    return restored
