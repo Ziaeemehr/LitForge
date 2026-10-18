@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
+from litforge.writing import cite as wcite
 from litforge.writing import compile as wc
 from litforge.writing import documents as wd
 
@@ -40,6 +41,14 @@ def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) ->
         doc = _doc(conn, app, query)
         return {"snapshots": [{k: s[k] for k in ("id", "created_at", "note", "files")}
                               for s in wd.list_snapshots(doc)]}
+    if path == "/api/write/cite/search":
+        doc = _doc(conn, app, query)
+        q = query.get("q", "")
+        if query.get("tab") == "evidence":
+            return {"results": wcite.search_evidence(conn, doc.project_id, q)}
+        return {"results": wcite.search_library(conn, doc.project_id, q)}
+    if path == "/api/write/quote":
+        return wcite.quotes_for_key(conn, _doc(conn, app, query), query.get("key", ""))
     if path == "/api/write/pdf":
         doc = _doc(conn, app, query)
         pdf = wd.resolve_inside(doc.folder, ".build/main.pdf", allow_hidden=True)
@@ -75,6 +84,8 @@ def post(app: App, conn: sqlite3.Connection, path: str, body: dict[str, Any]) ->
         return {"restored": wd.restore_snapshot(conn, doc, str(body.get("snapshot") or ""))}
     if path == "/api/write/snapshot":
         return {"id": wd.create_snapshot(doc, str(body.get("note") or "manual")[:200])}
+    if path == "/api/write/cite":
+        return wcite.cite(conn, doc, str(body.get("paper_id") or ""), body.get("evidence_id") or None)
     if path == "/api/write/compile":
         return compile_job(app, doc).__dict__
     raise LookupError("not found")
@@ -96,6 +107,11 @@ def compile_job(app: App, doc: wd.Document) -> Job:
 
     def work(job: Job) -> None:
         job.messages.append(f"Compiling with {doc.engine}…")
+        conn = app.db()
+        try:
+            wcite.sync_bib(conn, doc)  # entries for every library key the text cites
+        finally:
+            conn.close()
         result = wc.compile_document(doc, app.paths)
         job.report = result.as_dict()
         job.report.pop("log", None)

@@ -13,6 +13,7 @@ from pathlib import Path
 from litforge.storage.db import now, transaction
 
 KEY_RE = re.compile(r"^[a-z0-9:_-]+$")
+_ENTRY_KEY = re.compile(r"@\w+\s*\{\s*([^,\s]+)\s*,")
 BEGIN_MARK = "% litforge:begin managed entries (rewritten on each cite; edit outside this block)"
 END_MARK = "% litforge:end managed entries"
 _STOPWORDS = {
@@ -172,14 +173,15 @@ def bibtex_entry(conn: sqlite3.Connection, paper_id: str) -> str:
 def write_bib(conn: sqlite3.Connection, paper_ids: Iterable[str], path: Path) -> list[str]:
     """Rewrite the LitForge-managed block of `path` with these papers' entries; text outside the markers
     (the user's own entries) is kept as it is. Returns the keys written."""
-    ids = list(dict.fromkeys(paper_ids))
-    entries = [bibtex_entry(conn, pid) for pid in ids]
-    keys = [citation_key(conn, pid) for pid in ids]
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     before, after = existing, ""
     if BEGIN_MARK in existing and END_MARK in existing.split(BEGIN_MARK, 1)[1]:
         before, rest = existing.split(BEGIN_MARK, 1)
         after = rest.split(END_MARK, 1)[1]
+    own = {m.group(1).strip() for m in _ENTRY_KEY.finditer(before + after)}  # the user's entries win
+    ids = [pid for pid in dict.fromkeys(paper_ids) if citation_key(conn, pid) not in own]
+    entries = [bibtex_entry(conn, pid) for pid in ids]
+    keys = [citation_key(conn, pid) for pid in ids]
     block = BEGIN_MARK + "\n" + "\n".join(entries) + END_MARK
     text = before.rstrip("\n") + ("\n\n" if before.strip() else "") + block + "\n" + after.lstrip("\n")
     tmp = path.with_name(f".{path.name}.tmp")

@@ -10,6 +10,7 @@ class Element {
   constructor(tag) {
     this.tagName = tag; this.children = []; this.textContent = ''; this.hidden = false; this.value = '';
     this.listeners = {}; this.className = ''; this.selectionStart = 0; this.selectionEnd = 0;
+    this.classList = { toggle() {}, add() {}, remove() {} };
   }
   appendChild(node) { this.children.push(node); return node; }
   replaceChildren(...nodes) { this.children = nodes; }
@@ -181,4 +182,53 @@ test('an unknown project asks the user to choose one without a request', async (
   await ctx.loadWrite();
   assert.match($('write-docs').children[0].textContent, /Choose or create a project/);
   assert.equal(calls.length, 0);
+});
+
+test('insertCiteKey: new cite, add to an existing list, unclosed list, duplicates', () => {
+  const { ctx } = setup();
+  assert.deepEqual({ ...ctx.insertCiteKey('As shown ', 9, 'k1') }, { from: 9, to: 9, insert: '\\cite{k1}' });
+  const text = 'See \\citep[p.~3]{a, b} here';
+  assert.deepEqual({ ...ctx.insertCiteKey(text, text.indexOf('b'), 'k1') }, { from: 17, to: 21, insert: 'a,b,k1' });
+  assert.equal(ctx.insertCiteKey(text, text.indexOf('b'), 'a'), null);
+  assert.deepEqual({ ...ctx.insertCiteKey('x \\cite{', 8, 'k1') }, { from: 8, to: 8, insert: 'k1}' });
+  assert.deepEqual({ ...ctx.insertCiteKey('{not a cite} ', 5, 'k') }, { from: 5, to: 5, insert: '\\cite{k}' });
+  const persian = 'این نتیجه \\cite{a} است';
+  assert.deepEqual({ ...ctx.insertCiteKey(persian, persian.indexOf('a}'), 'b') },
+    { from: persian.indexOf('a}'), to: persian.indexOf('a}') + 1, insert: 'a,b' });
+});
+
+test('cite palette searches, inserts the key and offers the quote for keys under the cursor', async () => {
+  const { ctx, $, calls } = setup({
+    get: url => {
+      if (url.startsWith('/api/write/cite/search')) return { results: [{ paper_id: 'p1', title: '<b>Brains</b>',
+        year: 2021, authors: ['Ann Lee'], version: 'preprint', evidence_id: url.includes('evidence') ? 'ev_1' : null,
+        quote: url.includes('evidence') ? 'gain was 3.25' : null, page: url.includes('evidence') ? 4 : null }] };
+      if (url.startsWith('/api/write/quote')) return { key: 'lee2021brains', paper_id: 'p1', title: 'Brains', year: 2021,
+        quotes: [{ text: 'gain was 3.25', page: 4, version: 'Preprint (arXiv)' }] };
+    },
+    post: url => url === '/api/write/cite' ? { key: 'lee2021brains' } : null
+  });
+  await ctx.openWriteDoc('d1');
+  $('write-cite-panel').hidden = true;
+  const area = $('write-cm').children[0];
+  area.value = 'Text '; area.setSelectionRange(5, 5);
+  await ctx.openWriteCite();
+  const row = $('write-cite-results').children[0];
+  assert.equal(row.children[1].textContent, '<b>Brains</b> (2021) · Ann Lee');
+  assert.equal(row.children[2].textContent, 'preprint');
+  await ctx.setWriteCiteTab('evidence');
+  $('write-cite-q').value = 'gain';
+  await ctx.searchWriteCite();
+  await $('write-cite-results').children[0].children[0].onclick();
+  assert.deepEqual({ ...calls.find(c => c[0] === '/api/write/cite')[1] }, { doc: 'd1', paper_id: 'p1', evidence_id: 'ev_1' });
+  assert.equal(area.value, 'Text \\cite{lee2021brains}');
+  area.setSelectionRange(14, 14);
+  $('write-cite-panel').hidden = true;
+  await ctx.openWriteCite();
+  const quoteButton = $('write-cite-results').children[0].children[0];
+  assert.equal(quoteButton.textContent, 'Show quote: lee2021brains');
+  await quoteButton.onclick();
+  const quote = $('write-cite-results').children[1];
+  assert.equal(quote.children[0].href, '/api/papers/p1/pdf#page=4');
+  assert.equal(quote.children[1].textContent, 'gain was 3.25');
 });

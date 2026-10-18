@@ -2014,6 +2014,7 @@
 
   function writeChanged() {
     W.dirty = true;
+    maybeOpenCiteFromTyping();
     writeSaveState('Edited');
     clearTimeout(W.timer);
     W.timer = setTimeout(saveWriteNow, W.SAVE_DELAY);
@@ -2192,6 +2193,149 @@
     });
   }
 
+  // Where to put a key: inside the \cite{...} the cursor is in (added to its list), else a new \cite{key}.
+  function citeGroupAt(text, pos) {
+    var open = -1;
+    for (var i = pos - 1; i >= 0 && i >= pos - 400; i--) {
+      var ch = text[i];
+      if (ch === '}' || ch === '\n') return null;
+      if (ch === '{') { open = i; break; }
+    }
+    if (open < 0 || !/\\[a-zA-Z]*cite[a-zA-Z]*\*?\s*(?:\[[^\]\n]*\]\s*){0,2}$/.test(text.slice(Math.max(0, open - 200), open))) return null;
+    var close = -1;
+    for (var j = pos; j < text.length && j < pos + 400; j++) {
+      if (text[j] === '}') { close = j; break; }
+      if (text[j] === '\n' || text[j] === '{') break;
+    }
+    var inner = text.slice(open + 1, close < 0 ? pos : close);
+    return { open: open, close: close, keys: inner.split(',').map(function (k) { return k.trim(); }).filter(Boolean) };
+  }
+
+  function insertCiteKey(text, pos, key) {
+    var group = citeGroupAt(text, pos);
+    if (!group) return { from: pos, to: pos, insert: '\\cite{' + key + '}' };
+    if (group.keys.indexOf(key) >= 0) return null;
+    var keys = group.keys.concat([key]).join(',');
+    if (group.close < 0) return { from: group.open + 1, to: pos, insert: keys + '}' };
+    return { from: group.open + 1, to: group.close, insert: keys };
+  }
+
+  var CITE = { tab: 'library', timer: null, request: 0 };
+
+  function openWriteCite() {
+    var panel = $('write-cite-panel');
+    panel.hidden = !panel.hidden;
+    if (panel.hidden) return Promise.resolve();
+    $('write-cite-q').value = '';
+    $('write-cite-q').focus();
+    return searchWriteCite();
+  }
+
+  function setWriteCiteTab(tab) {
+    CITE.tab = tab;
+    $('write-cite-tab-lib').classList.toggle('on', tab === 'library');
+    $('write-cite-tab-ev').classList.toggle('on', tab === 'evidence');
+    return searchWriteCite();
+  }
+
+  function searchWriteCite() {
+    var request = ++CITE.request;
+    var q = $('write-cite-q').value.trim();
+    var list = $('write-cite-results');
+    var context = W.editor ? citeGroupAt(W.editor.getText(), W.editor.selection().from) : null;
+    var quoteButtons = (context ? context.keys : []).map(function (key) {
+      var li = document.createElement('li');
+      var btn = document.createElement('button');
+      btn.className = 'btn small'; btn.textContent = 'Show quote: ' + key;
+      btn.onclick = function () { showWriteQuote(key); };
+      li.appendChild(btn);
+      return li;
+    });
+    if (CITE.tab === 'evidence' && !q) {
+      list.replaceChildren.apply(list, quoteButtons.concat([citeNote('Type words to search quotes in the project\'s papers.')]));
+      return Promise.resolve();
+    }
+    return api('/api/write/cite/search?doc=' + encodeURIComponent(W.doc.id) + '&tab=' + CITE.tab +
+      '&q=' + encodeURIComponent(q)).then(function (data) {
+      if (request !== CITE.request) return;
+      var rows = (data.results || []).map(citeRow);
+      if (!rows.length) rows.push(citeNote('No matches in this project.'));
+      list.replaceChildren.apply(list, quoteButtons.concat(rows));
+    }).catch(function (e) { list.replaceChildren(citeNote(e.message)); });
+  }
+
+  function citeNote(text) {
+    var li = document.createElement('li');
+    li.className = 'muted'; li.textContent = text;
+    return li;
+  }
+
+  function citeRow(r) {
+    var li = document.createElement('li');
+    var add = document.createElement('button');
+    add.className = 'btn small'; add.textContent = 'Cite';
+    add.onclick = function () { citeWritePaper(r); };
+    var label = document.createElement('span');
+    label.dir = 'auto';
+    var who = (r.authors || []).join(', ');
+    label.textContent = (r.title || r.paper_id) + (r.year ? ' (' + r.year + ')' : '') + (who ? ' · ' + who : '') +
+      (r.page ? ' · p.' + r.page : '') + (r.key ? ' · ' + r.key : '');
+    li.appendChild(add); li.appendChild(label);
+    if (r.version) {
+      var badge = document.createElement('span');
+      badge.className = 'chip'; badge.textContent = r.version;
+      li.appendChild(badge);
+    }
+    if (r.quote) {
+      var quote = document.createElement('div');
+      quote.className = 'quote'; quote.dir = 'auto'; quote.textContent = r.quote;
+      li.appendChild(quote);
+    }
+    return li;
+  }
+
+  function citeWritePaper(r) {
+    return post('/api/write/cite', { doc: W.doc.id, paper_id: r.paper_id, evidence_id: r.evidence_id || null })
+      .then(function (res) {
+        var sel = W.editor.selection();
+        var edit = insertCiteKey(W.editor.getText(), sel.to, res.key);
+        if (edit) W.editor.replace(edit.from, edit.to, edit.insert);
+        $('write-cite-panel').hidden = true;
+        toast('Cited ' + res.key + '; its entry is in references.bib');
+      }).catch(function (e) { toast(e.message); });
+  }
+
+  function showWriteQuote(key) {
+    return api('/api/write/quote?doc=' + encodeURIComponent(W.doc.id) + '&key=' + encodeURIComponent(key))
+      .then(function (data) {
+        var list = $('write-cite-results');
+        list.replaceChildren();
+        var head = document.createElement('li');
+        head.dir = 'auto';
+        head.textContent = key + ' · ' + (data.title || '') + (data.year ? ' (' + data.year + ')' : '');
+        list.appendChild(head);
+        if (!data.quotes.length) list.appendChild(citeNote('Cited from the library list, not from a quote.'));
+        data.quotes.forEach(function (q) {
+          var li = document.createElement('li');
+          var quote = document.createElement('div');
+          quote.className = 'quote'; quote.dir = 'auto'; quote.textContent = q.text;
+          var link = document.createElement('a');
+          link.href = '/api/papers/' + encodeURIComponent(data.paper_id) + '/pdf#page=' + q.page;
+          link.target = '_blank'; link.rel = 'noopener';
+          link.textContent = 'p.' + q.page + (q.version ? ' · ' + q.version : '');
+          li.appendChild(link); li.appendChild(quote);
+          list.appendChild(li);
+        });
+      }).catch(function (e) { toast(e.message); });
+  }
+
+  function maybeOpenCiteFromTyping() {
+    if (!W.editor) return;
+    var sel = W.editor.selection();
+    var before = W.editor.getText().slice(Math.max(0, sel.from - 12), sel.from);
+    if (/\\[a-zA-Z]*cite[a-zA-Z]*\{$/.test(before) && $('write-cite-panel').hidden) openWriteCite();
+  }
+
   function wireWrite() {
     $('write-create').onclick = createWriteDoc;
     $('write-new-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') createWriteDoc(); });
@@ -2203,6 +2347,12 @@
     $('write-delete').onclick = deleteWriteDoc;
     $('write-reload').onclick = reloadTheirs;
     $('write-keep').onclick = keepMine;
+    $('write-cite').onclick = openWriteCite;
+    $('write-cite-tab-lib').onclick = function () { setWriteCiteTab('library'); };
+    $('write-cite-tab-ev').onclick = function () { setWriteCiteTab('evidence'); };
+    $('write-cite-q').addEventListener('input', function () {
+      clearTimeout(CITE.timer); CITE.timer = setTimeout(searchWriteCite, 250);
+    });
     $('write-upload').onchange = function () { uploadWriteFigure($('write-upload').files[0]); $('write-upload').value = ''; };
     window.addEventListener('beforeunload', function (e) {
       if (W.doc && W.dirty) { saveWriteNow(); e.preventDefault(); e.returnValue = ''; }

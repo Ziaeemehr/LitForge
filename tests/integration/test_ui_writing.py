@@ -133,3 +133,26 @@ def test_tools_status_lists_tectonic(server) -> None:
     _, tools = call(base, "/api/tools")
     assert tools["tectonic"]["tectonic"]["installed"] is True
     assert call(base, "/api/tools/tectonic/install", {})[0] == 400  # size not confirmed
+
+
+def test_cite_routes_and_bib_sync(server) -> None:
+    base, app = server
+    conn = app.db()
+    pid = conn.execute("SELECT id FROM projects WHERE name='demo'").fetchone()[0]
+    conn.execute("""INSERT INTO papers(id,title,year,authors_json,created_at,updated_at)
+                    VALUES ('p1','Whole brain models',2020,'["Ann Lee"]','now','now')""")
+    conn.execute("INSERT INTO project_papers(project_id,paper_id,source,added_at) VALUES (?,'p1','manual','now')",
+                 (pid,))
+    conn.close()
+    doc = create(base)
+    status, found = call(base, f"/api/write/cite/search?doc={doc['id']}&q=brain")
+    assert status == 200 and [r["paper_id"] for r in found["results"]] == ["p1"]
+    status, cited = call(base, "/api/write/cite", {"doc": doc["id"], "paper_id": "p1"})
+    assert status == 200 and cited["key"] == "lee2020whole"
+    _, bib = call(base, f"/api/write/file?doc={doc['id']}&name=references.bib")
+    assert "@misc{lee2020whole," in bib["text"]
+    status, quotes = call(base, f"/api/write/quote?doc={doc['id']}&key=lee2020whole")
+    assert status == 200 and quotes["quotes"] == []
+    assert call(base, f"/api/write/quote?doc={doc['id']}&key=nokey")[0] == 404
+    assert call(base, "/api/write/cite", {"doc": doc["id"], "paper_id": "p1"},
+                headers={"Origin": "http://evil.example"})[0] == 403
