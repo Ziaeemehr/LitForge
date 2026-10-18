@@ -24,13 +24,14 @@ from litforge.discovery.versions import (
     VersionCandidate,
     format_version_label,
     infer_version,
-    link_versions,
+    link_project_versions,
+    other_record_doi,
+    printed_dois,
     rank_candidates,
-    suggest_similar_versions,
 )
 from litforge.indexing.fts import current_runs, index_run
 from litforge.ingest import ingest_file
-from litforge.metadata.extract import normalize_doi
+from litforge.metadata.extract import extract_metadata, normalize_doi
 from litforge.observability import NULL_LOG, EventLog
 from litforge.parsing.run import parse_artifact
 from litforge.projects import MARK_SCOPES, add_paper
@@ -249,55 +250,63 @@ def fetch_open_access(
         assert candidate is not None
         import pymupdf
 
-        from litforge.metadata.extract import extract_metadata
-
-        pdf = pymupdf.open(stream=body, filetype="pdf")
+        first_page_text, dois = "", []
         try:
-            pdf_meta = extract_metadata(pdf)
-            first_page_text = pdf[0].get_text() if pdf.page_count else ""
-        finally:
-            pdf.close()
-        pdf_doi = normalize_doi(str(pdf_meta.doi.value)) if pdf_meta.doi.value else None
+            pdf = pymupdf.open(stream=body, filetype="pdf")
+            try:
+                pdf_meta = extract_metadata(pdf)
+                first_page_text = pdf[0].get_text() if pdf.page_count else ""
+                # Its own DOI, wherever printed, and any it cites on the first two pages.
+                dois = list(dict.fromkeys(
+                    ([normalize_doi(str(pdf_meta.doi.value))] if pdf_meta.doi.value else []) + printed_dois(pdf)))
+            finally:
+                pdf.close()
+        except Exception:  # noqa: BLE001 - a damaged PDF falls through to ingest, which quarantines it
+            pass
         paper_doi = normalize_doi(str(row["doi"])) if row["doi"] else None
-        if paper_doi and pdf_doi and paper_doi != pdf_doi:
+        if paper_doi and dois and paper_doi not in dois:
             # Do not silently attach a repository preprint with its own DOI to a published record.
-            known = conn.execute(
-                "SELECT id FROM papers WHERE lower(doi)=lower(?) ORDER BY id LIMIT 1", (pdf_doi,)
-            ).fetchone()
-            if known and conn.execute(
-                "SELECT 1 FROM artifacts WHERE paper_id=? AND status='ok' LIMIT 1", (known["id"],)
-            ).fetchone():
+            other = other_record_doi(conn, str(row["id"]), paper_doi, dois)
+            if other is None:
+                # The DOI of a work outside the library: skip it rather than add a record nobody asked for.
+                report.failed.append(f"{label}: found a different work (PDF DOI {dois[0]}); "
+                                     "it was not attached to this record")
+                report.note(row, "failed", f"PDF identifies as DOI {dois[0]}, which is not in the library; "
+                            "selected record was left unchanged", [c.url for c in candidates])
+                continue
+            known_id, pdf_doi = other
+            if conn.execute("SELECT 1 FROM artifacts WHERE paper_id=? AND status='ok' LIMIT 1",
+                            (known_id,)).fetchone():
                 report.note(row, "skipped", f"PDF identifies as DOI {pdf_doi}; its known record already has a PDF")
                 continue
             tmp = tmp_dir / f"{row['id']}.pdf"
             tmp.write_bytes(body)
             try:
-                result = ingest_file(conn, paths, tmp, None, log=log, paper_id=str(known["id"]) if known else None)
+                result = ingest_file(conn, paths, tmp, None, log=log, paper_id=known_id)
             finally:
                 tmp.unlink(missing_ok=True)
-            if result.artifact_id:
+            version = version_source = None
+            # Only a PDF this fetch attached gets its labels: never overwrite an existing artifact's.
+            if result.status == "new" and result.artifact_id and result.paper_id == known_id:
                 version, version_source = infer_version(candidate.url, candidate.version, candidate.version_source,
                                                         first_page_text)
                 version_label = format_version_label(version, candidate.url)
                 if version == "submitted" and candidate.version == "accepted":
                     version_label = f"{version_label} (author-updated)" if version_label else version_label
                 conn.execute("UPDATE artifacts SET version=?,version_source=?,source_url=?,version_label=? WHERE id=?",
-                             (version, version_source, candidate.url,
-                              version_label, result.artifact_id))
-                if result.paper_id and result.paper_id != row["id"]:
-                    stored = conn.execute("SELECT doi FROM papers WHERE id=?", (result.paper_id,)).fetchone()
-                    if stored and stored["doi"] and stored["doi"].lower() == pdf_doi.lower():
-                        add_paper(conn, project_id, result.paper_id, "discovery")
-                        artifact = conn.execute("SELECT * FROM artifacts WHERE id=?", (result.artifact_id,)).fetchone()
-                        parse_artifact(conn, paths, config, artifact, log=log)
-                        new_artifacts.add(result.artifact_id)
-                        report.downloaded += 1
+                             (version, version_source, candidate.url, version_label, result.artifact_id))
+                add_paper(conn, project_id, known_id, "discovery")
+                artifact = conn.execute("SELECT * FROM artifacts WHERE id=?", (result.artifact_id,)).fetchone()
+                parse_artifact(conn, paths, config, artifact, log=log)
+                new_artifacts.add(result.artifact_id)
+                report.downloaded += 1
             report.failed.append(
                 f"{label}: found a different work (PDF DOI {pdf_doi}); it was not attached to this record")
             report.note(row, "failed", f"PDF identifies as DOI {pdf_doi}; selected record was left unchanged",
                         [c.url for c in candidates])
-            report.items[-1]["version"] = version
-            report.items[-1]["version_source"] = version_source
+            if version:
+                report.items[-1]["version"] = version
+                report.items[-1]["version_source"] = version_source
             continue
         tmp = tmp_dir / f"{row['id']}.pdf"
         tmp.write_bytes(body)
@@ -350,6 +359,5 @@ def fetch_open_access(
         for run in current_runs(conn, project_id):
             if run["artifact_id"] in new_artifacts:
                 index_run(conn, paths, config, run)
-        link_versions(conn, api_http, mailto)
-        suggest_similar_versions(conn)
+        link_project_versions(conn, api_http, mailto, project_id)
     return report

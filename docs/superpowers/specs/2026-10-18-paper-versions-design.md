@@ -24,8 +24,12 @@ presented as the published version.
 
 ## 2. Download the best version
 
-- `fetch` orders candidates published > accepted > submitted > unknown, arXiv included in that order (arXiv is
-  `submitted` unless OpenAlex says otherwise). Within a rank keep today's preference (direct PDF links first).
+- `fetch` orders candidates published > accepted > submitted > unknown, arXiv included in that order. Within a
+  rank keep today's preference (direct PDF links first).
+- A copy on a preprint server (arXiv, bioRxiv, medRxiv, SSRN, Research Square, OSF/PsyArXiv, chemRxiv,
+  Preprints.org) is always a preprint (`submitted`), whatever OpenAlex or Unpaywall claim (they may call it
+  `publishedVersion` or `acceptedVersion`); only a user override changes it. Likewise a record whose own DOI is a
+  preprint-server DOI is a preprint record.
 - If the best copy available is a draft, it is still downloaded (better than nothing), but labelled.
 - Report and UI say which version was downloaded ("preprint downloaded; the published version is not openly
   available").

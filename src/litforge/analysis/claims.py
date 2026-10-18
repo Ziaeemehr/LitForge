@@ -96,7 +96,8 @@ def paper_runs(conn: sqlite3.Connection, project_id: str, paper_ids: list[str] |
     members = {r[0] for r in conn.execute("SELECT paper_id FROM project_papers WHERE project_id=?", (project_id,))}
     if paper_ids is not None and set(paper_ids) - members:
         raise ValueError("selected paper is outside project")
-    primary = None if all_versions else primary_paper_ids(conn, project_id)
+    # Explicitly selected papers are included even when another version is the primary.
+    primary = None if all_versions or paper_ids is not None else primary_paper_ids(conn, project_id)
     return {r["paper_id"]: r for r in sorted(current_runs(conn, project_id),
                                              key=lambda r: (r["created_at"], r["id"]))
             if (paper_ids is None or r["paper_id"] in paper_ids) and

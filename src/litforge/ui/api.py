@@ -31,6 +31,7 @@ from litforge.discovery.versions import (
     role_for_paper,
     set_artifact_version,
     version_display,
+    version_summaries,
     versions_for_paper,
 )
 from litforge.export.markdown import default_export_dir
@@ -107,15 +108,14 @@ def library(conn: sqlite3.Connection, limit: int = 5000, include_versions: bool 
         (limit,),
     ).fetchall()
     primary = primary_paper_ids(conn)
+    versions = version_summaries(conn)  # the versions list itself is in the paper detail
     return [{
         "id": r["id"], "title": r["title"], "year": r["year"], "venue": r["venue"], "doi": r["doi"],
         "arxiv_id": r["arxiv_id"], "oa_url": r["oa_url"], "cited_by_count": r["cited_by_count"],
         "authors": (json.loads(r["authors_json"]) if r["authors_json"] else [])[:4], "has_pdf": bool(r["has_pdf"]),
         "projects": sorted(r["projects"].split("|")) if r["projects"] else [],
         "unused": bool(r["unused"]),
-        "primary": r["id"] in primary, "version": version_display(conn, r["id"]) or role_for_paper(conn, r["id"]),
-        "pdf_version": version_display(conn, r["id"]), "version_role": role_for_paper(conn, r["id"]),
-        "versions": versions_for_paper(conn, r["id"]), "pdf_warning": pdf_warning(conn, r["id"]),
+        "primary": r["id"] in primary, **versions[r["id"]],
     } for r in rows if include_versions or r["id"] in primary]
 
 
@@ -216,6 +216,7 @@ def run_results(conn: sqlite3.Connection, run_id: str, all_versions: bool = Fals
         channels.setdefault(h["paper_id"], set()).add(h["relation"])
         sources.setdefault(h["paper_id"], set()).add(h["source"])
     papers = []
+    versions = version_summaries(conn)
     for r in rows:
         authors = json.loads(r["authors_json"]) if r["authors_json"] else []
         components = json.loads(r["components_json"])
@@ -225,8 +226,7 @@ def run_results(conn: sqlite3.Connection, run_id: str, all_versions: bool = Fals
             "retracted": bool(r["is_retracted"]), "citation_percentile": r["citation_percentile"],
             "title": r["title"], "year": r["year"], "venue": r["venue"],
             "doi": r["doi"], "arxiv_id": r["arxiv_id"], "openalex_id": r["openalex_id"], "oa_url": r["oa_url"],
-            "version": version_display(conn, r["paper_id"]) or role_for_paper(conn, r["paper_id"]),
-            "version_role": role_for_paper(conn, r["paper_id"]),
+            "version": versions[r["paper_id"]]["version"], "version_role": versions[r["paper_id"]]["version_role"],
             "cited_by_count": r["cited_by_count"], "has_pdf": bool(r["has_pdf"]), "mark": r["mark"],
             "new_to_project": bool(r["new_to_project"]), "reasons": json.loads(r["reasons_json"]),
             "components": components, "channels": sorted(channels.get(r["paper_id"], [])),

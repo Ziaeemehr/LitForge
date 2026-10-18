@@ -31,13 +31,13 @@ from litforge.discovery.textsim import load_embedder
 from litforge.discovery.versions import (
     backfill_unknown_versions,
     confirm_version_link,
-    link_versions,
+    link_project_versions,
     pdf_warning,
     primary_paper_ids,
     reject_version_link,
     set_artifact_version,
     set_primary,
-    suggest_similar_versions,
+    unlink_version,
 )
 from litforge.doctor import run_checks
 from litforge.export.markdown import export_markdown
@@ -959,15 +959,28 @@ def versions_link(ctx: typer.Context, project: ProjectOpt = None) -> None:
     st = _state(ctx)
     conn = st.db()
     try:
-        _project(st, conn, project)
+        # The whole library unless --project names one (the active project does not narrow it).
+        pid = _project(st, conn, project)[1] if project else None
         http = HttpClient(cache_dir=st.paths.http_cache,
                           cache_ttl_s=st.config.discovery.cache_ttl_days * 86400)
-        linked = link_versions(conn, http, contact_email(st.paths, st.config))
-        suggested = suggest_similar_versions(conn)
+        linked, suggested = link_project_versions(conn, http, contact_email(st.paths, st.config), pid)
         # PDFs attached before versions were tracked: read their first page (offline, never moves a PDF).
-        checked = backfill_unknown_versions(conn, st.paths)
+        checked, skipped = backfill_unknown_versions(conn, st.paths)
         typer.echo(f"linked {linked} explicit version relationships; added {suggested} suggestions; "
-                   f"labelled {checked} earlier PDFs from their first page")
+                   f"labelled {checked} earlier PDFs from their first page"
+                   + (f"; skipped {skipped} missing or unreadable PDFs" if skipped else ""))
+    finally:
+        conn.close()
+
+
+@versions_app.command("unlink")
+def versions_unlink(ctx: typer.Context, paper: str) -> None:
+    """Remove a paper from its version group and remember that it is a different work."""
+    conn = _state(ctx).db()
+    try:
+        if not unlink_version(conn, paper):
+            raise typer.BadParameter("this paper is not in a confirmed version group")
+        typer.echo(f"unlinked versions: {paper}")
     finally:
         conn.close()
 

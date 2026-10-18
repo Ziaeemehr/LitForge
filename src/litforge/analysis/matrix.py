@@ -216,7 +216,8 @@ class _Work(BaseModel):
 def _work(conn: sqlite3.Connection, gateway: ModelGateway, matrix: Matrix, paper_ids: list[str] | None,
           profile: str | None, force: bool, all_versions: bool = False) -> Iterator[_Work]:
     existing = {(c.paper_id, c.column_key): c for c in matrix.cells}
-    primary = None if all_versions else primary_paper_ids(conn, matrix.project_id)
+    # Explicitly selected papers are included even when another version is the primary.
+    primary = None if all_versions or paper_ids is not None else primary_paper_ids(conn, matrix.project_id)
     # One current parse per paper; deterministic when a paper has multiple artifacts.
     runs = {r["paper_id"]: r for r in sorted(current_runs(conn, matrix.project_id),
                                              key=lambda r: (r["created_at"], r["id"]))

@@ -913,9 +913,17 @@
     parent.replaceChildren();
     var peers = d.versions || [];
     if (!peers.length) parent.appendChild(lensNode('p', d.version || 'No linked versions.', 'hint'));
-    if (d.versions && d.versions.some(function (v) { return v.confirmed; }) && !d.primary) {
+    var linked = peers.some(function (v) { return v.confirmed && v.paper_id !== d.id; });
+    if (linked && !d.primary) {
       parent.appendChild(lensButton('Set this version as primary', function () {
         post('/api/versions/set-primary', { paper_id: d.id }).then(function () {
+          return loadLibrary().then(function () { openDrawer(paper); });
+        }).catch(function (e) { toast(e.message); });
+      }, 'btn small'));
+    }
+    if (linked) {
+      parent.appendChild(lensButton('Unlink: a different work', function () {
+        post('/api/versions/unlink', { paper_id: d.id }).then(function () {
           return loadLibrary().then(function () { openDrawer(paper); });
         }).catch(function (e) { toast(e.message); });
       }, 'btn small'));
@@ -946,7 +954,18 @@
     });
     var discover = lensButton('Find version links', function () {
       discover.disabled = true;
-      post('/api/versions/link', {}).then(function () {
+      // A background job: registry lookups can take a while.
+      post('/api/versions/link', { project: state.project || '' }).then(function (job) {
+        return new Promise(function (resolve, reject) {
+          (function poll() {
+            api('/api/jobs/' + encodeURIComponent(job.id)).then(function (j) {
+              if (j.status === 'running') { setTimeout(poll, 700); return; }
+              if (j.status === 'failed') { reject(new Error(j.error || 'Version linking failed')); return; }
+              resolve(j);
+            }).catch(reject);
+          })();
+        });
+      }).then(function () {
         return api('/api/papers/' + encodeURIComponent(d.id) + '?project=' +
           encodeURIComponent(state.project || '')).then(function (fresh) {
           if (request === drawerRequest) renderPaperVersions(parent, fresh, paper, request);
@@ -2506,7 +2525,11 @@
     else if (view === 'ask') renderLensAnswer(); else loadLensMatrices();
   }
 
-  function confirmLensPreview(plan) {
+  function lensVersionScope(allVersions) {
+    return allVersions ? 'all versions' : 'primary versions only';
+  }
+
+  function confirmLensPreview(plan, allVersions) {
     return new Promise(function (resolve) {
       var dialog = $('lens-preview');
       $('lens-preview-title').textContent = plan.remote ? 'Send evidence to a remote model?' : 'Run this action?';
@@ -2518,6 +2541,7 @@
         '\nModel: ' + plan.models.join(', ') + '\nCalls: ' + plan.number_of_calls + '\nEvidence spans: ' + plan.evidence_ids_count +
         '\nEstimated input tokens: ' + plan.estimated_input_tokens + '\nMaximum cost: ' +
         (plan.max_cost_usd == null ? 'unknown' : '$' + plan.max_cost_usd.toFixed(4)) +
+        '\nVersions: ' + lensVersionScope(allVersions) +
         ((plan.model_notices || []).length ? '\n' + plan.model_notices.join('\n') : '');
       dialog.returnValue = '';
       dialog.onclose = function () { resolve(dialog.returnValue === 'approved'); };
@@ -2543,13 +2567,14 @@
     if (lens.busy || !state.project) return;
     var project = state.project, statusNode = $(statusId);
     var body = Object.assign({ task: task, project: project }, extra);
-    body.all_versions = state.libraryAllVersions;
+    // Each run chooses its own scope; the library's "Show all versions" view toggle never widens it.
+    body.all_versions = !!(extra && extra.all_versions === true);
     lensBusy(true);
     $('lens-ask-status').textContent = ''; $('lens-matrix-status').textContent = '';
     $('lens-run-audit').disabled = true;
     post('/api/preview', body).then(function (plan) {
       if (plan.blocked_reasons.length) throw new Error('Action blocked: ' + plan.blocked_reasons.join(', '));
-      if (plan.remote || plan.requires_approval) return confirmLensPreview(plan);
+      if (plan.remote || plan.requires_approval) return confirmLensPreview(plan, body.all_versions);
       // Local only: nothing leaves the computer, so inform without blocking (e.g. "starts llama-server").
       if ((plan.model_notices || []).length) statusNode.textContent = plan.model_notices.join(' · ');
       return null;
@@ -2557,6 +2582,7 @@
       if (approved === false || project !== state.project) { lensBusy(false); return; }
       if (approved === true) body.approved = true;
       if (!statusNode.textContent) statusNode.textContent = 'Starting…';
+      if (task !== 'audit') statusNode.textContent += ' · ' + lensVersionScope(body.all_versions);
       return post(path, body).then(function (job) {
         (function tick() {
           api('/api/jobs/' + job.id).then(function (j) {
@@ -2977,7 +3003,7 @@
     $('living-refresh').onclick = refreshLivingProject;
     $('lens-claims-extract').onclick = function () {
       startLensTask('claim_extract', '/api/claims/extract', { profile: $('lens-claims-profile').value || null,
-        force: $('lens-claims-force').checked }, 'lens-claims-status');
+        force: $('lens-claims-force').checked, all_versions: $('lens-claims-all-versions').checked }, 'lens-claims-status');
     };
     $('lens-claims-cluster').onclick = function () {
       if (!state.project || lens.busy) return;
@@ -2993,7 +3019,7 @@
     $('lens-screen-fulltext').onclick = function () {
       saveCriteria().then(function () {
         startLensTask('screen_fulltext', '/api/screen-fulltext', { profile: $('lens-screen-profile').value || null,
-          top: Number($('screen-n').value) }, 'lens-screen-status');
+          top: Number($('screen-n').value), all_versions: $('lens-screen-all-versions').checked }, 'lens-screen-status');
       }).catch(function (e) { toast(e.message); });
     };
 
@@ -3002,7 +3028,8 @@
     $('lens-more-column').onclick = function () { lensColumnEditor($('lens-columns'), true); };
     $('lens-ask-form').onsubmit = function (e) {
       e.preventDefault(); startLensTask('ask', '/api/ask', { question: $('lens-question').value,
-        profile: $('lens-profile').value.trim() || null, sensitive: $('lens-sensitive').checked }, 'lens-ask-status', $('lens-auto-audit').checked);
+        profile: $('lens-profile').value.trim() || null, sensitive: $('lens-sensitive').checked,
+        all_versions: $('lens-all-versions').checked }, 'lens-ask-status', $('lens-auto-audit').checked);
     };
     $('lens-run-audit').onclick = function () {
       if (!lens.answer) { toast('Ask a question first'); return; }
@@ -3041,7 +3068,8 @@
     $('lens-extract').onclick = function () {
       if (!lens.matrix) return;
       startLensTask('matrix_extract', '/api/matrices/' + encodeURIComponent(lens.matrix.id) + '/extract',
-        { matrix_id: lens.matrix.id, profile: $('lens-matrix-profile').value.trim() || null, force: $('lens-force').checked }, 'lens-matrix-status');
+        { matrix_id: lens.matrix.id, profile: $('lens-matrix-profile').value.trim() || null, force: $('lens-force').checked,
+          all_versions: $('lens-matrix-all-versions').checked }, 'lens-matrix-status');
     };
   }
 

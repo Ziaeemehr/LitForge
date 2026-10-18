@@ -151,11 +151,12 @@ def search(
     parse_run_id: str | None = None,
     all_versions: bool = False,
 ) -> list[SearchHit]:
-    if not all_versions:
-        from litforge.discovery.versions import primary_paper_ids
+    hidden: set[str] = set()
+    if not all_versions and paper_ids is None:
+        # Explicit paper_ids are the caller's choice (a project's own primary may differ from the library's).
+        from litforge.discovery.versions import hidden_version_ids
 
-        primary = primary_paper_ids(conn, project_id)
-        paper_ids = list(primary if paper_ids is None else primary.intersection(paper_ids))
+        hidden = hidden_version_ids(conn, project_id)
     if paper_ids == [] or limit <= 0 or max_per_paper <= 0:
         return []
     builder = build_any_match if any_terms else build_match
@@ -179,6 +180,9 @@ def search(
     if paper_ids is not None:
         sql += " AND c.paper_id IN (" + ",".join("?" for _ in paper_ids) + ")"
         params.extend(paper_ids)
+    if hidden:
+        sql += " AND c.paper_id NOT IN (" + ",".join("?" for _ in hidden) + ")"
+        params.extend(sorted(hidden))
     if parse_run_id is not None:
         sql += " AND c.parse_run_id=?"
         params.append(parse_run_id)

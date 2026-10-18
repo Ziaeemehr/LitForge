@@ -745,3 +745,55 @@ def test_library_cleanup_all_unused_opt_in(lens_server: LensServer) -> None:
         conn.execute("INSERT INTO papers(id,title,created_at,updated_at) VALUES ('unused','Unused','now','now')")
         status, report = server.call('/api/library/remove', {'all_unused': True})
         assert status == 200 and 'unused' in report['removed']
+
+
+def test_version_endpoints_link_in_background_and_unlink_with_origin_guard(lens_server: LensServer) -> None:
+    from litforge.discovery.versions import link_explicit_versions, primary_paper_ids
+    server = lens_server
+    conn = server.app.db()
+    try:
+        for paper, doi in (('pub', '10.7554/elife.106194'), ('pre', '10.1101/2024.01.01.123456')):
+            conn.execute("INSERT INTO papers(id,title,doi,created_at,updated_at) VALUES (?,?,?,'now','now')",
+                         (paper, 'Version ' + paper, doi))
+        link_explicit_versions(conn, {'10.7554/elife.106194': [
+            {'id-type': 'doi', 'id': '10.1101/2024.01.01.123456', 'relation': 'has-preprint'}]})
+        conn.commit()
+        lookups: list[str] = []
+
+        class Offline:
+            def get_json(self, url: str) -> Any:
+                lookups.append(url)
+                raise OSError('offline')
+
+            def url(self, base: str, params: dict[str, Any]) -> str:
+                return base
+
+        server.app.make_http = Offline  # type: ignore[assignment]
+        job = server.job('/api/versions/link', {'project': 'demo'})
+        assert job['kind'] == 'versions-link' and job['status'] == 'done', job
+        assert job['report'] == {'linked': 0, 'suggested': 0}
+        assert lookups == []  # scoped to the project, whose paper has no DOI
+        assert server.call('/api/versions/unlink', {'paper_id': 'pre'}, origin='https://evil.example')[0] == 403
+        assert primary_paper_ids(conn) == {'p', 'pub'}
+        assert server.call('/api/versions/unlink', {'paper_id': 'pre'})[0] == 200
+        assert primary_paper_ids(conn) == {'p', 'pub', 'pre'}
+        assert server.call('/api/versions/unlink', {'paper_id': 'pre'})[0] == 400
+    finally:
+        conn.close()
+
+
+def test_matrix_job_report_honours_the_runs_version_scope(lens_server: LensServer) -> None:
+    server = lens_server
+    conn = server.app.db()
+    try:
+        seed(conn, paper='q')
+        for paper, primary in (('p', 1), ('q', 0)):
+            conn.execute("INSERT INTO paper_versions(group_id,paper_id,role,evidence,confirmed,is_primary,created_at)"
+                         " VALUES ('g',?,'published','test',1,?,'now')", (paper, primary))
+        conn.commit()
+    finally:
+        conn.close()
+    path, body = task_request(server, 'matrix_extract')
+    job = server.job(path, {**body, 'all_versions': True})
+    assert job['status'] == 'done', job
+    assert {c['paper_id'] for c in job['report']['cells']} == {'p', 'q'}

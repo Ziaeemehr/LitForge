@@ -159,12 +159,11 @@ def test_preprint_with_its_own_doi_is_not_attached_to_published_record(
     )
 
     assert conn.execute("SELECT COUNT(*) FROM artifacts WHERE paper_id=?", ("h" * 32,)).fetchone()[0] == 0
-    other = conn.execute("SELECT a.version,a.version_source,p.doi FROM artifacts a JOIN papers p ON p.id=a.paper_id "
-                         "WHERE a.paper_id != ?", ("h" * 32,)).fetchall()
-    # The distinct PDF is retained under its own extracted DOI rather than the publisher record.
-    assert any(r["doi"] == "10.1234/synthetic.5678" and r["version"] == "submitted"
-               and r["version_source"] == "host" for r in other)
+    # The PDF names a DOI that is not in the library: it is skipped, and no record is created for it.
+    assert conn.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0] == 1
     assert "different work" in report.failed[0]
+    assert "not in the library" in report.items[0]["reason"]
 
 
 def _pdf_with_text(text: str) -> bytes:
@@ -233,3 +232,64 @@ def test_preprint_host_overrides_accepted_openalex_label(
                             "WHERE paper_id=?", ("a" * 32,)).fetchone()
     assert tuple(artifact) == ("submitted", "host", "bioRxiv preprint (author-updated)")
     assert report.items[0]["version"] == "submitted"
+
+
+def test_pdf_citing_a_library_paper_on_page_one_stays_with_its_own_record(
+    conn: sqlite3.Connection, paths: Paths, config: Config
+) -> None:
+    pid = create_project(conn, paths, "cites")
+    _paper(conn, pid, "o" * 32, "Own record", oa_url="https://pub.example/own.pdf")
+    _paper(conn, pid, "k" * 32, "Cited record")
+    conn.execute("UPDATE papers SET doi='10.5555/own' WHERE id=?", ("o" * 32,))
+    conn.execute("UPDATE papers SET doi='10.5555/cited' WHERE id=?", ("k" * 32,))
+    api.set_marks(conn, "cites", ["o" * 32], "relevant")
+    transport = FakeTransport([("pub.example/own.pdf", (200, {}, _pdf_with_text(
+        "As shown before [1] (doi:10.5555/cited).\nThis article: https://doi.org/10.5555/own")))])
+
+    report = fetch_open_access(conn, paths, config, HttpClient(transport=transport, sleep=lambda _: None), pid)
+
+    assert report.downloaded == 1 and not report.failed
+    assert [r[0] for r in conn.execute("SELECT paper_id FROM artifacts")] == ["o" * 32]
+
+
+def test_damaged_pdf_is_quarantined_without_stopping_the_batch(
+    conn: sqlite3.Connection, paths: Paths, config: Config, corpus: Path
+) -> None:
+    pid = create_project(conn, paths, "damaged")
+    _paper(conn, pid, "1" * 32, "A damaged copy", oa_url="https://pub.example/broken.pdf")
+    _paper(conn, pid, "2" * 32, "A good copy", oa_url="https://pub.example/good.pdf")
+    api.set_marks(conn, "damaged", ["1" * 32, "2" * 32], "relevant")
+    transport = FakeTransport([
+        ("pub.example/broken.pdf", (200, {}, b"%PDF-1.4\n garbage garbage")),
+        ("pub.example/good.pdf", (200, {}, (corpus / "single_column.pdf").read_bytes())),
+    ])
+
+    report = fetch_open_access(conn, paths, config, HttpClient(transport=transport, sleep=lambda _: None), pid)
+
+    assert report.downloaded == 1
+    assert conn.execute("SELECT COUNT(*) FROM artifacts WHERE status='quarantined'").fetchone()[0] == 1
+    assert [r[0] for r in conn.execute("SELECT paper_id FROM artifacts WHERE status='ok'")] == ["2" * 32]
+
+
+def test_doi_mismatch_never_relabels_an_existing_artifact(
+    conn: sqlite3.Connection, paths: Paths, config: Config
+) -> None:
+    import hashlib
+
+    pid = create_project(conn, paths, "existing")
+    _paper(conn, pid, "r" * 32, "Published record", oa_url="https://biorxiv.org/copy.pdf")
+    _paper(conn, pid, "k" * 32, "Preprint record")
+    _paper(conn, pid, "z" * 32, "Record already holding this file")
+    conn.execute("UPDATE papers SET doi='10.5555/published' WHERE id=?", ("r" * 32,))
+    conn.execute("UPDATE papers SET doi='10.1101/2025.01.21.633922' WHERE id=?", ("k" * 32,))
+    api.set_marks(conn, "existing", ["r" * 32], "relevant")
+    body = _pdf_with_text("bioRxiv preprint\nDOI: 10.1101/2025.01.21.633922")
+    conn.execute("INSERT INTO artifacts(id,paper_id,sha256,pdf_path,size_bytes,version,version_source,status,"
+                 "created_at) VALUES ('kept','zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',?,'kept.pdf',1,'published','user',"
+                 "'ok',?)", (hashlib.sha256(body).hexdigest(), now()))
+    transport = FakeTransport([("biorxiv.org/copy.pdf", (200, {}, body))])
+
+    fetch_open_access(conn, paths, config, HttpClient(transport=transport, sleep=lambda _: None), pid)
+
+    kept = conn.execute("SELECT version,version_source,source_url FROM artifacts WHERE id='kept'").fetchone()
+    assert tuple(kept) == ("published", "user", None)

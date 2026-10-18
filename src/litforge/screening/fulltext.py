@@ -101,7 +101,8 @@ def _work(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, top:
     if c.is_empty():
         raise ValueError("no screening criteria: fill in the research question first")
     runs = paper_runs(conn, project_id, paper_ids, all_versions)
-    primary = None if all_versions else primary_paper_ids(conn, project_id)
+    # Explicitly selected papers are included even when another version is the primary.
+    primary = None if all_versions or paper_ids is not None else primary_paper_ids(conn, project_id)
     papers = [r[0] for r in conn.execute("SELECT pp.paper_id FROM project_papers pp JOIN papers p ON p.id=pp.paper_id "
               "WHERE pp.project_id=? ORDER BY COALESCE((SELECT MAX(COALESCE(d.priority,d.score)) "
               "FROM discovery_results d JOIN discovery_runs r ON r.id=d.run_id "

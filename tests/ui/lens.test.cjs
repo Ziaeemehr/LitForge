@@ -330,3 +330,31 @@ test('the partial-quote flag is labelled and neutral, not a warning', async () =
   assert.deepEqual(badges.map(b => b.textContent), ['Not every citation quoted', 'No exact quote']);
   assert.deepEqual(badges.map(b => b.className), ['badge neutral', 'badge warning']);
 });
+
+test('each run picks its own version scope; the library view toggle never widens it', async () => {
+  const { ctx, $, calls } = setup();
+  ctx.state.libraryAllVersions = true;
+  let status = '';
+  const post = ctx.post;
+  ctx.post = async (path, body) => { if (path === '/api/ask') status = $('lens-ask-status').textContent; return post(path, body); };
+  ctx.startLensTask('ask', '/api/ask', { question: 'Q' }, 'lens-ask-status', false);
+  await flush();
+  assert.equal(calls.find(c => c.path === '/api/ask').body.all_versions, false);
+  assert.match(status, /primary versions only/);
+  calls.length = 0;
+  ctx.startLensTask('ask', '/api/ask', { question: 'Q', all_versions: true }, 'lens-ask-status', false);
+  await flush();
+  assert.equal(calls.find(c => c.path === '/api/ask').body.all_versions, true);
+});
+
+test('the run confirmation states the version scope', async () => {
+  const { ctx, $ } = setup();
+  $('lens-preview').showModal = () => {};
+  $('lens-preview').close = () => {};
+  const plan = { remote: true, profiles: ['paid'], providers: ['remote'], models: ['m'], number_of_calls: 1,
+    evidence_ids_count: 1, estimated_input_tokens: 10, max_cost_usd: 0.01 };
+  ctx.confirmLensPreview(plan, false);
+  assert.match($('lens-preview-content').textContent, /Versions: primary versions only/);
+  ctx.confirmLensPreview(plan, true);
+  assert.match($('lens-preview-content').textContent, /Versions: all versions/);
+});

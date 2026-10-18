@@ -46,10 +46,10 @@ from litforge.discovery.similar import run_similar
 from litforge.discovery.textsim import Embedder, load_embedder
 from litforge.discovery.versions import (
     confirm_version_link,
-    link_versions,
+    link_project_versions,
     reject_version_link,
     set_primary,
-    suggest_similar_versions,
+    unlink_version,
 )
 from litforge.export.markdown import default_export_dir, export_markdown
 from litforge.ingest import IngestResult
@@ -454,7 +454,7 @@ class App:
                 result = matrices.extract_matrix(conn, gateway, request.matrix_id, request.paper_ids,
                                                   request.profile, request.approved, request.force,
                                                   request.all_versions)
-                job.report = api.lens_matrix(conn, request.matrix_id)
+                job.report = api.lens_matrix(conn, request.matrix_id, request.all_versions)
                 job.report['stats'] = {
                     'extracted': sum(c.run_id == result.run_id for c in result.cells),
                     'cached': sum(c.run_id != result.run_id for c in result.cells),
@@ -468,6 +468,28 @@ class App:
                 conn.close()
 
         return self.start_job(request.task, project, work)
+
+    def versions_link_job(self, body: dict[str, Any]) -> Job:
+        """Link versions in the background: online registry lookups can take a while."""
+        project = str(body.get("project") or "")
+        conn = self.db()
+        try:
+            pid = get_project_id(conn, project) if project else None
+        finally:
+            conn.close()
+
+        def work(job: Job) -> None:
+            conn = self.db()
+            try:
+                job.messages.append("looking up version links")
+                linked, suggested = link_project_versions(conn, self.make_http(),
+                                                          contact_email(self.paths, self.config), pid)
+                job.report = {"linked": linked, "suggested": suggested}
+                job.messages.append(f"done: {linked} links, {suggested} suggestions")
+            finally:
+                conn.close()
+
+        return self.start_job("versions-link", project, work)
 
     def console_job(self, run_id: str, project: str, approved_cloud: bool = False) -> Job:
         def work(job: Job) -> str:
@@ -1086,14 +1108,16 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         return self._json({"ok": True})
                     finally:
                         conn.close()
-                if url.path == "/api/versions/link":
+                if url.path == "/api/versions/unlink":
                     conn = app.db()
                     try:
-                        linked = link_versions(conn, app.make_http(), contact_email(app.paths, app.config))
-                        suggested = suggest_similar_versions(conn)
-                        return self._json({"linked": linked, "suggested": suggested})
+                        if not unlink_version(conn, str(body.get("paper_id") or "")):
+                            raise ValueError("this paper is not in a confirmed version group")
+                        return self._json({"ok": True})
                     finally:
                         conn.close()
+                if url.path == "/api/versions/link":
+                    return self._json(app.versions_link_job(body).__dict__)
                 if url.path == "/api/keys":
                     app.keys.set(body.get("name"), body.get("value"))
                     return self._json({"ok": True})

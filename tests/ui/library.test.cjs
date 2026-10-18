@@ -64,6 +64,25 @@ test('Version drawer provides primary and suggestion actions without HTML interp
   assert.match(app, /Reject/);
   assert.match(app, /\/api\/versions\/set-primary/);
 });
+test('Linked versions can be unlinked and version linking runs as a job', async () => {
+  const { ctx, calls } = setup();
+  ctx.drawerRequest = 0;
+  const nodes = [];
+  const parent = { replaceChildren() {}, appendChild: n => nodes.push(n) };
+  vm.runInContext(app.slice(app.indexOf('  function renderPaperVersions('), app.indexOf('  function closeDrawer(')), ctx);
+  ctx.renderPaperVersions(parent, { id: 'p', primary: true, versions: [
+    { paper_id: 'p', role: 'published', confirmed: true, is_primary: true },
+    { paper_id: 'q', role: 'preprint', confirmed: true }] }, { id: 'p' }, 0);
+  const unlink = nodes.find(n => /Unlink/.test(n.textContent));
+  assert.ok(unlink);
+  unlink.onclick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls.find(c => c[1] === '/api/versions/unlink'), ['POST', '/api/versions/unlink', { paper_id: 'p' }]);
+  ctx.post = async (url, body) => { calls.push(['POST', url, body]); return { id: 'job1' }; };
+  nodes.find(n => n.textContent === 'Find version links').onclick();
+  for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.ok(calls.some(c => c[0] === 'GET' && c[1] === '/api/jobs/job1'));
+});
 test('Removal dialog shows preview counts, irreversible warning, posts preview IDs and refreshes', async () => {
   const { ctx, calls, messages } = setup();
   await ctx.removeLibraryPapers();

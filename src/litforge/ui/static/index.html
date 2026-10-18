@@ -297,6 +297,7 @@
           <select id="lens-profile" aria-label="Model profile"><option value="">Configured default</option></select>
           <label class="check"><input type="checkbox" id="lens-sensitive"> Sensitive content</label>
           <label class="check"><input type="checkbox" id="lens-auto-audit" checked> Audit after answering</label>
+          <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-all-versions"> All versions</label>
           <button class="btn accent" type="submit" data-lens-work>Ask library</button>
           <button class="btn" type="button" id="lens-run-audit" data-lens-work>Run audit</button>
         </div>
@@ -319,6 +320,7 @@
         <label class="f" for="lens-claims-profile">Model profile</label>
         <select id="lens-claims-profile" aria-label="Claims model profile"><option value="">Configured default</option></select>
         <label class="check"><input type="checkbox" id="lens-claims-force"> Re-extract cached claims</label>
+        <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-claims-all-versions"> All versions</label>
         <button class="btn accent" id="lens-claims-extract" data-lens-work>Extract claims</button>
         <button class="btn" id="lens-claims-cluster" data-lens-work>Cluster claims</button>
         <label class="f" for="lens-claims-pairs">Pair limit</label><input type="number" id="lens-claims-pairs" min="1" value="200">
@@ -363,6 +365,7 @@
         <div class="lens-actions">
           <label class="f" for="lens-matrix-profile">Model profile</label><select id="lens-matrix-profile" aria-label="Matrix model profile"><option value="">Configured default</option></select>
           <label class="check"><input type="checkbox" id="lens-force"> Re-extract cached cells</label>
+          <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-matrix-all-versions"> All versions</label>
           <button class="btn accent" id="lens-extract" data-lens-work>Extract</button>
           <span id="lens-exports" class="lens-actions"></span>
         </div>
@@ -443,6 +446,7 @@
             <span class="hint" id="screen-model"></span>
             <label for="lens-screen-profile">Full-text model profile</label>
             <select id="lens-screen-profile" aria-label="Full-text model profile"><option value="">Configured default</option></select>
+            <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-screen-all-versions"> All versions</label>
             <button class="btn small" id="lens-screen-fulltext" data-lens-work>Screen full text (S2)</button>
             <span class="hint" id="lens-screen-status" role="status" aria-live="polite"></span>
           </div>
