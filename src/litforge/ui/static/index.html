@@ -21,6 +21,7 @@
   <button class="nav-item" data-view="claims" title="Explore cited claims and disagreements in this project">Claims</button>
   <button class="nav-item" data-view="gaps" title="Review evidence gaps and design research proposals">Gaps</button>
   <button class="nav-item" data-view="console" title="Plan, preview and run checkpointed research workflows">Console</button>
+  <button class="nav-item" data-view="write" title="Write LaTeX documents that cite this project's papers">Write</button>
   <h3 title="A project collects the papers, ✓/✗ marks and exports of one review">Projects</h3>
   <div class="side-list" id="side-projects"></div>
   <h3 title="Your latest searches; click one to reopen it with its marks">Recent</h3>
@@ -149,6 +150,12 @@
         <button class="btn" id="tool-vision-action">Open Models</button>
       </div>
       <pre id="tool-vision-progress" role="status" aria-live="polite"></pre>
+      <div class="tool-row">
+        <div><h3>Tectonic · Write</h3><p>Compiles Write documents to PDF, English and Persian · ~22 MB, LaTeX packages download on first use</p>
+          <p id="tool-tectonic-status" role="status"></p></div>
+        <button class="btn" id="tool-tectonic-action" hidden>Install Tectonic…</button>
+      </div>
+      <pre id="tool-tectonic-progress" role="status" aria-live="polite"></pre>
     </div>
     <div class="card settings-card">
       <h2>API keys</h2>
@@ -430,6 +437,69 @@
     </div>
   </section>
 
+  <section id="view-write" class="view" hidden>
+    <div id="write-home">
+      <h1>Write</h1>
+      <p class="muted">LaTeX documents of project <b id="write-project"></b>. Files live in the project folder; every save keeps a version.</p>
+      <div class="card write-new">
+        <input id="write-new-name" placeholder="Document name" aria-label="Document name" maxlength="200">
+        <select id="write-new-template" aria-label="Template"></select>
+        <button class="btn primary" id="write-create">New document</button>
+      </div>
+      <p id="write-engine" class="muted" role="status"></p>
+      <ul id="write-docs" class="write-docs"></ul>
+    </div>
+    <div id="write-editor" class="write-editor" hidden>
+      <div class="write-toolbar">
+        <button class="btn small" id="write-back" title="Back to the document list">← Documents</button>
+        <b id="write-title"></b>
+        <select id="write-file" aria-label="File"></select>
+        <span id="write-save-state" class="muted" role="status" aria-live="polite"></span>
+        <span class="spacer"></span>
+        <button class="btn small" id="write-cite" title="Cite a paper from the project (\cite{)">Cite</button>
+        <select id="write-ai" aria-label="AI actions" title="Model actions on the selection; nothing changes until you accept">
+          <option value="">AI…</option><option value="fix">Fix this error</option>
+          <option value="clearer">Rewrite: clearer</option><option value="shorter">Rewrite: shorter</option>
+          <option value="translate-en">Translate to English</option><option value="translate-fa">Translate to Persian</option>
+          <option value="cite">Suggest citations</option>
+        </select>
+        <label class="btn small" title="Upload a figure into figures/">Figure…<input type="file" id="write-upload" accept=".png,.jpg,.jpeg,.pdf,.eps,.svg" hidden></label>
+        <button class="btn small" id="write-versions-btn" title="Earlier versions of this document">Versions</button>
+        <button class="btn small" id="write-rename">Rename</button>
+        <button class="btn small danger" id="write-delete" title="Move this document to the project's trash folder">Delete</button>
+        <button class="btn small primary" id="write-compile" title="Compile to PDF (Ctrl/Cmd+Enter)">Compile</button>
+      </div>
+      <div id="write-conflict" class="write-banner" role="alert" hidden>
+        <span>This file changed on disk or in another tab since you opened it.</span>
+        <button class="btn small" id="write-reload">Reload theirs</button>
+        <button class="btn small" id="write-keep">Keep mine</button>
+      </div>
+      <div id="write-versions" class="card write-versions" hidden><h3>Versions</h3><ul id="write-version-list"></ul></div>
+      <div id="write-cite-panel" class="card write-cite" hidden>
+        <div class="write-cite-tabs"><button class="btn small on" id="write-cite-tab-lib" data-tab="library">Library</button><button class="btn small" id="write-cite-tab-ev" data-tab="evidence">Evidence</button></div>
+        <input id="write-cite-q" placeholder="Search title, author, year, DOI or quote" aria-label="Search papers to cite">
+        <ul id="write-cite-results"></ul>
+      </div>
+      <div id="write-suggestion" class="card write-suggestion" hidden>
+        <h3 id="write-suggestion-title">Suggestion</h3>
+        <p id="write-suggestion-meta" class="muted"></p>
+        <div id="write-suggestion-hunks"></div>
+        <div class="row"><button class="btn small" id="write-suggestion-close">Close</button></div>
+      </div>
+      <div class="write-split">
+        <div class="write-left">
+          <div id="write-cm" class="write-cm"></div>
+          <ul id="write-errors" class="write-errors" aria-label="Compile messages"></ul>
+        </div>
+        <div class="write-right">
+          <p id="write-compile-state" class="muted" role="status" aria-live="polite"></p>
+          <iframe id="write-pdf" title="PDF preview" hidden></iframe>
+          <p id="write-pdf-empty" class="muted">Compile to see the PDF here.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="results" class="view" hidden>
       <div class="runhead"><h2 id="run-title"></h2><span class="meta" id="run-meta"></span></div>
       <div class="stats" id="stats"></div>
@@ -623,6 +693,7 @@
 <script src="/static/vendor/purify.min.js"></script>
 <script src="/static/vendor/katex.min.js"></script>
 <script src="/static/md.js"></script>
+<script src="/static/vendor/codemirror.bundle.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

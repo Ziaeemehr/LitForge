@@ -92,6 +92,7 @@
         projects.map(function (p) { return '<option value="' + esc(p.name) + '">' + esc(p.name) + '</option>'; }).join('');
       $('recents-project').value = state.recentsProject || '';
       syncProjectFields();
+      if (state.page === 'write' && !W.doc) loadWrite();
       return loadRuns();
     });
   }
@@ -126,6 +127,7 @@
     store.set('project', name);
     syncProjectFields();
     renderSideProjects();
+    if (state.page === 'write') closeWriteDoc(false);
   }
 
   function syncProjectFields() {
@@ -476,8 +478,8 @@
   function showView(view) {
     if (view === 'models') view = 'settings';
     state.page = view;
-    if (history.replaceState) history.replaceState(null, '', /^(recents|library|ask|matrix|claims|gaps|console|settings)$/.test(view) ? '#' + view : location.pathname);
-    ['new', 'recents', 'library', 'ask', 'matrix', 'claims', 'gaps', 'console', 'settings'].forEach(function (v) { $(('view-' + v)).hidden = v !== view; });
+    if (history.replaceState) history.replaceState(null, '', /^(recents|library|ask|matrix|claims|gaps|console|write|settings)$/.test(view) ? '#' + view : location.pathname);
+    ['new', 'recents', 'library', 'ask', 'matrix', 'claims', 'gaps', 'console', 'write', 'settings'].forEach(function (v) { $(('view-' + v)).hidden = v !== view; });
     $('results').hidden = view !== 'results';
     document.querySelectorAll('.sidebar [data-view]').forEach(function (b) { b.classList.toggle('on', b.dataset.view === view); });
     document.querySelectorAll('#side-recent a').forEach(function (a) { a.classList.remove('on'); });
@@ -487,6 +489,7 @@
     if (view === 'ask' || view === 'matrix' || view === 'claims') enterLens(view);
     if (view === 'gaps') loadGaps();
     if (view === 'console') loadConsole();
+    if (view === 'write') loadWrite(); else leaveWrite();
     if (view === 'settings') { loadSettings(); loadUpdates(); }
   }
 
@@ -1819,6 +1822,394 @@
   }
   /* ---------- End MinerU ---------- */
 
+  /* ---------- Write ---------- */
+  var W = { doc: null, file: 'main.tex', hash: null, editor: null, timer: null, saving: null, dirty: false,
+    conflictHash: null, job: null, SAVE_DELAY: 2000 };
+
+  function makeEditor(parent, text, handlers) {
+    var CM = window.LitForgeCM;
+    parent.replaceChildren();
+    if (!CM) {  // the bundle failed to load: a plain text area still edits and saves
+      var area = document.createElement('textarea');
+      area.className = 'write-fallback'; area.value = text; area.dir = 'auto'; area.spellcheck = false;
+      area.addEventListener('input', handlers.change); area.addEventListener('blur', handlers.blur);
+      parent.appendChild(area);
+      return {
+        getText: function () { return area.value; },
+        setText: function (t) { area.value = t; },
+        gotoLine: function (n) {
+          var lines = area.value.split('\n'), pos = 0;
+          for (var i = 0; i < Math.min(n - 1, lines.length); i++) pos += lines[i].length + 1;
+          area.focus(); area.setSelectionRange(pos, pos);
+        },
+        selection: function () { return { from: area.selectionStart, to: area.selectionEnd,
+          text: area.value.slice(area.selectionStart, area.selectionEnd) }; },
+        replace: function (from, to, t) { area.setRangeText(t, from, to, 'end'); handlers.change(); },
+        lineRange: function (n) { return lineRange(area.value, n); },
+        destroy: function () { parent.replaceChildren(); }
+      };
+    }
+    var view = new CM.EditorView({
+      parent: parent,
+      state: CM.EditorState.create({ doc: text, extensions: [
+        CM.lineNumbers(), CM.highlightActiveLineGutter(), CM.history(), CM.foldGutter(), CM.drawSelection(),
+        CM.indentOnInput(), CM.bracketMatching(), CM.closeBrackets(), CM.highlightActiveLine(),
+        CM.highlightSelectionMatches(), CM.StreamLanguage.define(CM.stex),
+        CM.syntaxHighlighting(CM.defaultHighlightStyle, { fallback: true }),
+        CM.EditorView.lineWrapping, CM.EditorView.perLineTextDirection.of(true), autoDirection(CM),
+        CM.keymap.of([{ key: 'Mod-s', run: function () { handlers.blur(); return true; } },
+          { key: 'Mod-Enter', run: function () { handlers.compile(); return true; } }]
+          .concat(CM.searchKeymap, CM.historyKeymap, [CM.indentWithTab], CM.defaultKeymap)),
+        CM.EditorView.updateListener.of(function (u) {
+          if (u.docChanged) handlers.change();
+          if (u.docChanged || u.selectionSet) handlers.cursor && handlers.cursor(u.view);
+        }),
+        CM.EditorView.domEventHandlers({ blur: function () { handlers.blur(); } })
+      ] })
+    });
+    return {
+      view: view,
+      getText: function () { return view.state.doc.toString(); },
+      setText: function (t) { view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: t } }); },
+      gotoLine: function (n) {
+        var line = view.state.doc.line(Math.max(1, Math.min(n, view.state.doc.lines)));
+        view.dispatch({ selection: { anchor: line.from }, scrollIntoView: true }); view.focus();
+      },
+      selection: function () {
+        var r = view.state.selection.main;
+        return { from: r.from, to: r.to, text: view.state.sliceDoc(r.from, r.to) };
+      },
+      replace: function (from, to, t) {
+        view.dispatch({ changes: { from: from, to: to, insert: t }, selection: { anchor: from + t.length } });
+        view.focus();
+      },
+      lineRange: function (n) { return lineRange(view.state.doc.toString(), n); },
+      destroy: function () { view.destroy(); }
+    };
+  }
+
+  // Each line takes its direction from its first strong character, so Persian lines run right to left and
+  // cursor movement follows them (perLineTextDirection reads the direction from the line element).
+  function autoDirection(CM) {
+    var mark = CM.Decoration.line({ attributes: { dir: 'auto' } });
+    return CM.EditorView.decorations.of(function (view) {
+      var marks = [];
+      view.visibleRanges.forEach(function (range) {
+        for (var pos = range.from; pos <= range.to;) {
+          var line = view.state.doc.lineAt(pos);
+          marks.push(mark.range(line.from));
+          pos = line.to + 1;
+        }
+      });
+      return CM.Decoration.set(marks, true);
+    });
+  }
+
+  function lineRange(text, n) {
+    var lines = text.split('\n'), from = 0;
+    n = Math.max(1, Math.min(n, lines.length));
+    for (var i = 0; i < n - 1; i++) from += lines[i].length + 1;
+    return { from: from, to: from + lines[n - 1].length };
+  }
+
+  function writeSaveState(text) { $('write-save-state').textContent = text; }
+
+  function loadWrite() {
+    var project = projectName();
+    $('write-project').textContent = project;
+    if (W.doc) return Promise.resolve();
+    if (!state.projects.some(function (p) { return p.name === project; })) {  // not loaded yet, or no project
+      var hint = document.createElement('li');
+      hint.className = 'muted'; hint.textContent = 'Choose or create a project first (sidebar → Projects).';
+      $('write-docs').replaceChildren(hint);
+      return Promise.resolve();
+    }
+    return api('/api/write/docs?project=' + encodeURIComponent(project)).then(function (data) {
+      var select = $('write-new-template');
+      select.replaceChildren();
+      Object.keys(data.templates || {}).forEach(function (key) {
+        var opt = document.createElement('option');
+        opt.value = key; opt.textContent = data.templates[key];
+        select.appendChild(opt);
+      });
+      var eng = data.engines || {}, tec = eng.tectonic || {};
+      $('write-engine').textContent = tec.installed ? 'Engine: Tectonic ' + (tec.version || '') +
+        (eng.sandbox === 'scan' ? ' · partial sandbox: on this system a document could still read other files'
+          : ' · sandboxed') : (eng.xelatex || {}).installed ? 'Engine: system XeLaTeX (latexmk)' :
+        'No LaTeX engine yet: install Tectonic in Settings → Optional tools.';
+      var list = $('write-docs');
+      list.replaceChildren();
+      (data.documents || []).forEach(function (d) {
+        var li = document.createElement('li');
+        var open = document.createElement('button');
+        open.className = 'link'; open.textContent = d.name; open.dir = 'auto';
+        open.onclick = function () { openWriteDoc(d.id); };
+        var meta = document.createElement('span');
+        meta.className = 'muted';
+        meta.textContent = (data.templates[d.template] || d.template) + ' · edited ' + String(d.updated_at).slice(0, 16).replace('T', ' ');
+        li.appendChild(open); li.appendChild(meta);
+        list.appendChild(li);
+      });
+      if (!(data.documents || []).length) {
+        var empty = document.createElement('li');
+        empty.className = 'muted'; empty.textContent = 'No documents yet.';
+        list.appendChild(empty);
+      }
+    }).catch(function (e) {
+      var list = $('write-docs');
+      list.replaceChildren();
+      var li = document.createElement('li');
+      li.className = 'muted';
+      li.textContent = e.status === 404 ? 'Choose or create a project first (sidebar → Projects).' : e.message;
+      list.appendChild(li);
+    });
+  }
+
+  function leaveWrite() {
+    if (W.doc && W.dirty) saveWriteNow();
+  }
+
+  function createWriteDoc() {
+    var name = $('write-new-name').value.trim();
+    if (!name) { toast('Give the document a name'); return Promise.resolve(); }
+    return post('/api/write/create', { project: projectName(), name: name, template: $('write-new-template').value })
+      .then(function (doc) { $('write-new-name').value = ''; return openWriteDoc(doc.id); })
+      .catch(function (e) { toast(e.message); });
+  }
+
+  function openWriteDoc(id) {
+    return api('/api/write/doc?doc=' + encodeURIComponent(id)).then(function (doc) {
+      W.doc = doc;
+      $('write-home').hidden = true; $('write-editor').hidden = false;
+      $('write-title').textContent = doc.name; $('write-title').dir = 'auto';
+      var select = $('write-file');
+      select.replaceChildren();
+      doc.files.filter(function (f) { return f.kind === 'text'; }).forEach(function (f) {
+        var opt = document.createElement('option');
+        opt.value = f.name; opt.textContent = f.name;
+        select.appendChild(opt);
+      });
+      $('write-errors').replaceChildren();
+      showWritePdf(doc.pdf);
+      return openWriteFile('main.tex');
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function openWriteFile(name) {
+    var load = function () {
+      return api('/api/write/file?doc=' + encodeURIComponent(W.doc.id) + '&name=' + encodeURIComponent(name))
+        .then(function (file) {
+          if (W.editor) W.editor.destroy();
+          W.file = file.name; W.hash = file.hash; W.dirty = false; W.conflictHash = null;
+          $('write-file').value = file.name;
+          $('write-conflict').hidden = true;
+          W.editor = makeEditor($('write-cm'), file.text, {
+            change: writeChanged, blur: function () { if (W.dirty) saveWriteNow(); }, compile: compileWrite
+          });
+          writeSaveState('Saved');
+        });
+    };
+    return (W.dirty ? saveWriteNow() : Promise.resolve()).then(load).catch(function (e) { toast(e.message); });
+  }
+
+  function writeChanged() {
+    W.dirty = true;
+    writeSaveState('Edited');
+    clearTimeout(W.timer);
+    W.timer = setTimeout(saveWriteNow, W.SAVE_DELAY);
+  }
+
+  function saveWriteNow(force) {
+    clearTimeout(W.timer);
+    if (!W.doc || !W.editor) return Promise.resolve();
+    if (W.conflictHash && !force) return Promise.resolve();  // wait for the user's choice
+    if (W.saving) return W.saving.then(function () { return W.dirty ? saveWriteNow(force) : null; });
+    var text = W.editor.getText();
+    var doc = W.doc;
+    writeSaveState('Saving…');
+    W.saving = post('/api/write/save', { doc: doc.id, name: W.file, text: text, hash: W.hash })
+      .then(function (r) {
+        if (W.doc !== doc) return;
+        W.hash = r.hash; W.conflictHash = null;
+        W.dirty = W.editor.getText() !== text;
+        $('write-conflict').hidden = true;
+        writeSaveState(W.dirty ? 'Edited' : 'Saved');
+        if (W.dirty) W.timer = setTimeout(saveWriteNow, W.SAVE_DELAY);
+      })
+      .catch(function (e) {
+        if (e.status === 409) {
+          return api('/api/write/file?doc=' + encodeURIComponent(doc.id) + '&name=' + encodeURIComponent(W.file))
+            .then(function (current) {
+              W.conflictHash = current.hash;
+              $('write-conflict').hidden = false;
+              writeSaveState('Conflict — reload or keep mine');
+            });
+        }
+        writeSaveState('Not saved: ' + e.message);
+      })
+      .then(function () { W.saving = null; });
+    return W.saving;
+  }
+
+  function keepMine() {
+    W.hash = W.conflictHash;
+    return saveWriteNow(true);
+  }
+
+  function reloadTheirs() {
+    W.dirty = false;
+    return openWriteFile(W.file);
+  }
+
+  function showWritePdf(ready) {
+    var frame = $('write-pdf');
+    $('write-pdf-empty').hidden = !!ready;
+    frame.hidden = !ready;
+    if (ready) frame.src = '/api/write/pdf?doc=' + encodeURIComponent(W.doc.id) + '&t=' + Date.now();
+  }
+
+  function renderWriteMessages(report) {
+    var list = $('write-errors');
+    list.replaceChildren();
+    [['error', report.errors || []], ['warning', report.warnings || []]].forEach(function (group) {
+      group[1].forEach(function (item) {
+        var li = document.createElement('li');
+        li.className = group[0];
+        li.textContent = (item.line ? (item.file || 'main.tex') + ':' + item.line + ' · ' : '') + item.message;
+        if (item.line) li.onclick = function () { jumpToWriteLine(item); };
+        li.dir = 'auto';
+        list.appendChild(li);
+      });
+    });
+  }
+
+  function jumpToWriteLine(item) {
+    var target = item.file && item.file !== W.file ? openWriteFile(item.file) : Promise.resolve();
+    return target.then(function () { if (W.editor) W.editor.gotoLine(item.line); });
+  }
+
+  function compileWrite() {
+    if (!W.doc || W.job) return Promise.resolve();
+    var doc = W.doc;
+    $('write-compile-state').textContent = 'Saving…';
+    return saveWriteNow().then(function () {
+      if (W.conflictHash) { $('write-compile-state').textContent = 'Resolve the conflict first.'; return; }
+      $('write-compile-state').textContent = 'Compiling…';
+      return post('/api/write/compile', { doc: doc.id }).then(function (job) {
+        W.job = job;
+        return pollWriteJob(job, doc);
+      });
+    }).catch(function (e) { W.job = null; $('write-compile-state').textContent = e.message; });
+  }
+
+  function pollWriteJob(job, doc) {
+    return api('/api/jobs/' + encodeURIComponent(job.id)).then(function (j) {
+      if (j.status === 'running') {
+        return new Promise(function (resolve) { setTimeout(resolve, 700); }).then(function () { return pollWriteJob(job, doc); });
+      }
+      W.job = null;
+      if (W.doc !== doc) return;
+      var report = j.report || {};
+      if (j.status === 'failed') { $('write-compile-state').textContent = j.error || 'Compile failed'; return; }
+      renderWriteMessages(report);
+      $('write-compile-state').textContent = report.ok ?
+        'Compiled in ' + (report.elapsed_ms / 1000).toFixed(1) + ' s · ' + report.engine +
+        (report.warnings && report.warnings.length ? ' · ' + report.warnings.length + ' warning(s)' : '') :
+        (report.errors || []).length + ' error(s) — click one to jump to its line';
+      if (report.ok) showWritePdf(true);
+    });
+  }
+
+  function showWriteVersions() {
+    var box = $('write-versions');
+    if (!box.hidden) { box.hidden = true; return Promise.resolve(); }
+    return saveWriteNow().then(function () {
+      return api('/api/write/snapshots?doc=' + encodeURIComponent(W.doc.id));
+    }).then(function (data) {
+      var list = $('write-version-list');
+      list.replaceChildren();
+      (data.snapshots || []).forEach(function (s) {
+        var li = document.createElement('li');
+        var label = document.createElement('span');
+        label.textContent = String(s.created_at || s.id).replace('T', ' ').slice(0, 19) + (s.note ? ' · ' + s.note : '');
+        var restore = document.createElement('button');
+        restore.className = 'btn small'; restore.textContent = 'Restore';
+        restore.onclick = function () { restoreWriteVersion(s.id); };
+        li.appendChild(label); li.appendChild(restore);
+        list.appendChild(li);
+      });
+      if (!(data.snapshots || []).length) {
+        var none = document.createElement('li'); none.textContent = 'No versions yet; they are kept as you save.';
+        list.appendChild(none);
+      }
+      box.hidden = false;
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function restoreWriteVersion(id) {
+    if (!window.confirm('Restore this version? The current text is kept as a version first.')) return Promise.resolve();
+    return post('/api/write/restore', { doc: W.doc.id, snapshot: id }).then(function () {
+      $('write-versions').hidden = true;
+      W.dirty = false;
+      return openWriteFile(W.file);
+    }).then(function () { toast('Version restored'); }).catch(function (e) { toast(e.message); });
+  }
+
+  function uploadWriteFigure(file) {
+    if (!file) return Promise.resolve();
+    return fetch('/api/write/upload?doc=' + encodeURIComponent(W.doc.id) + '&name=' + encodeURIComponent(file.name),
+      { method: 'POST', body: file }).then(function (r) {
+      return r.json().then(function (body) {
+        if (!r.ok) throw new Error(body.error || 'upload failed');
+        var sel = W.editor.selection();
+        W.editor.replace(sel.from, sel.to, '\\includegraphics[width=\\linewidth]{' + body.name + '}');
+        toast('Figure added: ' + body.name);
+      });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function renameWriteDoc() {
+    var name = window.prompt('Document name', W.doc.name);
+    if (!name || !name.trim()) return Promise.resolve();
+    return post('/api/write/rename', { doc: W.doc.id, name: name.trim() }).then(function (doc) {
+      W.doc.name = doc.name; $('write-title').textContent = doc.name;
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function deleteWriteDoc() {
+    if (!window.confirm('Move "' + W.doc.name + '" to the project\'s trash folder?')) return Promise.resolve();
+    return post('/api/write/delete', { doc: W.doc.id }).then(function () { return closeWriteDoc(true); })
+      .catch(function (e) { toast(e.message); });
+  }
+
+  function closeWriteDoc(skipSave) {
+    return (skipSave || !W.doc ? Promise.resolve() : saveWriteNow()).then(function () {
+      if (W.conflictHash && !skipSave) return;
+      if (W.editor) W.editor.destroy();
+      W.doc = null; W.editor = null; W.dirty = false;
+      $('write-editor').hidden = true; $('write-home').hidden = false;
+      return loadWrite();
+    });
+  }
+
+  function wireWrite() {
+    $('write-create').onclick = createWriteDoc;
+    $('write-new-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') createWriteDoc(); });
+    $('write-back').onclick = function () { closeWriteDoc(false); };
+    $('write-file').onchange = function () { openWriteFile($('write-file').value); };
+    $('write-compile').onclick = compileWrite;
+    $('write-versions-btn').onclick = showWriteVersions;
+    $('write-rename').onclick = renameWriteDoc;
+    $('write-delete').onclick = deleteWriteDoc;
+    $('write-reload').onclick = reloadTheirs;
+    $('write-keep').onclick = keepMine;
+    $('write-upload').onchange = function () { uploadWriteFigure($('write-upload').files[0]); $('write-upload').value = ''; };
+    window.addEventListener('beforeunload', function (e) {
+      if (W.doc && W.dirty) { saveWriteNow(); e.preventDefault(); e.returnValue = ''; }
+    });
+  }
+  /* ---------- End Write ---------- */
+
   /* ---------- Optional tools ---------- */
   function watchOptionalToolJob(job, target, done) {
     return api('/api/jobs/' + encodeURIComponent(job.id)).then(function (report) {
@@ -1848,6 +2239,12 @@
       $('tool-pix2text-action').textContent = 'Install Pix2Text…';
       $('tool-pix2text-action').onclick = installPix2Text;
 
+      var tec = (tools.tectonic || {}).tectonic || {};
+      $('tool-tectonic-status').textContent = tec.installed ? 'Installed · ' + (tec.version || '') :
+        tec.offerable ? 'Not installed · ' + tec.size : 'No Tectonic build for this platform; install TeX Live or MacTeX';
+      $('tool-tectonic-action').hidden = !!tec.installed || !tec.offerable;
+      $('tool-tectonic-action').onclick = function () { installTectonic(tec); };
+
       var vision = tools.vision || {};
       var visionDetail = vision.message || (vision.model ? 'Model: ' + vision.model : 'No image model configured');
       $('tool-vision-status').textContent = (vision.ready ? 'Ready · ' : 'Not ready · ') + visionDetail;
@@ -1874,6 +2271,14 @@
         return watchOptionalToolJob(job, $('tool-pix2text-progress'), loadOptionalTools);
       });
     }).catch(function (e) { $('tool-pix2text-progress').textContent = e.message; });
+  }
+
+  function installTectonic(tec) {
+    if (!window.confirm('Download Tectonic ' + (tec.release || '') + ' (' + (tec.size || '~22 MB') + ')?')) return;
+    $('tool-tectonic-progress').textContent = 'Installing Tectonic…';
+    return post('/api/tools/tectonic/install', { confirmed: true }).then(function (job) {
+      return watchOptionalToolJob(job, $('tool-tectonic-progress'), loadOptionalTools);
+    }).catch(function (e) { $('tool-tectonic-progress').textContent = e.message; });
   }
 
   function openVisionModels() {
@@ -3133,6 +3538,7 @@
     initModels();
     initSettings();
     initLens();
+    wireWrite();
     // Each open page checks in; when none does for a while, the server stops itself (stop_when_idle).
     // If the server is gone (it stopped while the computer slept, say), the page says so instead of failing quietly.
     var beat = setInterval(function () {
@@ -3147,10 +3553,10 @@
     setMode(store.get('mode', 'similar'));
     if (location.hash === '#models') history.replaceState(null, '', '#settings');
     var linked = /^#run=([\w-]+)$/.exec(location.hash);  // a bookmarked search; never set automatically
-    showView(/^#(recents|library|ask|matrix|claims|gaps|console|settings)$/.test(location.hash) ? location.hash.slice(1) : 'new');
+    showView(/^#(recents|library|ask|matrix|claims|gaps|console|write|settings)$/.test(location.hash) ? location.hash.slice(1) : 'new');
     if (linked) loadRun(linked[1]);
     window.addEventListener('hashchange', function () {
-      if (/^#(ask|matrix|claims|gaps|recents|library|console|settings)$/.test(location.hash)) showView(location.hash.slice(1));
+      if (/^#(ask|matrix|claims|gaps|recents|library|console|write|settings)$/.test(location.hash)) showView(location.hash.slice(1));
     });
     $('sort').value = state.sort;
 

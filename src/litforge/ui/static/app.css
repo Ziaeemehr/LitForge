@@ -482,3 +482,48 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .lens-quote { margin: .6rem 0; padding: .5rem .8rem; border-left: 3px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
 .lens-quote .quote-chip { display: block; margin-top: .4rem; }
 .lens-evidence mark { background: #ffe58a; color: #222; }
+
+/* ---------- Write ---------- */
+.write-new { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px; }
+.write-new input { flex: 1 1 220px; }
+.write-docs { list-style: none; padding: 0; display: grid; gap: 6px; }
+.write-docs li { display: flex; gap: 10px; align-items: baseline; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 10px 12px; }
+.write-docs li button.link { border: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; padding: 0; }
+.write-editor { display: flex; flex-direction: column; gap: 8px; height: calc(100vh - 40px); min-height: 480px; }
+.write-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.write-toolbar .spacer { flex: 1; }
+.write-banner { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: var(--radius);
+  background: var(--bad-soft); color: var(--ink); }
+.write-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; flex: 1; min-height: 0; }
+.write-left, .write-right { display: flex; flex-direction: column; min-height: 0; gap: 6px; }
+.write-cm { flex: 1; min-height: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+  background: var(--panel); }
+.write-cm .cm-editor { height: 100%; background: var(--panel); color: var(--ink); }
+.write-cm .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Vazirmatn", "Geeza Pro",
+  "Noto Naskh Arabic", Tahoma, monospace; font-size: 14px; line-height: 1.55; }
+.write-cm .cm-gutters { background: var(--bg); color: var(--muted); border-right: 1px solid var(--line); }
+.write-cm .cm-activeLine, .write-cm .cm-activeLineGutter { background: var(--accent-soft); }
+.write-cm .cm-cursor { border-left-color: var(--ink); }
+.write-cm .write-fallback { width: 100%; height: 100%; border: 0; resize: none; padding: 8px; background: var(--panel);
+  color: var(--ink); font: 14px/1.55 ui-monospace, Menlo, monospace; unicode-bidi: plaintext; }
+.write-errors { list-style: none; margin: 0; padding: 0; max-height: 30%; overflow: auto; }
+.write-errors li { padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.write-errors li.error { background: var(--bad-soft); }
+.write-errors li.warning { color: var(--warn); }
+.write-right iframe { flex: 1; width: 100%; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+.write-versions ul, .write-cite ul { list-style: none; padding: 0; margin: 6px 0 0; max-height: 240px; overflow: auto; }
+.write-versions li, .write-cite li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0;
+  border-bottom: 1px solid var(--line); }
+.write-cite input { width: 100%; margin-top: 6px; }
+.write-cite-tabs { display: flex; gap: 4px; }
+.write-cite-tabs .on { background: var(--accent-soft); }
+.write-suggestion .hunk { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 6px 0; }
+.write-suggestion .hunk del { background: var(--bad-soft); text-decoration: line-through; unicode-bidi: plaintext; }
+.write-suggestion .hunk ins { background: var(--good-soft); text-decoration: none; unicode-bidi: plaintext; }
+.write-suggestion .flag { color: var(--bad); font-size: 13px; }
+.write-suggestion .quote { font-size: 13px; color: var(--muted); border-left: 3px solid var(--line); padding-left: 8px; }
+@media (max-width: 900px) { .write-split { grid-template-columns: 1fr; } .write-right iframe { min-height: 60vh; } }
+.write-toolbar .btn.primary, .write-new .btn.primary { width: auto; margin-top: 0; padding: 5px 12px; }
+#view-write .muted { color: var(--muted); }
+.write-toolbar select, .write-new select { width: auto; }
