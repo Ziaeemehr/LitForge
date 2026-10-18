@@ -2,7 +2,9 @@
 
 parsing:
   fast_path: pymupdf
-  complex_fallback: docling
+  complex_fallback: auto
+  mineru:
+    install_timeout_s: 2700
   ocr: selective
   keep_originals: true
   # Figure crops are rendered at this resolution.

@@ -1,4 +1,8 @@
-"""Route a fast-path parse to: keep it, send to Docling, or send pages to OCR."""
+"""Route fast-path text to keep, structural parsing or OCR.
+
+The persisted ``needs_docling`` label means a structural parser is needed; the
+orchestrator chooses MinerU or Docling from configuration and availability.
+"""
 
 from __future__ import annotations
 

@@ -13,6 +13,7 @@ import signal
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from contextlib import AbstractContextManager, suppress
@@ -45,6 +46,18 @@ def http_probe(url: str) -> dict[str, Any] | None:
         return None if getattr(exc.reason, "errno", None) == errno.ECONNREFUSED else {}
     except (ValueError, OSError):
         return {}
+
+
+def http_slots(url: str) -> list[dict[str, Any]] | None:
+    """Unknown/disabled slot reporting must never authorize stopping a server."""
+    try:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url, timeout=1) as response:
+            result = json.load(response)
+        if isinstance(result, list) and all(isinstance(slot, dict) for slot in result):
+            return result
+    except (ValueError, OSError):
+        pass
+    return None
 
 
 def spawn_process(command: list[str], log: Path) -> int:
@@ -123,11 +136,13 @@ class LlamaCppServer:
                  alive: Callable[[int], bool] = process_alive,
                  terminate: Callable[[int], None] = terminate_process,
                  kill: Callable[[int], None] = kill_process,
+                 slots_probe: Callable[[str], list[dict[str, Any]] | None] = http_slots,
                  lock: Callable[..., AbstractContextManager[None]] = file_lock) -> None:
         self.root = root.resolve()
         self.probe, self.spawner, self.clock, self.sleep = probe, spawner, clock, sleep
         self.which, self.process, self.terminate, self.lock = which, process, terminate, lock
         self.alive, self.kill = alive, kill
+        self.slots_probe = slots_probe
         self.state = self.root / "state" / "llama-server.json"
         self.lock_path = self.root / "state" / "llama-server.lock"
 
@@ -228,10 +243,28 @@ class LlamaCppServer:
         except (OSError, ValueError, KeyError, IndexError, TypeError):
             return None
 
-    def stop(self, cfg: LlamaCppServerConfig) -> bool:
+    def is_idle(self, cfg: LlamaCppServerConfig) -> bool:
+        if not cfg.managed or self._owned(cfg) is None:
+            return False
+        models = self._models(cfg)
+        if not models:
+            return False
+        for model in models:
+            name = model.get('id')
+            if not isinstance(name, str):
+                return False
+            url = cfg.base_url.removesuffix('/v1') + '/slots?' + urllib.parse.urlencode({'model': name})
+            slots = self.slots_probe(url)
+            if not slots or any(slot.get('is_processing') is not False for slot in slots):
+                return False
+        return True
+
+    def stop(self, cfg: LlamaCppServerConfig, *, only_if_idle: bool = False) -> bool:
         with self.lock(self.lock_path, cfg.start_timeout_s, clock=self.clock, sleep=self.sleep):
             identity = self._owned(cfg)
             if identity is None:
+                return False
+            if only_if_idle and not self.is_idle(cfg):
                 return False
             # Revalidate immediately before each signal. A residual OS-level race remains
             # between inspecting identity and kill(pid): portable stdlib has no process handle

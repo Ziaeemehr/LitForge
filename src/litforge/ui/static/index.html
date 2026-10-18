@@ -112,6 +112,13 @@
       <div class="row2"><button class="btn" id="download-pause">Pause</button><button class="btn" id="download-resume">Resume</button><button class="btn" id="download-cancel">Cancel download</button></div>
     </div>
     <div class="card settings-card">
+      <h2>Accurate PDF parsing</h2>
+      <p>MinerU reads equations and tables locally, about 20 seconds per page. The first parse downloads about 2 GB of models.</p>
+      <p id="mineru-status" role="status"></p>
+      <button class="btn" id="mineru-install">Install MinerU…</button>
+      <pre id="mineru-progress" role="status" aria-live="polite"></pre>
+    </div>
+    <div class="card settings-card">
       <h2>API keys</h2>
       <p id="keys-status" class="hint">Keys resolve from the environment first, then the system keychain. Removing an entry leaves environment variables unchanged.</p>
       <div id="keys-list"></div>

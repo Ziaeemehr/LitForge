@@ -1,0 +1,299 @@
+{
+  "schema": "docvortex.middle",
+  "schema_version": "2.0",
+  "is_full_document": true,
+  "metadata": {},
+  "extensions": {
+    "docvortex_layout": {
+      "version": 1,
+      "pages": [
+        {
+          "page_idx": 0,
+          "width_pt": 600,
+          "height_pt": 800
+        },
+        {
+          "page_idx": 1,
+          "width_pt": 600,
+          "height_pt": 800
+        }
+      ]
+    }
+  },
+  "pages": [
+    {
+      "page_idx": 0,
+      "blocks": [
+        {
+          "type": "header",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": [
+            {
+              "type": "text",
+              "content": "Synthetic Journal",
+              "styles": []
+            }
+          ]
+        },
+        {
+          "type": "paragraph_title",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": [
+            {
+              "type": "text",
+              "content": "Abstract",
+              "styles": []
+            }
+          ],
+          "level": 1
+        },
+        {
+          "type": "text",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": [
+            {
+              "type": "text",
+              "content": "budgets ranging from ",
+              "styles": []
+            },
+            {
+              "type": "equation_inline",
+              "content": "2^{ 1 0 }"
+            },
+            {
+              "type": "text",
+              "content": " up to "
+            },
+            {
+              "type": "equation_inline",
+              "content": "2^{ 1 7 }"
+            },
+            {
+              "type": "text",
+              "content": " samples; ordinary digits 1 0 stay spaced."
+            }
+          ]
+        },
+        {
+          "type": "equation",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": "x = 2^{ 1 0 } \\tag{1}"
+        },
+        {
+          "type": "page_number",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": [
+            {
+              "type": "text",
+              "content": "1",
+              "styles": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page_idx": 1,
+      "blocks": [
+        {
+          "type": "paragraph_title",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": [
+            {
+              "type": "text",
+              "content": "2 Methods",
+              "styles": []
+            }
+          ],
+          "level": 2
+        },
+        {
+          "type": "table",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": [
+            {
+              "type": "table_caption",
+              "bbox": [
+                0.1,
+                0.2,
+                0.9,
+                0.3
+              ],
+              "content": [
+                {
+                  "type": "text",
+                  "content": "Table 1: Scores",
+                  "styles": []
+                }
+              ]
+            },
+            {
+              "type": "table_body",
+              "bbox": [
+                0.1,
+                0.2,
+                0.9,
+                0.3
+              ],
+              "content": "<table><tr><th>Method</th><th>Score</th></tr><tr><td>Test &amp; control</td><td>0.95</td></tr></table>"
+            }
+          ]
+        },
+        {
+          "type": "chart",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": [
+            {
+              "type": "chart_body",
+              "bbox": [
+                0.1,
+                0.2,
+                0.9,
+                0.3
+              ],
+              "content": ""
+            },
+            {
+              "type": "chart_caption",
+              "bbox": [
+                0.1,
+                0.2,
+                0.9,
+                0.3
+              ],
+              "content": [
+                {
+                  "type": "text",
+                  "content": "Figure 1: Synthetic chart",
+                  "styles": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "paragraph_title",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": [
+            {
+              "type": "text",
+              "content": "References",
+              "styles": []
+            }
+          ],
+          "level": 1
+        },
+        {
+          "type": "text",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": [
+            {
+              "type": "text",
+              "content": "A synthetic reference.",
+              "styles": []
+            }
+          ]
+        },
+        {
+          "type": "paragraph_title",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": [
+            {
+              "type": "text",
+              "content": "Appendix A",
+              "styles": []
+            }
+          ],
+          "level": 1
+        },
+        {
+          "type": "text",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": [
+            {
+              "type": "text",
+              "content": "Extra details.",
+              "styles": []
+            }
+          ]
+        },
+        {
+          "type": "footer",
+          "bbox": [
+            0.1,
+            0.2,
+            0.9,
+            0.3
+          ],
+          "content": [
+            {
+              "type": "text",
+              "content": "Synthetic footer",
+              "styles": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

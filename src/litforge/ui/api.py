@@ -6,6 +6,7 @@ Kept free of HTTP concerns so it can be tested directly.
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
 import uuid
@@ -254,6 +255,21 @@ def result_stats(papers: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def mineru_seconds_per_page(conn: sqlite3.Connection) -> float:
+    """Average per-run pace across this library, including successful historical runs."""
+    row = conn.execute(
+        """SELECT AVG(r.elapsed_ms / (1000.0 * json_extract(r.quality_json, '$.page_count')))
+           FROM parse_runs r WHERE r.parser='mineru' AND r.status='ok' AND r.elapsed_ms > 0
+           AND json_extract(r.quality_json, '$.page_count') > 0"""
+    ).fetchone()
+    value = row[0]
+    return float(value) if value is not None and math.isfinite(value) and value > 0 else 20.0
+
+
+def mineru_estimate_minutes(page_count: int | None, seconds_per_page: float) -> int:
+    return max(1, math.ceil((page_count or 1) * seconds_per_page / 60))
+
+
 def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_id: str | None) -> dict[str, Any]:
     row = conn.execute("SELECT * FROM papers WHERE id=?", (paper_id,)).fetchone()
     if row is None:
@@ -263,6 +279,14 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
            WHERE a.paper_id=? AND a.status='ok' AND r.is_current=1""", (paper_id,)
     ).fetchone()
     markdown = None
+    page_count = None
+    pdf = _pdf_path(conn, paths, paper_id)
+    if pdf:
+        artifact = conn.execute(
+            "SELECT page_count FROM artifacts WHERE paper_id=? AND status='ok' ORDER BY created_at LIMIT 1",
+            (paper_id,),
+        ).fetchone()
+        page_count = artifact['page_count']
     if run and run["output_dir"]:
         out_dir = paths.root / run["output_dir"]
         if (out_dir / "canonical.json").is_file():
@@ -299,12 +323,15 @@ def paper_detail(conn: sqlite3.Connection, paths: Paths, paper_id: str, project_
             "page": asset["page"], "crop_url": crop_url,
             "analyses": [analysis.model_dump() for analysis in figures.asset_analyses(conn, asset["id"])],
         })
+    seconds_per_page = mineru_seconds_per_page(conn)
     return {
         "id": row["id"], "title": row["title"], "year": row["year"], "venue": row["venue"], "doi": row["doi"],
         "doi_status": row["doi_status"], "arxiv_id": row["arxiv_id"], "openalex_id": row["openalex_id"],
         "oa_url": row["oa_url"], "cited_by_count": row["cited_by_count"], "abstract": row["abstract"],
         "authors": json.loads(row["authors_json"]) if row["authors_json"] else [],
-        "has_pdf": run is not None, "markdown": markdown, "mark": mark,
+        "has_pdf": pdf is not None, "page_count": page_count, "markdown": markdown, "mark": mark,
+        "mineru_seconds_per_page": seconds_per_page,
+        "mineru_estimate_minutes": mineru_estimate_minutes(page_count, seconds_per_page),
         "unused": conn.execute('SELECT 1 FROM project_papers WHERE paper_id=? LIMIT 1', (paper_id,)).fetchone()
         is None,
         "pdf_url": f"/api/papers/{paper_id}/pdf" if _pdf_path(conn, paths, paper_id) else None,

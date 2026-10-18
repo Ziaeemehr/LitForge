@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from litforge.config import Config, ModelProfileConfig, Paths
 from litforge.llm.http import open_url
 from litforge.parsing.docling_parser import docling_available
+from litforge.parsing.mineru_parser import mineru_status
 from litforge.storage.db import connect, fts5_available, latest_version, schema_version
 
 Level = Literal["ok", "warn", "error"]
@@ -103,6 +104,10 @@ def run_checks(paths: Paths, config: Config | None = None) -> list[Check]:
         _gpu(),
         _ollama(os.environ.get("LITFORGE_OLLAMA_URL", "http://localhost:11434")),
     ]
+    mineru = mineru_status(paths, (config or Config()).parsing)
+    checks.append(Check(name="mineru", level="ok" if mineru['installed'] else "warn",
+                        detail=mineru['version'] or mineru['error'] or
+                        "not installed (optional; litforge parse install-mineru)"))
     if config is not None:
         for name, profile in {"local": config.models.local, **config.models.profiles}.items():
             if (profile.provider == "openai_compatible" and not profile.remote and

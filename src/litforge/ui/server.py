@@ -50,7 +50,8 @@ from litforge.llm.local_models import fit_check, ollama_change, ollama_pull
 from litforge.llm.secrets import KeyStore
 from litforge.observability import EventLog
 from litforge.parsing.formulas import FormulaEngine, Pix2TextEngine, formulas_available
-from litforge.parsing.run import ParseResult
+from litforge.parsing.mineru_parser import find_command, install_mineru, mineru_status
+from litforge.parsing.run import ParseResult, parse_artifact
 from litforge.parsing.vision import GatewayVision, OllamaVision, Vision, enhance_project, plan_project
 from litforge.parsing.vision_setup import OllamaSetup
 from litforge.pipeline import add_pdfs
@@ -119,6 +120,47 @@ class App:
         # Jobs live in memory: runs left 'running' by a previous server process will never finish.
         conn.execute("UPDATE discovery_runs SET status='interrupted' WHERE status='running'")
         conn.close()
+
+    def mineru_install_job(self, body: dict[str, Any]) -> Job:
+        if body.get('confirmed') is not True:
+            raise ValueError('Confirm the MinerU download size first')
+        if any(j.kind == 'mineru-install' and j.status == 'running' for j in self.jobs.values()):
+            raise ValueError('MinerU installation is already running')
+        def work(job: Job) -> None:
+            install_mineru(self.paths, job.messages.append,
+                           timeout_s=self.config.parsing.mineru.install_timeout_s)
+            job.report = mineru_status(self.paths, self.config.parsing)
+        return self.start_job('mineru-install', '', work)
+
+    def mineru_parse_job(self, paper_id: str) -> Job:
+        if not find_command(self.paths, self.config.parsing):
+            raise ValueError('MinerU is not installed; open Settings to install it')
+        if any(j.kind == 'mineru-parse' and j.status == 'running' for j in self.jobs.values()):
+            raise ValueError('A MinerU parse is already running')
+        conn = self.db()
+        try:
+            artifact = conn.execute(
+                "SELECT * FROM artifacts WHERE paper_id=? AND status='ok' ORDER BY created_at LIMIT 1",
+                (paper_id,),
+            ).fetchone()
+            if artifact is None or not (self.paths.root / artifact['pdf_path']).is_file():
+                raise LookupError('Paper has no PDF')
+        finally:
+            conn.close()
+        def work(job: Job) -> None:
+            conn = self.db()
+            try:
+                minutes = api.mineru_estimate_minutes(artifact['page_count'], api.mineru_seconds_per_page(conn))
+                job.messages.append(f'Re-reading with MinerU (about {minutes} min; '
+                                    'first use downloads about 2 GB of models)…')
+                result = parse_artifact(conn, self.paths, self.config, artifact, force=True, parser='mineru')
+                job.report = result.model_dump()
+                if result.status != 'ok':
+                    raise RuntimeError('Previous parse kept: ' + '; '.join(result.route_reasons))
+                job.messages.append('Finished MinerU parse and re-indexed paper.')
+            finally:
+                conn.close()
+        return self.start_job('mineru-parse', '', work)
 
     def stop_models(self) -> None:
         cfg = self.config.models.servers.get("llamacpp")
@@ -808,6 +850,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 return self._lens(path, query, None)
             conn = app.db()
             try:
+                if path == "/api/mineru":
+                    return self._json(mineru_status(app.paths, app.config.parsing))
                 if path == "/api/keys":
                     return self._json(app.keys.status())
                 if path == "/api/models/catalogue":
@@ -909,6 +953,10 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     q = {k: v[0] for k, v in parse_qs(url.query).items()}
                     return self._import(q.get("name", "refs.csv"), q.get("project") or "default", q.get("export_dir"))
                 body = self._body()
+                if url.path == "/api/mineru/install":
+                    return self._json(app.mineru_install_job(body).__dict__)
+                if m := re.fullmatch(r"/api/papers/([\w-]+)/parse-mineru", url.path):
+                    return self._json(app.mineru_parse_job(m[1]).__dict__)
                 if url.path == "/api/library/remove":
                     conn = app.db()
                     try:
@@ -1041,6 +1089,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 self._error(HTTPStatus.NOT_FOUND, "not found")
             except (ValueError, KeyError, ProjectNotFound, json.JSONDecodeError) as exc:
                 self._error(HTTPStatus.BAD_REQUEST, str(exc))
+            except LookupError as exc:
+                self._error(HTTPStatus.NOT_FOUND, str(exc))
 
         def _is_lens(self, path: str) -> bool:
             return (path in ("/api/ask", "/api/audit", "/api/preview", "/api/review", "/api/matrices",

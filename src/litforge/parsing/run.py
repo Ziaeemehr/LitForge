@@ -1,4 +1,4 @@
-"""Parse orchestration: cache lookup, fast path, routing, optional Docling, persistence."""
+"""Parse orchestration: caching, fast path, structural fallback and persistence."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from litforge.observability import NULL_LOG, EventLog
 from litforge.parsing.base import ParsedDocument, Parser
 from litforge.parsing.canonical import outputs_exist, write_outputs
 from litforge.parsing.docling_parser import DoclingParser, docling_available
+from litforge.parsing.mineru_parser import MinerUParser, find_command
 from litforge.parsing.pymupdf_parser import PyMuPDFParser
 from litforge.parsing.quality import compute_quality
 from litforge.parsing.router import decide
@@ -118,15 +119,20 @@ def _run_parser(
 ) -> tuple[str, Outcome, str, list[str], float | None]:
     """Run one parser with caching. Returns (run_id, outcome, status, reasons, elapsed_ms)."""
     cfg_hash = config_hash(config.parsing.model_dump())
-    out_dir = parse_output_dir(paths, artifact["sha256"], parser.name, parser.version, cfg_hash)
     cached = conn.execute(
-        """SELECT id, status, route_reasons FROM parse_runs
-           WHERE artifact_id=? AND parser=? AND parser_version=? AND config_hash=?""",
-        (artifact["id"], parser.name, parser.version, cfg_hash),
+        """SELECT id, status, route_reasons, output_dir FROM parse_runs
+           WHERE artifact_id=? AND parser=? AND parser_version=? AND (config_hash=? OR config_hash LIKE ?)
+           ORDER BY rowid DESC LIMIT 1""",
+        (artifact["id"], parser.name, parser.version, cfg_hash, cfg_hash + "-%"),
     ).fetchone()
-    if cached and not force and cached["status"] != "failed" and outputs_exist(out_dir):
+    if (cached and not force and cached["status"] != "failed" and cached["output_dir"]
+            and outputs_exist(paths.root / cached["output_dir"])):
         return cached["id"], "cached", cached["status"], json.loads(cached["route_reasons"]), None
 
+    # MinerU attempts retain previous runs and their canonical files, even for the same input.
+    if parser.name == "mineru":
+        cfg_hash += "-" + new_id()
+    out_dir = parse_output_dir(paths, artifact["sha256"], parser.name, parser.version, cfg_hash)
     pdf_path = paths.root / artifact["pdf_path"]
     start = time.perf_counter()
     try:
@@ -134,15 +140,17 @@ def _run_parser(
     except Exception as exc:  # noqa: BLE001 - recorded as a failed run, never as empty success
         elapsed = round((time.perf_counter() - start) * 1000, 1)
         error = f"{type(exc).__name__}: {exc}"
+        retry_reasons = list(getattr(parser, "reasons", []))
         run_id = _persist(conn, paths, artifact["id"], parser, cfg_hash, out_dir, None, "failed",
-                          None, [error], {}, error, elapsed)
+                          None, [*retry_reasons, error], {}, error, elapsed)
         log.emit("parse.failed", artifact_id=artifact["id"], parser=parser.name, error=error)
-        return run_id, "failed", "failed", [error], elapsed
+        return run_id, "failed", "failed", [*retry_reasons, error], elapsed
     elapsed = round((time.perf_counter() - start) * 1000, 1)
     quality = compute_quality(doc, config.parsing.router)
     decision = decide(quality, config.parsing.router)
     if parser.name != "pymupdf" and decision.route == "needs_docling":
-        decision.route = "pymupdf"  # Docling output is the structural fallback; don't loop
+        decision.route = "pymupdf"  # Structural output is already the fallback; don't loop
+    decision.reasons.extend(getattr(parser, "reasons", []))
     status = "ok" if decision.route == "pymupdf" else decision.route
     write_outputs(doc, out_dir, title)
     quality_json = {**quality.model_dump(), "flags": decision.flags, "ocr_pages": decision.ocr_pages}
@@ -161,32 +169,57 @@ def parse_artifact(
     force: bool = False,
     use_docling: bool = True,
     log: EventLog = NULL_LOG,
+    parser: Literal["auto", "pymupdf", "mineru", "docling"] = "auto",
 ) -> ParseResult:
     title_row = conn.execute("SELECT title FROM papers WHERE id=?", (artifact["paper_id"],)).fetchone()
     title = title_row["title"] if title_row else None
     job_id = start_job(conn, "parse", artifact["id"])
+    if parser not in ('auto', 'pymupdf', 'mineru', 'docling'):
+        raise ValueError('Unknown parser: ' + parser)
+    selected: Parser
+    if parser == 'mineru':
+        selected = MinerUParser(paths, config)
+    elif parser == 'docling':
+        selected = DoclingParser()
+    else:
+        selected = PyMuPDFParser()
     run_id, outcome, status, reasons, elapsed = _run_parser(
-        conn, paths, config, artifact, PyMuPDFParser(), title, force, log
+        conn, paths, config, artifact, selected, title, force, log
     )
-    parser_name = "pymupdf"
+    parser_name = selected.name
     message = None
     current_id = run_id
-    if status == "needs_docling":
-        if use_docling and docling_available():
+    fallback = config.parsing.complex_fallback if use_docling and parser == 'auto' else 'none'
+    if status == 'needs_docling' and fallback != 'none':
+        structural: Parser | None = None
+        if fallback in ('auto', 'mineru') and find_command(paths, config.parsing):
+            structural = MinerUParser(paths, config)
+        elif fallback in ('auto', 'docling') and docling_available():
+            structural = DoclingParser()
+        if structural:
             d_run, d_outcome, d_status, d_reasons, d_elapsed = _run_parser(
-                conn, paths, config, artifact, DoclingParser(), title, force, log
+                conn, paths, config, artifact, structural, title, force, log
             )
-            if d_status not in ("failed", "needs_review"):
-                current_id, parser_name, status, outcome = d_run, "docling", d_status, d_outcome
-                reasons = reasons + [f"docling: {r}" for r in d_reasons]
+            if d_status not in ('failed', 'needs_review', 'needs_ocr'):
+                current_id, parser_name, status, outcome = d_run, structural.name, d_status, d_outcome
+                reasons += d_reasons
+                elapsed = (elapsed or 0) + (d_elapsed or 0)
             else:
-                message = f"docling fallback failed: {'; '.join(d_reasons)}"
+                message = f"{structural.name} fallback failed: {'; '.join(d_reasons)}"
         else:
-            message = "Docling not installed; kept PyMuPDF output (install with `uv sync --extra docling`)"
+            message = 'Structural parser not installed; kept PyMuPDF output (run `litforge parse install-mineru`)'
     with transaction(conn):
-        _set_current(conn, artifact["id"], current_id)
-        finish_job(conn, job_id, "failed" if status == "failed" else "done",
-                   {"outcome": outcome, "status": status, "parser": parser_name})
+        if status != 'failed' and (parser != 'mineru' or status == 'ok'):
+            _set_current(conn, artifact['id'], current_id)
+        finish_job(conn, job_id, 'failed' if status == 'failed' else 'done',
+                   {'outcome': outcome, 'status': status, 'parser': parser_name})
+    if parser == 'mineru' and status not in ('failed', 'needs_review', 'needs_ocr'):
+        from litforge.indexing.fts import index_run
+        current = conn.execute(
+            'SELECT r.*, a.paper_id, a.sha256 FROM parse_runs r JOIN artifacts a ON a.id=r.artifact_id WHERE r.id=?',
+            (current_id,),
+        ).fetchone()
+        index_run(conn, paths, config, current)
     return ParseResult(
         artifact_id=artifact["id"], paper_id=artifact["paper_id"], outcome=outcome, parser=parser_name,
         status=status, route_reasons=reasons, message=message, elapsed_ms=elapsed,

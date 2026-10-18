@@ -27,9 +27,16 @@ class RouterThresholds(BaseModel):
     max_table_count: int = 6
 
 
+class MinerUConfig(BaseModel):
+    command: str | None = None
+    seconds_per_page_timeout: float = Field(default=120, gt=0, allow_inf_nan=False)
+    install_timeout_s: float = Field(default=2700, gt=0, allow_inf_nan=False)
+
+
 class ParsingConfig(BaseModel):
     fast_path: str = "pymupdf"
-    complex_fallback: str = "docling"
+    complex_fallback: Literal["auto", "mineru", "docling", "none"] = "auto"
+    mineru: MinerUConfig = Field(default_factory=MinerUConfig)
     ocr: str = "selective"
     keep_originals: bool = True
     figure_dpi: int = 150

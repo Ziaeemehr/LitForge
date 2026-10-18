@@ -69,6 +69,40 @@ def test_start_and_own_stop(tmp_path: Path) -> None:
     assert server.stop(cfg) and fake.signals == [123]
 
 
+@pytest.mark.parametrize(('slots', 'idle'), [
+    ([{'is_processing': False}], True), ([{'is_processing': True}], False),
+    ([{'is_processing': False}, {'is_processing': True}], False),
+    (None, False), ([], False), ([{}], False),
+])
+def test_idle_requires_verified_inactive_slots(tmp_path: Path, slots: Any, idle: bool) -> None:
+    fake = Fake()
+    cfg = LlamaCppServerConfig(managed=True)
+    urls: list[str] = []
+    def probe(url: str) -> Any:
+        urls.append(url)
+        return slots
+    server = fake.server(tmp_path, slots_probe=probe)
+    server.ensure_running(cfg, 'gemma4')
+    assert server.is_idle(cfg) is idle
+    assert urls == [cfg.base_url.removesuffix('/v1') + '/slots?model=gemma4']
+
+
+def test_unowned_server_is_never_idle(tmp_path: Path) -> None:
+    server = Fake().server(tmp_path, slots_probe=lambda _: pytest.fail('unowned slots queried'))
+    assert not server.is_idle(LlamaCppServerConfig(managed=True))
+
+
+def test_idle_stop_rechecks_slots_inside_lock(tmp_path: Path) -> None:
+    fake = Fake()
+    slots = iter([[{'is_processing': False}], [{'is_processing': True}]])
+    server = fake.server(tmp_path, slots_probe=lambda _: next(slots))
+    cfg = LlamaCppServerConfig(managed=True)
+    server.ensure_running(cfg, 'gemma4')
+    assert server.is_idle(cfg)
+    assert not server.stop(cfg, only_if_idle=True)
+    assert fake.signals == []
+
+
 @pytest.mark.parametrize("mode", ["foreign", "up"])
 def test_foreign_port_never_spawned_or_stopped(tmp_path: Path, mode: str) -> None:
     fake = Fake()

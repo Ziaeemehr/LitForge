@@ -885,6 +885,15 @@
           if (!full.hidden) full.scrollIntoView({ behavior: 'smooth' });
         };
       }
+      if (d.pdf_url) {
+        var reread = document.createElement('button');
+        reread.className = 'btn small'; reread.textContent = 'Re-read accurately (MinerU)';
+        reread.onclick = function () { rereadMineru(d); };
+        var parseStatus = document.createElement('p'); parseStatus.id = 'mineru-paper-status';
+        parseStatus.setAttribute('role', 'status');
+        parseStatus.textContent = mineruEstimate(d);
+        $('dhead').appendChild(reread); $('dhead').appendChild(parseStatus);
+      }
       attachReproTabs(d, request);
     }).catch(function (e) { if (request === drawerRequest) $('dbody').textContent = e.message; });
   }
@@ -1684,6 +1693,55 @@
     zone.querySelector('a').onclick = function (e) { e.preventDefault(); clear(); };
   }
 
+  /* ---------- MinerU ---------- */
+  function loadMineru() {
+    return api('/api/mineru').then(function (info) {
+      $('mineru-status').textContent = (info.installed ? 'Installed · ' + info.version : 'Not installed') +
+        ' · Models: ' + (info.models_bytes / 1000000000).toFixed(2) + ' GB' + (info.error ? ' · ' + info.error : '');
+      $('mineru-install').hidden = info.installed;
+      $('mineru-install').onclick = installMineru;
+    }).catch(function (e) { $('mineru-status').textContent = e.message; });
+  }
+
+  function watchMineru(job, target, done) {
+    return api('/api/jobs/' + encodeURIComponent(job.id)).then(function (report) {
+      target.textContent = (report.messages || []).join('\n') + (report.error ? '\n' + report.error : '');
+      if (report.status === 'running') {
+        setTimeout(function () { watchMineru(job, target, done); }, 1500);
+      } else if (report.status === 'done') {
+        done();
+      }
+    }).catch(function (e) { target.textContent = e.message; });
+  }
+
+  function installMineru() {
+    return api('/api/mineru').then(function (info) {
+      if (!window.confirm(info.notice + '\nDownload and install MinerU?')) return;
+      $('mineru-progress').textContent = 'Installing MinerU…';
+      return post('/api/mineru/install', { confirmed: true }).then(function (job) {
+        return watchMineru(job, $('mineru-progress'), loadMineru);
+      });
+    }).catch(function (e) { $('mineru-progress').textContent = e.message; });
+  }
+
+  function rereadMineru(paper) {
+    return api('/api/mineru').then(function (info) {
+      if (!info.installed) { showView('settings'); return; }
+      var estimate = mineruEstimate(paper);
+      if (!window.confirm('Re-read accurately with MinerU? ' + estimate + '. Models download on first use (~2 GB).')) return;
+      var target = $('mineru-paper-status');
+      target.textContent = 'MinerU is running · ' + estimate;
+      return post('/api/papers/' + encodeURIComponent(paper.id) + '/parse-mineru', {}).then(function (job) {
+        return watchMineru(job, target, function () { openDrawer(paper); });
+      });
+    }).catch(function (e) { $('mineru-paper-status').textContent = e.message; });
+  }
+  function mineruEstimate(paper) {
+    var seconds = paper.mineru_seconds_per_page || 20;
+    return 'about ' + Math.max(1, Math.ceil((paper.page_count || 1) * seconds / 60)) + ' min';
+  }
+  /* ---------- End MinerU ---------- */
+
   /* ---------- Models settings ---------- */
   var modelsInfo = null;
   var modelProviders = {
@@ -1918,7 +1976,7 @@
       }).catch(settingsError);
   }
   function loadSettings() {
-    return Promise.all([loadModels(), loadKeys()]).then(function () {
+    return Promise.all([loadModels(), loadKeys(), loadMineru()]).then(function () {
       if (modelsInfo && modelsInfo.proposal && modelsInfo.proposal.recommended_tier === 'cloud' && !$('cloud-cheap').value) return searchCatalogue();
     });
   }

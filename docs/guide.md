@@ -417,8 +417,33 @@ and exports stay intact. File failures are reported, and space estimates exclude
    (`needs_docling`) or OCR (`needs_ocr`).
 3. **Index:** text is split into section-aware chunks and indexed with SQLite FTS5.
 
-Optional: `uv sync --extra docling` installs [Docling](https://github.com/docling-project/docling)
-as a fallback for complex layouts.
+[MinerU](https://github.com/opendatalab/MinerU) is the accurate local parser for equations,
+superscripts and tables. Install the pinned 4.0.12 release with `litforge parse install-mineru`
+(or Settings → Accurate PDF parsing). LitForge previews the size and asks before downloading;
+`--yes` confirms from the command line. The isolated environment lives in `<data>/tools/mineru`,
+with about 2 GB of models under `<data>/models/mineru`, downloaded on first use; torch and other
+dependencies need additional disk space.
+
+Allow roughly **20 seconds per page on GPU**, longer on CPU (about 46 seconds per page in our
+sample). MinerU needs substantial memory. LitForge stops its own managed llama-server when its
+slots report it is idle; a GPU memory failure triggers one CPU retry. The model server loads again
+on the next model call.
+
+The default `parsing.complex_fallback: auto` uses MinerU when installed, otherwise Docling
+(`uv sync --extra docling`). You can choose `mineru`, `docling` or `none` in config.
+`litforge parse --parser mineru --paper ID` re-reads a selected paper; repeat `--paper` for more.
+The paper drawer's **Re-read accurately (MinerU)** button runs in the background with a time
+estimate ("about N min", based on successful MinerU runs in this library, initially 20 seconds per page)
+and status. Successful forced MinerU runs become current and re-index the paper;
+failed attempts preserve the previous run and earlier evidence stays available.
+`--parser pymupdf` selects the fast parser alone, and the legacy `--no-docling` disables all
+automatic structural fallback.
+
+**Privacy:** PDFs stay on this computer. LitForge invokes only local parsing, never MinerU's
+remote service, strips API keys from the parsing process, and disables interactive telemetry
+prompts. Installation and first-use model downloads require internet access.
+Installation allows 45 minutes in total (`parsing.mineru.install_timeout_s: 2700`); failure, timeout or
+interruption removes the tool directory created by that attempt and preserves existing installations.
 
 ## Better math (equations and tables)
 

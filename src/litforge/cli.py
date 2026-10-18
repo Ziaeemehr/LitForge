@@ -6,6 +6,7 @@ import json
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -288,25 +289,62 @@ def add(
     typer.echo(f"indexed: {chunks} chunks. Try: litforge search \"your query\"")
 
 
-@app.command()
+class ParserChoice(StrEnum):
+    auto = "auto"
+    pymupdf = "pymupdf"
+    mineru = "mineru"
+    docling = "docling"
+
+
+parse_app = typer.Typer(help="Parse PDFs or install the accurate parser.", invoke_without_command=True)
+app.add_typer(parse_app, name="parse")
+
+
+@parse_app.command("install-mineru")
+def install_mineru_command(
+    ctx: typer.Context,
+    yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
+) -> None:
+    from litforge.parsing.mineru_parser import INSTALL_NOTICE, install_mineru
+    st = _state(ctx)
+    typer.echo(INSTALL_NOTICE)
+    typer.echo(f"Tool: {st.paths.root / 'tools' / 'mineru'}; models: {st.paths.root / 'models' / 'mineru'}")
+    if not yes and not typer.confirm("Download and install MinerU?"):
+        return
+    install_mineru(st.paths, typer.echo, timeout_s=st.config.parsing.mineru.install_timeout_s)
+
+
+@parse_app.callback()
 def parse(
     ctx: typer.Context,
     project: ProjectOpt = None,
     force: Annotated[bool, typer.Option("--force", help="Re-parse even when cached")] = False,
-    no_docling: Annotated[bool, typer.Option("--no-docling", help="Never run the Docling fallback")] = False,
+    no_docling: Annotated[bool, typer.Option("--no-docling", help="Disable structural fallback")] = False,
+    parser: Annotated[ParserChoice, typer.Option("--parser")] = ParserChoice.auto,
+    paper: Annotated[list[str] | None, typer.Option("--paper", help="Paper ID (repeatable)")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Parse ingested PDFs (cached by PDF hash + parser version + config; resumable)."""
+    if ctx.invoked_subcommand:
+        return
     st = _state(ctx)
     conn = st.db()
-    artifacts = artifacts_for_project(conn, _project(st, conn, project)[1])
+    scope = _project(st, conn, project)[1] if project or not paper else None
+    artifacts = artifacts_for_project(conn, scope)
+    if paper:
+        artifacts = [art for art in artifacts if art["paper_id"] in paper]
+        missing = set(paper) - {art["paper_id"] for art in artifacts}
+        if missing:
+            where = "in this project" if scope else "with a PDF in the library"
+            typer.secho(f"skipped {len(missing)} paper(s) not {where}: {', '.join(sorted(missing))}",
+                        fg="yellow", err=True)
     if dry_run:
         typer.echo(f"[dry-run] {len(artifacts)} artifact(s) would be parsed or served from cache")
         return
     results = []
     for i, art in enumerate(artifacts, 1):
-        res = parse_artifact(conn, st.paths, st.config, art, force, not no_docling, st.log)
+        res = parse_artifact(conn, st.paths, st.config, art, force, not no_docling, st.log, parser=parser.value)
         results.append(res)
         if not as_json:
             color = "green" if res.status == "ok" else "yellow" if res.status != "failed" else "red"

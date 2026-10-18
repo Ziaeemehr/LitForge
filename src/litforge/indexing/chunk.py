@@ -60,15 +60,19 @@ def _split_sentences(text: str, target: int, count: TokenCounter) -> list[str]:
     """Group sentences into pieces of at most ~target tokens."""
     pieces: list[str] = []
     current = ""
-    for sentence in SENTENCE_SPLIT_RE.split(text):
-        candidate = f"{current} {sentence}".strip()
+    start = 0
+    # Keep source separators: caption/table boundaries carry structural meaning.
+    for end in [m.end() for m in SENTENCE_SPLIT_RE.finditer(text)] + [len(text)]:
+        sentence = text[start:end]
+        start = end
+        candidate = current + sentence
         if current and count(candidate) > target:
-            pieces.append(current)
+            pieces.append(current.strip())
             current = sentence
         else:
             current = candidate
     if current:
-        pieces.append(current)
+        pieces.append(current.strip())
     return pieces
 
 

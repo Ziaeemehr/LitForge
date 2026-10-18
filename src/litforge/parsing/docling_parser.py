@@ -20,7 +20,7 @@ from litforge.parsing.base import (
     ParagraphKind,
     ParsedDocument,
     Section,
-    SectionKind,
+    section_kind,
 )
 
 
@@ -70,15 +70,7 @@ class DoclingParser:
                 continue
             if label == "section_header":  # the title stays a front-matter paragraph
                 text = item.text.strip()
-                lowered = text.lower()
-                kind: SectionKind = "body"
-                if "abstract" in lowered:
-                    kind = "abstract"
-                elif lowered.startswith(("references", "bibliography")):
-                    kind = "references"
-                elif lowered.startswith(("appendix", "supplementary")):
-                    kind = "appendix"
-                sections.append(Section(heading=text, kind=kind, level=max(1, level)))
+                sections.append(Section(heading=text, kind=section_kind(text), level=max(1, level)))
                 continue
             if label == "table":
                 caption = item.caption_text(ddoc) or None

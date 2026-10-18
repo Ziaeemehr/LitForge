@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -15,6 +16,18 @@ SectionKind = Literal["front", "abstract", "body", "references", "appendix"]
 ParagraphKind = Literal["text", "caption", "equation"]
 AssetKind = Literal["figure", "table", "equation"]
 AssetQuality = Literal["verified", "uncertain", "failed"]
+
+
+def section_kind(heading: str) -> SectionKind:
+    """Classify structural headings, including labelled appendix headings."""
+    lowered = heading.strip().lower()
+    if re.match(r'^(?:(?:[a-z]|\d+(?:\.\d+)*)[.):]?\s+)?(?:appendix|supplementary)\b', lowered):
+        return 'appendix'
+    if 'abstract' in lowered:
+        return 'abstract'
+    if lowered.startswith(('references', 'bibliography')):
+        return 'references'
+    return 'body'
 
 
 class Paragraph(BaseModel):
