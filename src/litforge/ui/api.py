@@ -561,7 +561,7 @@ def lens_matrix(conn: sqlite3.Connection, matrix_id: str, all_versions: bool = F
         primary = primary_paper_ids(conn, project_id)
         matrix = matrix.model_copy(update={"cells": [c for c in matrix.cells if c.paper_id in primary]})
     result = matrices.MatrixResult(run_id="", matrix=matrix, cells=matrix.cells)
-    data = result.model_dump()
+    data = matrix.model_dump()
     data['warnings'] = matrices.matrix_warnings(result)
     data['evidence'] = [s.model_dump() for s in matrices.matrix_spans(conn, matrix)]
     data['papers'] = [dict(r) for r in conn.execute(

@@ -23,6 +23,7 @@ from litforge.analysis.validation import (
     missing_numbers,
     strip_evidence_mentions,
 )
+from litforge.discovery.versions import primary_paper_ids
 from litforge.indexing.fts import SearchHit, current_runs
 from litforge.llm.evidence import EvidencePacket
 from litforge.storage.db import new_id, now, transaction
@@ -115,7 +116,8 @@ class Answer(BaseModel):
 
 
 def _question_spans(conn: sqlite3.Connection, hits: list[SearchHit], question: str,
-                    project_id: str | None, paper_ids: list[str] | None = None) -> list[EvidenceSpan]:
+                    project_id: str | None, paper_ids: list[str] | None = None,
+                    all_versions: bool = False) -> list[EvidenceSpan]:
     spans = [span.model_copy(update={"page": hit.page}) for span, hit in
              zip(record_spans(conn, hits), hits, strict=True)]
     seen = {span.id for span in spans}
@@ -125,8 +127,10 @@ def _question_spans(conn: sqlite3.Connection, hits: list[SearchHit], question: s
         if row is not None:
             selected_runs.add((hit.paper_id, row["parse_run_id"]))
     if not hits:
+        wanted = (set(paper_ids) if paper_ids is not None else
+                  None if all_versions else primary_paper_ids(conn, project_id))
         selected_runs.update((row["paper_id"], row["id"]) for row in current_runs(conn, project_id)
-                             if paper_ids is None or row["paper_id"] in paper_ids)
+                             if wanted is None or row["paper_id"] in wanted)
     for paper_id, parse_run_id in sorted(selected_runs):
         for span in relevant_asset_spans(conn, paper_id, parse_run_id, question):
             if span.id not in seen:
@@ -205,7 +209,7 @@ def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, question: str, p
                paper_ids: list[str] | None = None, all_versions: bool = False) -> list[CallPreview]:
     hits = retrieve_for_question(conn, question, project_id, k, paper_ids=paper_ids,
                                  all_versions=all_versions)
-    spans = _question_spans(conn, hits, question, project_id, paper_ids)
+    spans = _question_spans(conn, hits, question, project_id, paper_ids, all_versions)
     if not spans:
         return []
     packet, messages = gateway.fit_evidence("ask", to_packet(spans, sensitive=sensitive),
@@ -222,7 +226,7 @@ def ask(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_
     try:
         hits = retrieve_for_question(conn, question, project_id, k, paper_ids=paper_ids,
                                      all_versions=all_versions)
-        spans = _question_spans(conn, hits, question, project_id, paper_ids)
+        spans = _question_spans(conn, hits, question, project_id, paper_ids, all_versions)
         link_evidence(conn, run_id, spans, [*(h.score for h in hits), *([None] * (len(spans) - len(hits)))])
         model, provider = "", ""
         if spans:

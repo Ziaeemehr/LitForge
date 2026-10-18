@@ -51,6 +51,7 @@ class VersionCandidate:
     version_source: str
     direct: bool
     order: int
+    declared_version: str | None = None
 
 
 def infer_version(
@@ -116,9 +117,10 @@ def rank_candidates(
         seen.add(url)
         version = _version_name(raw_version)
         version_source = source if version != "unknown" else "unknown"
-        if version == "unknown" and _host_is_preprint(url):
+        if _host_is_preprint(url):
             version, version_source = "submitted", "host"
-        candidates.append(VersionCandidate(url, version, version_source, _direct(url), order))
+        candidates.append(VersionCandidate(url, version, version_source, _direct(url), order,
+                                           _version_name(raw_version)))
         order += 1
 
     # Retain the historic source preference inside a version: arXiv, repository copies,
@@ -184,6 +186,15 @@ def _join_pair(conn: sqlite3.Connection, a: str, b: str, evidence: str, *, confi
                by_user: bool = False) -> bool:
     if a == b or (not by_user and _rejected(conn, a, b)):
         return False
+    ga, gb = _group_for(conn, a), _group_for(conn, b)
+    if ga != gb:
+        left = [str(r[0]) for r in conn.execute(
+            "SELECT paper_id FROM paper_versions WHERE group_id=? AND confirmed=1", (ga,))] if ga else [a]
+        right = [str(r[0]) for r in conn.execute(
+            "SELECT paper_id FROM paper_versions WHERE group_id=? AND confirmed=1", (gb,))] if gb else [b]
+        if any(_rejected(conn, x, y) for x in left for y in right
+               if not by_user or {x, y} != {a, b}):
+            return False
     ts = now()
     # A decided pair is no longer a suggestion (the user's confirmation also lifts an earlier rejection).
     conn.execute(
@@ -191,7 +202,6 @@ def _join_pair(conn: sqlite3.Connection, a: str, b: str, evidence: str, *, confi
              SELECT x.group_id FROM paper_versions x JOIN paper_versions y ON x.group_id=y.group_id
              WHERE x.paper_id=? AND y.paper_id=? AND x.confirmed=0 AND y.confirmed=0)""", (a, b),
     )
-    ga, gb = _group_for(conn, a), _group_for(conn, b)
     roles = {a: _role_for_paper(conn, a), b: _role_for_paper(conn, b)}
     if ga and ga == gb:
         for paper_id in (a, b):
@@ -223,9 +233,9 @@ def link_explicit_versions(
 ) -> int:
     """Link only explicit Crossref DOI relations, DOI revisions and shared OpenAlex works."""
     linked = 0
-    doi_ids = {normalize_doi(str(r["doi"])).lower(): str(r["id"]) for r in conn.execute(
-        "SELECT id,doi FROM papers WHERE doi IS NOT NULL")}
-    with transaction(conn):
+    with transaction(conn, immediate=True):
+        doi_ids = {normalize_doi(str(r["doi"])).lower(): str(r["id"]) for r in conn.execute(
+            "SELECT id,doi FROM papers WHERE doi IS NOT NULL")}
         for doi, relations in (crossref_relations or {}).items():
             source_id = doi_ids.get(doi.lower())
             if not source_id:
@@ -382,15 +392,27 @@ def suggest_similar_versions(conn: sqlite3.Connection, paper_ids: Collection[str
         found.append((a.id, b.id))
     roles = {paper_id: _role_for_paper(conn, paper_id) for pair in found for paper_id in pair}
     ts = now()
-    with transaction(conn):
+    inserted = 0
+    with transaction(conn, immediate=True):
+        # Similarity is computed outside the write lock, but decisions must be read again after
+        # reserving the writer: another UI job may have suggested, rejected or confirmed this pair.
+        confirmed = {str(r["paper_id"]): str(r["group_id"]) for r in conn.execute(
+            "SELECT paper_id,group_id FROM paper_versions WHERE confirmed=1")}
+        decided = {frozenset((str(r[0]), str(r[1]))) for r in conn.execute(
+            "SELECT paper_id_a,paper_id_b FROM paper_version_pairs")}
         for pair in found:
+            left_id, right_id = pair
+            if frozenset(pair) in decided or (left_id in confirmed and
+                                              confirmed[left_id] == confirmed.get(right_id)):
+                continue
             group_id = str(uuid.uuid4())
             for paper_id in pair:
                 conn.execute(
-                    "INSERT OR IGNORE INTO paper_versions(group_id,paper_id,role,evidence,confirmed,created_at)"
+                    "INSERT INTO paper_versions(group_id,paper_id,role,evidence,confirmed,created_at)"
                     " VALUES (?,?,?,'similarity:title-authors-year',0,?)", (group_id, paper_id, roles[paper_id], ts),
                 )
-    return len(found)
+            inserted += 1
+    return inserted
 
 
 def link_project_versions(conn: sqlite3.Connection, http: HttpClient, mailto: str | None,
@@ -403,7 +425,7 @@ def link_project_versions(conn: sqlite3.Connection, http: HttpClient, mailto: st
 
 
 def confirm_version_link(conn: sqlite3.Connection, a: str, b: str) -> bool:
-    with transaction(conn):
+    with transaction(conn, immediate=True):
         _join_pair(conn, a, b, "user:confirmed", confirmed=True, by_user=True)
         group = _group_for(conn, a)
         return group is not None and group == _group_for(conn, b)
@@ -411,7 +433,7 @@ def confirm_version_link(conn: sqlite3.Connection, a: str, b: str) -> bool:
 
 def unlink_version(conn: sqlite3.Connection, paper_id: str) -> bool:
     """Remove a paper from its confirmed group and remember that it is not a version of the others."""
-    with transaction(conn):
+    with transaction(conn, immediate=True):
         group = _group_for(conn, paper_id)
         if group is None:
             return False
@@ -422,6 +444,14 @@ def unlink_version(conn: sqlite3.Connection, paper_id: str) -> bool:
             conn.execute("DELETE FROM paper_versions WHERE group_id=?", (group,))
         ts = now()
         for other in others:
+            # A similarity suggestion may predate this group's transitive confirmation. Replace
+            # that pair's old decision before recording the unlink, preserving pair uniqueness.
+            left_id, right_id = sorted((paper_id, other))
+            conn.execute(
+                "DELETE FROM paper_versions WHERE confirmed=0 AND group_id IN ("
+                "SELECT group_id FROM paper_version_pairs WHERE paper_id_a=? AND paper_id_b=?)",
+                (left_id, right_id),
+            )
             rejection = str(uuid.uuid4())  # one per pair, so the remaining members stay versions of each other
             for member in (paper_id, other):
                 conn.execute(
@@ -432,7 +462,7 @@ def unlink_version(conn: sqlite3.Connection, paper_id: str) -> bool:
 
 
 def reject_version_link(conn: sqlite3.Connection, a: str, b: str) -> bool:
-    with transaction(conn):
+    with transaction(conn, immediate=True):
         row = conn.execute(
             """SELECT x.group_id FROM paper_versions x JOIN paper_versions y ON x.group_id=y.group_id
                WHERE x.paper_id=? AND y.paper_id=? AND x.confirmed=0 AND y.confirmed=0
@@ -446,9 +476,9 @@ def reject_version_link(conn: sqlite3.Connection, a: str, b: str) -> bool:
 
 
 def set_primary(conn: sqlite3.Connection, paper_id: str) -> None:
-    row = conn.execute("SELECT group_id FROM paper_versions WHERE paper_id=? AND confirmed=1 LIMIT 1",
-                       (paper_id,)).fetchone()
-    with transaction(conn):
+    with transaction(conn, immediate=True):
+        row = conn.execute("SELECT group_id FROM paper_versions WHERE paper_id=? AND confirmed=1 LIMIT 1",
+                           (paper_id,)).fetchone()
         group_id = str(row["group_id"]) if row else str(uuid.uuid4())
         if not row:
             conn.execute(
@@ -468,11 +498,16 @@ def _version_selection(conn: sqlite3.Connection, project_id: str | None) -> tupl
     ).fetchone():
         return set(), set()
     sql = """SELECT pv.group_id,pv.paper_id,pv.role,pv.is_primary,
-                  EXISTS(SELECT 1 FROM artifacts a WHERE a.paper_id=pv.paper_id AND a.status='ok'
-                         AND a.id=(SELECT current.id FROM artifacts current WHERE current.paper_id=pv.paper_id
-                                   AND current.status='ok' ORDER BY current.created_at DESC LIMIT 1)
-                         AND COALESCE(a.version_label,'') NOT LIKE 'this PDF is %') has_pdf
-           FROM paper_versions pv WHERE pv.confirmed=1 AND pv.rejected=0"""
+                  (a.id IS NOT NULL AND COALESCE(a.version_label,'') NOT LIKE 'this PDF is %') has_pdf,
+                  (COALESCE(a.version_label,'') NOT LIKE 'this PDF is %' AND EXISTS(
+                      SELECT 1 FROM parse_runs r JOIN chunks c ON c.parse_run_id=r.id
+                      WHERE r.artifact_id=a.id AND r.is_current=1 AND r.output_dir IS NOT NULL
+                        AND trim(c.text)<>'')) has_text
+           FROM paper_versions pv
+           LEFT JOIN artifacts a ON a.id=(SELECT current.id FROM artifacts current
+               WHERE current.paper_id=pv.paper_id AND current.status='ok'
+               ORDER BY current.created_at DESC LIMIT 1)
+           WHERE pv.confirmed=1 AND pv.rejected=0"""
     params: tuple[str, ...] = ()
     if project_id:
         sql += " AND pv.paper_id IN (SELECT paper_id FROM project_papers WHERE project_id=?)"
@@ -484,7 +519,7 @@ def _version_selection(conn: sqlite3.Connection, project_id: str | None) -> tupl
     for members in grouped.values():
         explicit = next((r for r in members if r["is_primary"]), None)
         winner = explicit or min(members, key=lambda r: (
-            not bool(r["has_pdf"]), ROLE_ORDER.get(r["role"], 4), str(r["paper_id"])))
+            not bool(r["has_text"]), not bool(r["has_pdf"]), ROLE_ORDER.get(r["role"], 4), str(r["paper_id"])))
         selected.add(str(winner["paper_id"]))
     return {str(r["paper_id"]) for members in grouped.values() for r in members}, selected
 
@@ -614,7 +649,7 @@ def backfill_unknown_versions(conn: sqlite3.Connection, paths: Any) -> tuple[int
         if version == "unknown" and warning is None:
             continue
         label = warning or format_version_label(version, row["source_url"])
-        with transaction(conn):
+        with transaction(conn, immediate=True):
             changed += conn.execute(
                 "UPDATE artifacts SET version=?,version_source=?,version_label=? WHERE id=? AND version='unknown'",
                 (version, source, label, row["id"]),
@@ -633,7 +668,7 @@ def set_artifact_version(
 ) -> None:
     if version not in VERSION_ORDER or source not in {"openalex", "unpaywall", "host", "pdf_text", "user", "unknown"}:
         raise ValueError("invalid PDF version or source")
-    with transaction(conn):
+    with transaction(conn, immediate=True):
         changed = conn.execute(
             "UPDATE artifacts SET version=?,version_source=?,version_label=NULL WHERE id=(SELECT id FROM artifacts "
             "WHERE paper_id=? AND status='ok' ORDER BY created_at DESC LIMIT 1)",

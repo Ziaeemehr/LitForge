@@ -50,7 +50,7 @@ def urllib_transport(url: str, headers: Mapping[str, str], timeout: float) -> Re
             body = resp.read(MAX_RESPONSE_BYTES + 1)
             if len(body) > MAX_RESPONSE_BYTES:
                 raise HttpError(url, -1, f"response larger than {MAX_RESPONSE_BYTES // 2**20} MB")
-            return resp.status, dict(resp.headers.items()), body
+            return resp.status, {**dict(resp.headers.items()), "X-LitForge-Final-URL": resp.geturl()}, body
     except urllib.error.HTTPError as exc:
         return exc.code, dict(exc.headers.items()) if exc.headers else {}, exc.read() or b""
 
@@ -98,12 +98,16 @@ class HttpClient:
         self._last_request[host] = time.monotonic()
 
     def get_bytes(self, url: str, headers: Mapping[str, str] | None = None) -> bytes:
+        return self.get_bytes_with_url(url, headers)[0]
+
+    def get_bytes_with_url(self, url: str, headers: Mapping[str, str] | None = None) -> tuple[bytes, str]:
+        """Return the response body and final URL after redirects."""
         cache = self._cache_path(url)
         if cache is not None and cache.exists() and not self.refresh:
             entry = json.loads(cache.read_text())
             if time.time() - entry["fetched_at"] < self.cache_ttl_s:
                 self.cache_hits += 1
-                return bytes(entry["body"], "utf-8")
+                return bytes(entry["body"], "utf-8"), entry.get("response_url", url)
         host = urllib.parse.urlsplit(url).netloc
         hdrs = {"User-Agent": self.user_agent, "Accept": "application/json", **(headers or {})}
         delay = 2.0
@@ -113,11 +117,17 @@ class HttpClient:
             self.requests_made += 1
             self._track_cost(host, resp_headers)
             if status == 200:
+                response_url = _header(resp_headers, "X-LitForge-Final-URL") or url
                 if cache is not None:
+                    parsed = urllib.parse.urlsplit(response_url)
+                    query = [(k, v) for k, v in urllib.parse.parse_qsl(parsed.query)
+                             if k not in ("api_key", "mailto", "email")]
+                    cached_url = urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(query)))
                     cache.parent.mkdir(parents=True, exist_ok=True)
                     cache.write_text(json.dumps({"url": url.split("api_key=")[0], "fetched_at": time.time(),
-                                                 "body": body.decode("utf-8", errors="replace")}))
-                return body
+                                                 "body": body.decode("utf-8", errors="replace"),
+                                                 "response_url": cached_url}))
+                return body, response_url
             if status in RETRY_STATUSES and attempt < self.max_retries:
                 retry_after = _header(resp_headers, "Retry-After")
                 wait = float(retry_after) if retry_after and retry_after.isdigit() else delay

@@ -68,7 +68,7 @@ def export_markdown(
            WHERE pp.project_id = ?{MARK_SCOPES[only]} ORDER BY p.year, p.title""",
         (project_id,),
     ).fetchall()
-    if not all_versions:
+    if not all_versions and paper_ids is None:
         primary = primary_paper_ids(conn, project_id)
         rows = [r for r in rows if r["id"] in primary]
     if paper_ids is not None:

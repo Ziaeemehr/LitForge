@@ -358,3 +358,20 @@ test('the run confirmation states the version scope', async () => {
   ctx.confirmLensPreview(plan, true);
   assert.match($('lens-preview-content').textContent, /Versions: all versions/);
 });
+
+test('matrix renders a response produced by the real Python API', async () => {
+  const { execFileSync } = require('node:child_process');
+  const path = require('node:path');
+  const venvPython = path.join('.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+  const python = process.env.LITFORGE_TEST_PYTHON || (fs.existsSync(venvPython) ? venvPython : 'python3');
+  const response = JSON.parse(execFileSync(python, ['tests/ui/matrix_response.py'], { encoding: 'utf8' }));
+  const { ctx, $ } = setup();
+  ctx.api = async () => response;
+  await ctx.loadLensMatrix(response.id);
+  assert.equal($('lens-matrix-title').textContent, 'Contract matrix');
+  assert.equal($('lens-matrix-description').textContent, 'What is the gain?');
+  const [head, body] = $('lens-table').children;
+  assert.deepEqual(head.children[0].children.map(el => el.textContent), ['Paper', 'Gain']);
+  assert.equal(body.children[0].children[0].textContent, 'Synthetic paper');
+  assert.equal(body.children[0].children[1].children[0].textContent, 'Not extracted');
+});

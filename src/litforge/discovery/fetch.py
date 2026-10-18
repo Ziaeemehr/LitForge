@@ -11,12 +11,14 @@ papers are reported with a link to open in a browser.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import html
 import re
 import sqlite3
 import urllib.parse
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 
 from litforge.config import Config, Paths
 from litforge.discovery.http import HttpClient, HttpError
@@ -31,7 +33,7 @@ from litforge.discovery.versions import (
 )
 from litforge.indexing.fts import current_runs, index_run
 from litforge.ingest import ingest_file
-from litforge.metadata.extract import extract_metadata, normalize_doi
+from litforge.metadata.extract import extract_metadata, normalize_doi, normalize_title
 from litforge.observability import NULL_LOG, EventLog
 from litforge.parsing.run import parse_artifact
 from litforge.projects import MARK_SCOPES, add_paper
@@ -149,7 +151,7 @@ def unpaywall_locations(http: HttpClient, doi: str | None, email: str | None) ->
 
 
 def _short(exc: Exception) -> str:
-    return f"HTTP {exc.status}" if isinstance(exc, HttpError) else str(exc)[:120]
+    return f"HTTP {exc.status}" if isinstance(exc, HttpError) else str(exc)[:300]
 
 
 def citation_pdf_url(page: bytes, base: str) -> str | None:
@@ -166,17 +168,89 @@ def _is_pdf(body: bytes) -> bool:
 
 
 def download_pdf(http: HttpClient, url: str) -> bytes:
-    body = http.get_bytes(url, PDF_ACCEPT)
+    return _download_pdf(http, url)[0]
+
+
+def _download_pdf(http: HttpClient, url: str) -> tuple[bytes, str]:
+    body, final_url = http.get_bytes_with_url(url, PDF_ACCEPT)
     if not _is_pdf(body):
-        link = citation_pdf_url(body, url)
+        link = citation_pdf_url(body, final_url)
         if link is None:
             raise ValueError("not a PDF and no PDF link on the page")
-        body = http.get_bytes(link, PDF_ACCEPT)
+        body, final_url = http.get_bytes_with_url(link, PDF_ACCEPT)
         if not _is_pdf(body):
             raise ValueError("the page's PDF link did not return a PDF")
     if len(body) > MAX_PDF_BYTES:
         raise ValueError(f"PDF larger than {MAX_PDF_BYTES // 2**20} MB")
-    return body
+    return body, final_url
+
+
+def _title_matches(title: str | None, extracted: str | None, first_page: str) -> bool:
+    """Compare a record title with metadata or the title lines at the top of page one."""
+    return _title_score(title, extracted, first_page) >= 0.92
+
+
+def _title_score(title: str | None, extracted: str | None, first_page: str) -> float:
+    """Best similarity between a record title and the PDF's metadata title or leading title lines."""
+    if not title:
+        return 0.0
+    wanted = normalize_title(title)
+    lines = [line.strip() for line in first_page.splitlines() if line.strip()][:8]
+    titles = [extracted or ""]
+    # Font/metadata extraction handles journal headers. Without those signals, only the leading
+    # title lines count: an early reference or introduction must never supply another paper's title.
+    for j, line in enumerate(lines[:4]):
+        if re.match(r"(?i)^(?:abstract|(?:\d+\.?\s+)?introduction|references)\b", line):
+            break
+        titles.append(" ".join(lines[:j + 1]))
+    return max((SequenceMatcher(None, wanted, normalize_title(t)).ratio() for t in titles if t), default=0.0)
+
+
+def _pdf_identity(conn: sqlite3.Connection, row: sqlite3.Row, body: bytes
+                  ) -> tuple[str, tuple[str, str] | None]:
+    """Validate identity before accepting a candidate; a citation alone cannot identify its PDF."""
+    import pymupdf
+
+    try:
+        with pymupdf.open(stream=body, filetype="pdf") as pdf:
+            meta = extract_metadata(pdf)
+            first_page = pdf[0].get_text() if pdf.page_count else ""
+            metadata_doi = (normalize_doi(str(meta.doi.value))
+                            if meta.doi.value and meta.doi.source == "pdf_metadata" else None)
+            dois = list(dict.fromkeys(([metadata_doi] if metadata_doi else []) + printed_dois(pdf)))
+    except Exception:  # noqa: BLE001 - damaged PDFs still go through ingest's quarantine
+        return "", None
+    own_doi = normalize_doi(str(row["doi"])) if row["doi"] else None
+    if own_doi is None and conn.execute(
+        "SELECT 1 FROM artifacts WHERE sha256=? AND status='ok'", (hashlib.sha256(body).hexdigest(),)
+    ).fetchone():
+        # Ingest records byte-identical copies as duplicate candidates, without moving their PDF.
+        return first_page, None
+    if not dois or own_doi in dois or (own_doi is None and not any(
+        other_record_doi(conn, str(row["id"]), None, [doi]) for doi in dois
+    )):
+        return first_page, None
+    own_score = _title_score(row["title"], meta.title.value, first_page)
+    own_title = own_score >= 0.92
+    for doi in dois:
+        other = other_record_doi(conn, str(row["id"]), own_doi, [doi])
+        if other is None:
+            continue
+        other_title = conn.execute("SELECT title FROM papers WHERE id=?", (other[0],)).fetchone()[0]
+        # A self-identifying preprint stamp followed by its standalone DOI is also positive evidence.
+        stamp = re.search(r"(?im)^(?:bio|med|chem|psy)Rxiv preprint[^\n]*\n\s*"
+                          r"(?:DOI:\s*)?(?:https?://doi\.org/)?" + re.escape(doi) + r"\s*$", first_page)
+        # Versions of one work share near-identical titles: the PDF belongs to whichever record it
+        # names more exactly (eLife "..., a flexible ..." vs its bioRxiv preprint "...: A flexible ...").
+        other_score = _title_score(other_title, meta.title.value, first_page)
+        if metadata_doi == doi or stamp or (other_score >= 0.92 and other_score > own_score + 0.02):
+            return first_page, other
+    if own_title:
+        return first_page, None
+    outside = not any(other_record_doi(conn, str(row["id"]), own_doi, [doi]) for doi in dois)
+    reason = "which is not in the library" if outside else "without matching title or metadata evidence"
+    raise ValueError(f"found a different work (PDF DOI {dois[0]}), {reason}; "
+                     "selected record was left unchanged")
 
 
 def fetch_open_access(
@@ -234,10 +308,14 @@ def fetch_open_access(
             continue
         body, errors = None, []
         candidate: VersionCandidate | None = None
+        first_page_text = ""
+        other: tuple[str, str] | None = None
         for item in candidates:
             try:
-                body = download_pdf(http, item.url)
-                candidate = item
+                downloaded, final_url = _download_pdf(http, item.url)
+                text, identity = _pdf_identity(conn, row, downloaded)
+                resolved = dataclasses.replace(item, url=final_url)
+                body, candidate, first_page_text, other = downloaded, resolved, text, identity
                 break
             except Exception as exc:  # noqa: BLE001 - one bad host must not stop the batch
                 errors.append(f"{urllib.parse.urlsplit(item.url).netloc}: {_short(exc)}")
@@ -248,32 +326,7 @@ def fetch_open_access(
             log.emit("fetch.failed", paper_id=row["id"], errors=errors)
             continue
         assert candidate is not None
-        import pymupdf
-
-        first_page_text, dois = "", []
-        try:
-            pdf = pymupdf.open(stream=body, filetype="pdf")
-            try:
-                pdf_meta = extract_metadata(pdf)
-                first_page_text = pdf[0].get_text() if pdf.page_count else ""
-                # Its own DOI, wherever printed, and any it cites on the first two pages.
-                dois = list(dict.fromkeys(
-                    ([normalize_doi(str(pdf_meta.doi.value))] if pdf_meta.doi.value else []) + printed_dois(pdf)))
-            finally:
-                pdf.close()
-        except Exception:  # noqa: BLE001 - a damaged PDF falls through to ingest, which quarantines it
-            pass
-        paper_doi = normalize_doi(str(row["doi"])) if row["doi"] else None
-        if paper_doi and dois and paper_doi not in dois:
-            # Do not silently attach a repository preprint with its own DOI to a published record.
-            other = other_record_doi(conn, str(row["id"]), paper_doi, dois)
-            if other is None:
-                # The DOI of a work outside the library: skip it rather than add a record nobody asked for.
-                report.failed.append(f"{label}: found a different work (PDF DOI {dois[0]}); "
-                                     "it was not attached to this record")
-                report.note(row, "failed", f"PDF identifies as DOI {dois[0]}, which is not in the library; "
-                            "selected record was left unchanged", [c.url for c in candidates])
-                continue
+        if other is not None:
             known_id, pdf_doi = other
             if conn.execute("SELECT 1 FROM artifacts WHERE paper_id=? AND status='ok' LIMIT 1",
                             (known_id,)).fetchone():
@@ -291,15 +344,16 @@ def fetch_open_access(
                 version, version_source = infer_version(candidate.url, candidate.version, candidate.version_source,
                                                         first_page_text)
                 version_label = format_version_label(version, candidate.url)
-                if version == "submitted" and candidate.version == "accepted":
+                if version == "submitted" and candidate.declared_version == "accepted":
                     version_label = f"{version_label} (author-updated)" if version_label else version_label
                 conn.execute("UPDATE artifacts SET version=?,version_source=?,source_url=?,version_label=? WHERE id=?",
                              (version, version_source, candidate.url, version_label, result.artifact_id))
                 add_paper(conn, project_id, known_id, "discovery")
                 artifact = conn.execute("SELECT * FROM artifacts WHERE id=?", (result.artifact_id,)).fetchone()
-                parse_artifact(conn, paths, config, artifact, log=log)
+                moved = parse_artifact(conn, paths, config, artifact, log=log)
                 new_artifacts.add(result.artifact_id)
                 report.downloaded += 1
+                report.parsed += moved.status != "failed"
             report.failed.append(
                 f"{label}: found a different work (PDF DOI {pdf_doi}); it was not attached to this record")
             report.note(row, "failed", f"PDF identifies as DOI {pdf_doi}; selected record was left unchanged",
@@ -334,7 +388,7 @@ def fetch_open_access(
         if version == "submitted":
             label_text += "; the published version is not openly available"
         version_label = format_version_label(version, candidate.url)
-        if version == "submitted" and candidate.version == "accepted":
+        if version == "submitted" and candidate.declared_version == "accepted":
             version_label = f"{version_label} (author-updated)" if version_label else version_label
         conn.execute("UPDATE artifacts SET version=?,version_source=?,source_url=?,version_label=? WHERE id=?",
                      (version, version_source, candidate.url, version_label, res.artifact_id))

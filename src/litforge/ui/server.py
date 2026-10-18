@@ -1236,7 +1236,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     try:
                         pid = app.ensure_project(conn, body["project"], body.get("export_dir"))
                         out, count = export_markdown(conn, app.paths, body["project"], pid, config=app.config,
-                                                     only=body.get("only", "all"), paper_ids=body.get("paper_ids"))
+                                                     only=body.get("only", "all"), paper_ids=body.get("paper_ids"),
+                                                     all_versions=bool(body.get("all_versions", False)))
                     finally:
                         conn.close()
                     return self._json({"path": str(out), "papers": count})
