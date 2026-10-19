@@ -861,3 +861,11 @@ test('spell checking can be turned off and the choice is remembered', () => {
   ctx.setSpell(true);
   assert.equal($('write-spell').attrs['aria-pressed'], 'true');
 });
+
+test('the spelling menu opens above the word when there is no room below, and stays inside the pane', () => {
+  const { ctx } = setup();
+  const pane = { left: 100, top: 50, width: 600, height: 400 };
+  assert.deepEqual({ ...ctx.menuPosition(pane, 300, 120, 180, 160) }, { left: 200, top: 74 });   // below the click
+  assert.deepEqual({ ...ctx.menuPosition(pane, 300, 420, 180, 160) }, { left: 200, top: 206 });  // above: 420-50-160-4
+  assert.deepEqual({ ...ctx.menuPosition(pane, 690, 120, 180, 160) }, { left: 414, top: 74 });   // pulled in from the right
+});

@@ -2295,6 +2295,14 @@
     });
   }
 
+  // Where a menu of size w×h opens for a click at (x, y): below it, or above when there is no room, inside the pane.
+  function menuPosition(pane, x, y, w, h) {
+    var left = Math.max(6, Math.min(x - pane.left, pane.width - w - 6));
+    var top = y - pane.top + 4;
+    if (top + h > pane.height - 6) top = Math.max(6, y - pane.top - h - 4);
+    return { left: Math.round(left), top: Math.round(top) };
+  }
+
   // Right-click on an underlined word: suggestions, add to the dictionary, ignore.
   function openSpellMenu(span, x, y) {
     var menu = $('write-spell-menu');
@@ -2309,8 +2317,10 @@
         b.onclick = function () { menu.hidden = true; applySpellChoice(item, span.from, span.to, span.word, span.lang); };
         menu.appendChild(b);
       });
-      menu.style.left = Math.round(x - pane.left) + 'px'; menu.style.top = Math.round(y - pane.top + 4) + 'px';
-      menu.hidden = false;
+      menu.style.left = '0px'; menu.style.top = '0px';
+      menu.hidden = false;  // shown first so its size is known
+      var at = menuPosition(pane, x, y, menu.offsetWidth, menu.offsetHeight);
+      menu.style.left = at.left + 'px'; menu.style.top = at.top + 'px';
       var first = menu.querySelector('button:not([disabled])');
       if (first) first.focus();
     });
@@ -3124,8 +3134,8 @@
     $('write-file').onchange = function () { openWriteFile($('write-file').value); };
     $('write-compile').onclick = compileWrite;
     $('write-versions-btn').onclick = showWriteVersions;
-    $('write-rename').onclick = renameWriteDoc;
-    $('write-delete').onclick = deleteWriteDoc;
+    $('write-rename').onclick = function () { $('write-more').open = false; return renameWriteDoc(); };
+    $('write-delete').onclick = function () { $('write-more').open = false; return deleteWriteDoc(); };
     $('write-reload').onclick = reloadTheirs;
     $('write-keep').onclick = keepMine;
     $('write-cite').onclick = openWriteCite;

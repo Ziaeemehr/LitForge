@@ -519,6 +519,18 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .pill > select { appearance: none; padding-right: 11px; field-sizing: content; max-width: 7em; }  /* as wide as the chosen label */
 .pill > button:hover, .pill > label:hover, .pill > select:hover { background: var(--chip); }
 .pill > .danger { color: var(--bad); }
+/* Rarely used actions behind "More". */
+.pill .more { position: relative; }
+.pill .more > summary { list-style: none; cursor: pointer; font-size: 13px; padding: 6px 11px; border-radius: 10px; }
+.pill .more > summary::-webkit-details-marker { display: none; }
+.pill .more > summary:hover, .pill .more[open] > summary { background: var(--chip); }
+.pill .more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 7; display: flex; flex-direction: column;
+  min-width: 140px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--float); }
+.pill .more-menu button { border: 0; background: transparent; color: var(--ink); text-align: start; padding: 6px 10px;
+  border-radius: 7px; font-size: 13px; cursor: pointer; }
+.pill .more-menu button:hover { background: var(--chip); }
+.pill .more-menu .danger { color: var(--bad); }
 .pill > .go { background: var(--accent); color: #fff; font-weight: 600; padding: 6px 16px; }
 .pill > .go:hover { background: var(--accent); filter: brightness(1.08); }
 .write-banner { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: var(--radius);
