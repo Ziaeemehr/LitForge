@@ -706,3 +706,64 @@ test('labels of other files: only the newest load is kept', async () => {
   await new Promise(r => setImmediate(r));
   assert.ok(ctx.W.otherTexts.join(' ').includes('new') && !ctx.W.otherTexts.join(' ').includes('old'));
 });
+
+// ---------- Text ↔ PDF (SyncTeX + PDF.js viewer) ----------
+test('a click on a page becomes a PDF position in points', () => {
+  const { ctx } = setup();
+  const p = ctx.pdfPoint({ left: 100, top: 50 }, 100 + 150, 50 + 300, 1.5);
+  assert.deepEqual({ ...p }, { x: 100, y: 200 });
+});
+
+test('cursor line counts newlines before the cursor', () => {
+  const { ctx } = setup();
+  assert.equal(ctx.cursorLine('a\nb\nc', 0), 1);
+  assert.equal(ctx.cursorLine('a\nb\nc', 2), 2);
+  assert.equal(ctx.cursorLine('a\nb\nc', 5), 3);
+});
+
+test('find in PDF asks for the cursor line and highlights the boxes on that page', async () => {
+  const { ctx, $, calls } = setup({ get: url => (url.startsWith('/api/write/synctex?') ?
+    { page: 2, line: 3, boxes: [{ x: 10, y: 20, w: 100, h: 12 }] } : null) });
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'one\ntwo\nthree'; area.setSelectionRange(9, 9);
+  const page2 = new (area.constructor)('div');
+  ctx.PDFV.scale = 2; ctx.PDFV.pages = [{ wrap: new (area.constructor)('div') }, { wrap: page2 }];
+  page2.scrollIntoView = () => calls.push(['scrolled']);
+  await ctx.syncToPdf();
+  assert.ok(calls.some(c => c[0] === 'GET' && /synctex\?doc=d1&file=main\.tex&line=3$/.test(c[1])));
+  const mark = page2.children.find(c => c.className === 'pdf-mark');
+  assert.ok(mark, 'highlight added');
+  assert.deepEqual([mark.style.left, mark.style.top, mark.style.width, mark.style.height], ['20px', '40px', '200px', '24px']);
+});
+
+test('find in PDF without a compiled PDF says so', async () => {
+  const { ctx, calls } = setup();
+  await ctx.openWriteDoc('d1');
+  ctx.PDFV.pages = [];
+  await ctx.syncToPdf();
+  assert.ok(calls.some(c => c[0] === 'toast' && /Compile first/.test(c[1])));
+});
+
+test('a double-click in the PDF opens the source line, switching files when needed', async () => {
+  const opened = [];
+  const { ctx, $ } = setup({ get: url => {
+    if (url.startsWith('/api/write/synctex?')) return { file: 'methods.tex', line: 7 };
+    if (url.includes('name=methods.tex')) { opened.push('methods.tex'); return { name: 'methods.tex', text: 'a\nb\nc\nd\ne\nf\ng\nh', hash: 'm' }; }
+    return null;
+  } });
+  await ctx.openWriteDoc('d1');
+  await ctx.syncFromPdf(1, 145.2, 153.9);
+  assert.deepEqual(opened, ['methods.tex']);
+  const area = $('write-cm').children[0];
+  assert.equal(area.selectionStart, 12);  // start of line 7
+});
+
+test('without PDF.js the browser\'s own viewer is used', async () => {
+  const { ctx, $ } = setup();
+  await ctx.openWriteDoc('d1');
+  ctx.W.doc.pdf = true;
+  ctx.showWritePdf(true);
+  assert.match($('write-pdf').src, /\/api\/write\/pdf\?doc=d1/);
+  assert.equal($('write-pdf').hidden, false);
+});

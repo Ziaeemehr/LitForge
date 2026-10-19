@@ -572,6 +572,20 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .write-errors li.error { background: var(--bad-soft); }
 .write-errors li.warning { color: var(--warn); }
 .write-right { background: var(--chip); border-radius: var(--radius); padding: 10px; }
+.pdfview { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.pdf-bar { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.pdf-bar button, .pdf-bar a { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 7px;
+  padding: 2px 9px; font-size: 12px; cursor: pointer; text-decoration: none; }
+.pdf-bar button:hover, .pdf-bar a:hover { border-color: var(--accent); }
+.pdf-pages { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center;
+  gap: 12px; padding: 6px 0 12px; }
+.pdf-page { position: relative; flex: none; background: #fff; box-shadow: var(--shadow), 0 0 0 1px var(--line);
+  cursor: text; }
+.pdf-page canvas { display: block; }
+/* SyncTeX highlight: shown for a moment where the editor's line is in the PDF. */
+.pdf-mark { position: absolute; background: rgba(251, 138, 76, .28); outline: 2px solid var(--accent);
+  border-radius: 2px; pointer-events: none; animation: pdf-mark 2.5s ease-out forwards; }
+@keyframes pdf-mark { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
 .write-right iframe { flex: 1; width: 100%; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .write-versions ul, .write-cite ul { list-style: none; padding: 0; margin: 6px 0 0; max-height: 240px; overflow: auto; }
 .write-versions li, .write-cite li { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; padding: 4px 0;

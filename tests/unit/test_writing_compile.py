@@ -69,6 +69,7 @@ def test_tectonic_flags_and_env(env) -> None:
     assert result.ok and result.pdf == ".build/main.pdf"
     seen = json.loads(record.read_text())
     assert "--untrusted" in seen["argv"] and seen["argv"][-1] == "main.tex"
+    assert "--synctex" in seen["argv"]  # main.synctex.gz for jumping between the text and the PDF
     assert Path(seen["cwd"]).resolve() == doc.folder.resolve()
     assert seen["env"]["TECTONIC_CACHE_DIR"] == str(paths.root / "tools" / "tectonic-cache")
     assert [w.line for w in result.warnings] == [7]
@@ -79,6 +80,7 @@ def test_xelatex_flags_and_paranoid_env(env) -> None:
     assert wc.compile_document(doc, paths, "xelatex").ok
     seen = json.loads(record.read_text())
     assert "-no-shell-escape" in seen["argv"] and "-xelatex" in seen["argv"]
+    assert "-synctex=1" in seen["argv"]
     assert seen["env"]["openout_any"] == "p" and seen["env"]["openin_any"] == "p"
     assert seen["env"]["shell_escape"] == "f"
 

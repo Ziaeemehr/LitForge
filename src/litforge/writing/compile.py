@@ -285,7 +285,7 @@ def _command(doc: Document, paths: Paths, engine: str, main: str) -> tuple[list[
         cache = tectonic_cache(paths)
         cache.mkdir(parents=True, exist_ok=True)
         env["TECTONIC_CACHE_DIR"] = str(cache)
-        argv = [command, "--untrusted", "--keep-logs", "--chatter", "minimal", "-o", ".build", main]
+        argv = [command, "--untrusted", "--keep-logs", "--synctex", "--chatter", "minimal", "-o", ".build", main]
         return argv, env, [Path(command).resolve().parent, cache.resolve()]
     if engine == "xelatex":
         command = xelatex_command()
@@ -293,8 +293,8 @@ def _command(doc: Document, paths: Paths, engine: str, main: str) -> tuple[list[
             raise CompileError("latexmk and xelatex were not found; install TeX Live or MacTeX")
         env.update(openout_any="p", openin_any="p", shell_escape="f")
         # -norc: a latexmkrc in the folder is Perl code and must not run.
-        argv = [command, "-norc", "-xelatex", "-no-shell-escape", "-interaction=nonstopmode", "-halt-on-error",
-                "-file-line-error", "-outdir=.build", main]
+        argv = [command, "-norc", "-xelatex", "-synctex=1", "-no-shell-escape", "-interaction=nonstopmode",
+                "-halt-on-error", "-file-line-error", "-outdir=.build", main]
         return argv, env, []
     raise CompileError(f"unknown engine {engine}")
 

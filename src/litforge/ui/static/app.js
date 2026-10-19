@@ -1878,7 +1878,8 @@
         CM.EditorView.lineWrapping, CM.EditorView.perLineTextDirection.of(true), autoDirection(CM),
         CM.keymap.of([{ key: 'Mod-s', run: function () { handlers.blur(); return true; } },
           { key: 'Mod-Enter', run: function () { handlers.compile(); return true; } },
-          { key: 'Tab', run: CM.acceptCompletion }]  // only when the list is open; otherwise Tab indents
+          { key: 'Tab', run: CM.acceptCompletion },
+          { key: 'Mod-Alt-j', run: function () { syncToPdf(); return true; } }]  // only when the list is open; otherwise Tab indents
           .concat(CM.searchKeymap, CM.historyKeymap, [CM.indentWithTab], CM.defaultKeymap)),
         CM.EditorView.updateListener.of(function (u) {
           if (u.docChanged) handlers.change();
@@ -2160,10 +2161,138 @@
   }
 
   function showWritePdf(ready) {
-    var frame = $('write-pdf');
+    var frame = $('write-pdf'), url = '/api/write/pdf?doc=' + encodeURIComponent(W.doc.id) + '&t=' + Date.now();
     $('write-pdf-empty').hidden = !!ready;
+    if (window.pdfjsLib && ready) {  // PDF.js: pages we can click on and draw highlights over
+      frame.hidden = true; frame.removeAttribute && frame.removeAttribute('src');
+      $('write-pdfview').hidden = false;
+      $('write-pdf-open').href = url;
+      return loadPdf(url);
+    }
+    $('write-pdfview').hidden = true;
     frame.hidden = !ready;
-    if (ready) frame.src = '/api/write/pdf?doc=' + encodeURIComponent(W.doc.id) + '&t=' + Date.now();
+    if (ready) frame.src = url;
+    return Promise.resolve();
+  }
+
+  /* PDF viewer (PDF.js) and SyncTeX jumps. PDF positions are points from the page's top-left corner. */
+  var PDFV = { doc: null, pages: [], scale: 0, fit: true, request: 0 };
+
+  function loadPdf(url) {
+    var request = ++PDFV.request, box = $('write-pdf-pages');
+    var keep = box.scrollHeight ? box.scrollTop / box.scrollHeight : 0;  // stay at the same place after a recompile
+    return window.pdfjsLib.getDocument({ url: url, isEvalSupported: false }).promise.then(function (pdf) {
+      if (request !== PDFV.request) return null;
+      if (PDFV.doc) PDFV.doc.destroy();
+      PDFV.doc = pdf;
+      return renderPdfPages().then(function () { box.scrollTop = keep * box.scrollHeight; });
+    }).catch(function (e) { toast('The PDF could not be shown: ' + e.message); });
+  }
+
+  function renderPdfPages() {
+    var pdf = PDFV.doc, box = $('write-pdf-pages');
+    if (!pdf) return Promise.resolve();
+    var request = PDFV.request, ratio = window.devicePixelRatio || 1, pages = [];
+    return pdf.getPage(1).then(function (first) {
+      var base = first.getViewport({ scale: 1 });
+      if (PDFV.fit || !PDFV.scale) PDFV.scale = Math.max(0.3, (box.clientWidth - 24) / base.width);
+      var chain = Promise.resolve();
+      for (var n = 1; n <= pdf.numPages; n++) {
+        (function (number) {
+          chain = chain.then(function () { return pdf.getPage(number); }).then(function (page) {
+            if (request !== PDFV.request) return;
+            var view = page.getViewport({ scale: PDFV.scale });
+            var wrap = document.createElement('div'), canvas = document.createElement('canvas');
+            wrap.className = 'pdf-page'; wrap.dataset.page = String(number);
+            wrap.style.width = Math.floor(view.width) + 'px'; wrap.style.height = Math.floor(view.height) + 'px';
+            canvas.width = Math.floor(view.width * ratio); canvas.height = Math.floor(view.height * ratio);
+            canvas.style.width = Math.floor(view.width) + 'px'; canvas.style.height = Math.floor(view.height) + 'px';
+            wrap.appendChild(canvas);
+            pages.push({ wrap: wrap, number: number });
+            return page.render({ canvasContext: canvas.getContext('2d'), viewport: view,
+              transform: ratio !== 1 ? [ratio, 0, 0, ratio, 0, 0] : null }).promise;
+          });
+        })(n);
+      }
+      return chain.then(function () {
+        if (request !== PDFV.request) return;
+        box.replaceChildren.apply(box, pages.map(function (p) { return p.wrap; }));
+        PDFV.pages = pages;
+        showPdfPageNumber();
+      });
+    });
+  }
+
+  function zoomPdf(factor) {
+    if (!PDFV.doc) return Promise.resolve();
+    PDFV.fit = factor === 0;
+    if (factor) PDFV.scale = Math.min(4, Math.max(0.3, PDFV.scale * factor));
+    PDFV.request++;
+    return renderPdfPages();
+  }
+
+  function showPdfPageNumber() {
+    var box = $('write-pdf-pages'), mid = box.scrollTop + box.clientHeight / 2, current = 1;
+    PDFV.pages.forEach(function (p) { if (p.wrap.offsetTop <= mid) current = p.number; });
+    $('write-pdf-page').textContent = PDFV.pages.length ? current + ' / ' + PDFV.pages.length : '';
+  }
+
+  function pdfPoint(rect, clientX, clientY, scale) {
+    return { x: Math.round((clientX - rect.left) / scale * 100) / 100,
+      y: Math.round((clientY - rect.top) / scale * 100) / 100 };
+  }
+
+  function cursorLine(text, pos) { return text.slice(0, pos).split('\n').length; }
+
+  // Editor → PDF: scroll to the cursor's line and highlight it for a moment.
+  function syncToPdf() {
+    if (!W.doc || !W.editor) return Promise.resolve();
+    if (!PDFV.pages.length) { toast('Compile first: the PDF has no position data yet.'); return Promise.resolve(); }
+    var line = cursorLine(W.editor.getText(), W.editor.selection().from);
+    return api('/api/write/synctex?doc=' + encodeURIComponent(W.doc.id) + '&file=' + encodeURIComponent(W.file) +
+      '&line=' + line).then(function (hit) {
+      var page = hit && PDFV.pages[hit.page - 1];
+      if (!page) { toast('This line is not in the PDF (recompile after changes).'); return; }
+      (page.wrap.querySelectorAll ? Array.from(page.wrap.querySelectorAll('.pdf-mark')) : []).forEach(function (m) { m.remove(); });
+      var first = null;
+      hit.boxes.forEach(function (b) {
+        var mark = document.createElement('div');
+        mark.className = 'pdf-mark';
+        mark.style.left = Math.round(b.x * PDFV.scale) + 'px'; mark.style.top = Math.round(b.y * PDFV.scale) + 'px';
+        mark.style.width = Math.round(b.w * PDFV.scale) + 'px'; mark.style.height = Math.round(b.h * PDFV.scale) + 'px';
+        page.wrap.appendChild(mark);
+        first = first || mark;
+        setTimeout(function () { mark.remove && mark.remove(); }, 2500);
+      });
+      (first && first.scrollIntoView ? first : page.wrap).scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // PDF → editor: the source line of a place in the PDF.
+  function syncFromPdf(page, x, y) {
+    if (!W.doc) return Promise.resolve();
+    return api('/api/write/synctex?doc=' + encodeURIComponent(W.doc.id) + '&page=' + page + '&x=' + x + '&y=' + y)
+      .then(function (hit) {
+        if (!hit) return;
+        var open = hit.file !== W.file ? openWriteFile(hit.file) : Promise.resolve(true);
+        return open.then(function (ok) { if (ok && W.editor) W.editor.gotoLine(hit.line); });
+      }).catch(function (e) { toast(e.message); });
+  }
+
+  function wirePdfView() {
+    var box = $('write-pdf-pages');
+    box.addEventListener('dblclick', function (e) {
+      var wrap = e.target.closest && e.target.closest('.pdf-page');
+      if (!wrap) return;
+      var p = pdfPoint(wrap.getBoundingClientRect(), e.clientX, e.clientY, PDFV.scale);
+      syncFromPdf(Number(wrap.dataset.page), p.x, p.y);
+    });
+    box.addEventListener('scroll', showPdfPageNumber);
+    $('write-pdf-in').onclick = function () { zoomPdf(1.2); };
+    $('write-pdf-out').onclick = function () { zoomPdf(1 / 1.2); };
+    $('write-pdf-fit').onclick = function () { zoomPdf(0); };
+    $('write-sync').onclick = syncToPdf;
+    window.addEventListener('pdfjs-ready', function () { if (W.doc && W.doc.pdf) showWritePdf(true); });
   }
 
   function renderWriteMessages(report) {
@@ -2860,6 +2989,7 @@
     setWriteLayout(store.get('write-layout', 'split'));
     setWriteSplit(store.get('write-split', 50));
     wireWriteGutter();
+    wirePdfView();
     window.addEventListener('resize', function () { if (AI.pending) placeWriteSuggestion(AI.pending.range); });
     window.addEventListener('beforeunload', function (e) {
       if (W.doc && W.dirty && !W.conflictHash) {  // keepalive lets the save finish while the page closes

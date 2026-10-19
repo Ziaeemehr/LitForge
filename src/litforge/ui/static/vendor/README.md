@@ -17,7 +17,10 @@ The math tokenizer in `../md.js` is adapted from MDviewer's `index.html`.
 |---|---|---|
 | `codemirror.bundle.js` | [CodeMirror 6](https://codemirror.net) (view 6.43.13, state 6.7.6, language 6.12.4, legacy-modes 6.5.4 `stex`, search 6.7.2, commands 6.11.1, autocomplete 6.20.3, @lezer/highlight 1.2.5 `classHighlighter`) with @lezer, style-mod, w3c-keyname, crelt | MIT (`codemirror.LICENSE`) |
 
-Built once with esbuild from pinned packages; see `scripts/build_editor_bundle.md`.
+| `pdfjs/pdf.min.mjs`, `pdfjs/pdf.worker.min.mjs` | [PDF.js](https://mozilla.github.io/pdf.js/) (`pdfjs-dist` 4.10.38, `build/`) | Apache-2.0 (`pdfjs/LICENSE`) |
+
+Built once with esbuild from pinned packages; see `scripts/build_editor_bundle.md`. PDF.js is copied unchanged from
+the pinned npm package: `cd scripts/pdfjs && npm ci` and copy the two `build/*.min.mjs` files and `LICENSE`.
 
 The Persian template's Vazirmatn font (`src/litforge/writing/templates/persian/fonts/`, v33.003) is under the
 SIL Open Font License (`OFL.txt` beside it).

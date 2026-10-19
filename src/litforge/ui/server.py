@@ -89,6 +89,7 @@ MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 HEARTBEAT_S = 15  # how often an open page checks in (app.js)
 IDLE_STOP_S = 120  # no check-in for this long, and no job running: the server stops itself
 STATIC = resources.files("litforge.ui") / "static"
+mimetypes.add_type("text/javascript", ".mjs")  # PDF.js modules; the Windows registry may say otherwise
 
 
 @dataclass

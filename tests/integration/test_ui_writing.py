@@ -230,3 +230,22 @@ def test_dns_rebinding_host_refused(server) -> None:
     assert call(base, f"/api/write/file?doc={doc['id']}&name=main.tex", headers={"Host": "evil.example"})[0] == 403
     assert call(base, "/api/write/save", {"doc": doc["id"], "name": "main.tex", "text": "x", "hash": None},
                 headers={"Host": "evil.example:80", "Origin": "http://evil.example:80"})[0] == 403
+
+
+def test_synctex_lookups_both_ways(server) -> None:
+    import gzip
+
+    base, app = server
+    doc = create(base)
+    folder = Path(app.paths.root) / "projects" / "demo" / "writing" / "draft"
+    fixture = Path(__file__).parents[1] / "fixtures" / "synctex" / "en.synctex.gz"
+    (folder / ".build").mkdir(exist_ok=True)
+    data = gzip.decompress(fixture.read_bytes()).replace(b"/doc/", str(folder.resolve()).encode() + b"/")
+    assert call(base, f"/api/write/synctex?doc={doc['id']}&file=main.tex&line=4")[0] == 404  # not compiled yet
+    (folder / ".build" / "main.synctex.gz").write_bytes(gzip.compress(data))
+    status, hit = call(base, f"/api/write/synctex?doc={doc['id']}&file=main.tex&line=4")
+    assert status == 200 and hit["page"] == 1 and hit["boxes"]
+    status, back = call(base, f"/api/write/synctex?doc={doc['id']}&page=1&x=145&y=153")
+    assert status == 200 and back == {"file": "main.tex", "line": 4}
+    assert call(base, f"/api/write/synctex?doc={doc['id']}&page=1&x=abc&y=1")[0] == 400
+    assert call(base, f"/api/write/synctex?doc={doc['id']}&file=../../x&line=1")[0] in (400, 404)

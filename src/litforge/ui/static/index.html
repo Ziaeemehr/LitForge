@@ -475,6 +475,7 @@
           <button type="button" id="write-versions-btn" title="Earlier versions of this document">Versions</button>
           <button type="button" id="write-rename">Rename</button>
           <button type="button" class="danger" id="write-delete" title="Move this document to the project's trash folder">Delete</button>
+          <button type="button" id="write-sync" title="Show the cursor's line in the PDF (Ctrl/Cmd+Alt+J)">Find in PDF</button>
           <button type="button" class="go" id="write-compile" title="Compile to PDF (Ctrl/Cmd+Enter)">Compile</button>
         </div>
       </div>
@@ -505,6 +506,17 @@
           title="Drag to resize; double-click to reset"></div>
         <div class="write-right">
           <p id="write-compile-state" class="muted" role="status" aria-live="polite"></p>
+          <div id="write-pdfview" class="pdfview" hidden>
+            <div class="pdf-bar" role="toolbar" aria-label="PDF">
+              <span id="write-pdf-page" class="pdf-page-no" aria-live="polite"></span>
+              <span class="spacer"></span>
+              <button type="button" id="write-pdf-out" title="Zoom out" aria-label="Zoom out">−</button>
+              <button type="button" id="write-pdf-fit" title="Fit the page width">Fit</button>
+              <button type="button" id="write-pdf-in" title="Zoom in" aria-label="Zoom in">+</button>
+              <a id="write-pdf-open" target="_blank" rel="noopener" title="Open the PDF in a new tab">Open</a>
+            </div>
+            <div id="write-pdf-pages" class="pdf-pages" title="Double-click to show this place in the editor"></div>
+          </div>
           <iframe id="write-pdf" title="PDF preview" hidden></iframe>
           <p id="write-pdf-empty" class="muted">Compile to see the PDF here.</p>
         </div>
@@ -706,6 +718,13 @@
 <script src="/static/vendor/katex.min.js"></script>
 <script src="/static/md.js"></script>
 <script src="/static/vendor/codemirror.bundle.js"></script>
+<script type="module">
+  // PDF.js for the Write view's PDF pane (text ↔ PDF jumps); without it the browser's own viewer is used.
+  import * as pdfjsLib from '/static/vendor/pdfjs/pdf.min.mjs';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '/static/vendor/pdfjs/pdf.worker.min.mjs';
+  window.pdfjsLib = pdfjsLib;
+  window.dispatchEvent(new Event('pdfjs-ready'));
+</script>
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -9,6 +9,7 @@ from litforge.writing import assist as wassist
 from litforge.writing import cite as wcite
 from litforge.writing import compile as wc
 from litforge.writing import documents as wd
+from litforge.writing import synctex as wsync
 
 if TYPE_CHECKING:
     from litforge.ui.server import App, Job
@@ -24,6 +25,31 @@ class Conflict(Exception):
 
 def _doc(conn: sqlite3.Connection, app: App, query: dict[str, Any]) -> wd.Document:
     return wd.get_document(conn, app.paths, str(query.get("doc") or ""))
+
+
+_SYNC_CACHE: dict[str, tuple[tuple[int, int], wsync.SyncTex]] = {}  # document id -> (file stamp, parsed)
+
+
+def synctex_lookup(doc: wd.Document, query: dict[str, str]) -> dict[str, Any] | None:
+    """Forward (file, line) or inverse (page, x, y) lookup in the last compile's SyncTeX file."""
+    path = wd.resolve_inside(doc.folder, ".build/main.synctex.gz", allow_hidden=True)
+    if not path.is_file():
+        raise LookupError("no position data yet; compile the document first")
+    stat = path.stat()
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    cached = _SYNC_CACHE.get(doc.id)
+    if cached is None or cached[0] != stamp:
+        cached = (stamp, wsync.load(path, doc.folder.resolve()))
+        _SYNC_CACHE[doc.id] = cached
+    sync = cached[1]
+    try:
+        if "page" in query:
+            return wsync.inverse(sync, int(query["page"]), float(query.get("x", "")), float(query.get("y", "")))
+        name = query.get("file") or "main.tex"
+        wd.resolve_inside(doc.folder, name)
+        return wsync.forward(sync, name, int(query.get("line", "")))
+    except ValueError as exc:
+        raise ValueError(f"bad position: {exc}") from None
 
 
 def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) -> Any:
@@ -50,6 +76,8 @@ def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) ->
         return {"results": wcite.search_library(conn, doc.project_id, q)}
     if path == "/api/write/quote":
         return wcite.quotes_for_key(conn, _doc(conn, app, query), query.get("key", ""))
+    if path == "/api/write/synctex":
+        return synctex_lookup(_doc(conn, app, query), query)
     if path == "/api/write/pdf":
         doc = _doc(conn, app, query)
         pdf = wd.resolve_inside(doc.folder, ".build/main.pdf", allow_hidden=True)
