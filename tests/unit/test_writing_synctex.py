@@ -61,6 +61,7 @@ def test_inverse_in_the_margin_takes_the_nearest_line(sync) -> None:
 def test_inputs_outside_the_folder_are_ignored(tmp_path: Path) -> None:
     import gzip
     data = ("SyncTeX Version:1\nInput:1:/elsewhere/x.tex\nInput:2:/doc/../etc/y.tex\nInput:3:/doc/a.tex\n"
+            "Input:4:/doc/.build/main.bbl\n"  # the bibliography TeX writes: the editor cannot open it"
             "Output:pdf\nMagnification:1000\nUnit:1\nX Offset:0\nY Offset:0\nContent:\n{1\n"
             "(3,1:6578176,6578176:6578176,657817,0\ng3,1:6578176,6578176\n)\n}1\n")
     path = tmp_path / "s.synctex.gz"

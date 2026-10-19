@@ -74,9 +74,11 @@ def _inside(root: PurePosixPath, name: str) -> str | None:
     if ".." in path.parts or not path.is_absolute():
         return None
     try:
-        return str(path.relative_to(root))
+        relative = path.relative_to(root)
     except ValueError:
         return None
+    # Files in hidden folders (.build/main.bbl) are TeX's own output, which the editor does not open.
+    return None if any(part.startswith(".") for part in relative.parts) else str(relative)
 
 
 def forward(sync: SyncTex, file: str, line: int) -> dict[str, Any] | None:
