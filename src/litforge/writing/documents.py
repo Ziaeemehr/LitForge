@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import shutil
 import sqlite3
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path, PurePosixPath
@@ -274,17 +276,17 @@ def _text_files(doc: Document) -> list[str]:
     return [f["name"] for f in list_files(doc) if f["kind"] == "text"]
 
 
-def create_snapshot(doc: Document, note: str = "") -> str:
+def create_snapshot(doc: Document, note: str = "", name: str = "") -> str:
     snap_id = time.strftime("%Y%m%dT%H%M%S") + f"-{time.time_ns() % 1_000_000_000:09d}"
     target = _snapshot_dir(doc) / snap_id
     target.mkdir()
     files = _text_files(doc)
-    for name in files:
-        dest = target / name
+    for file_name in files:
+        dest = target / file_name
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(resolve_inside(doc.folder, name), dest)
-    (target / ".meta.json").write_text(json.dumps({"created_at": now(), "note": note, "files": files},
-                                                  ensure_ascii=False), encoding="utf-8")
+        shutil.copyfile(resolve_inside(doc.folder, file_name), dest)
+    meta = {"created_at": now(), "note": note, "name": _clean_version_name(name), "files": files}
+    (target / ".meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     _rotate(doc)
     return snap_id
 
@@ -297,7 +299,7 @@ def _maybe_snapshot(doc: Document) -> None:
 
 
 def _rotate(doc: Document) -> None:
-    for snap in list_snapshots(doc)[SNAPSHOT_KEEP:]:
+    for snap in [s for s in list_snapshots(doc) if not s["name"]][SNAPSHOT_KEEP:]:
         shutil.rmtree(_snapshot_dir(doc) / snap["id"], ignore_errors=True)
 
 
@@ -312,18 +314,14 @@ def list_snapshots(doc: Document) -> list[dict[str, Any]]:
         except (OSError, json.JSONDecodeError):
             continue
         out.append({"id": path.name, "created_at": meta.get("created_at"), "note": meta.get("note", ""),
-                    "files": meta.get("files", []), "mtime": meta_file.stat().st_mtime})
+                    "name": meta.get("name", ""), "files": meta.get("files", []), "mtime": meta_file.stat().st_mtime})
     out.sort(key=lambda s: s["id"], reverse=True)
     return out
 
 
 def restore_snapshot(conn: sqlite3.Connection, doc: Document, snap_id: str) -> list[str]:
     """Bring back a snapshot's text files; the current text is snapshotted first so nothing is lost."""
-    if not re.fullmatch(r"\d{8}T\d{6}-\d{9}", snap_id):
-        raise DocumentError("unknown snapshot")
-    source = _snapshot_dir(doc) / snap_id
-    if not (source / ".meta.json").is_file() or source.is_symlink():
-        raise DocumentError("unknown snapshot")
+    source = _version_folder(doc, snap_id)
     meta = json.loads((source / ".meta.json").read_text(encoding="utf-8"))
     with _lock(doc.id):
         # Read first: the safety snapshot below may rotate this (oldest) snapshot away.
@@ -336,3 +334,100 @@ def restore_snapshot(conn: sqlite3.Connection, doc: Document, snap_id: str) -> l
             restored.append(name)
         conn.execute("UPDATE writing_documents SET updated_at=? WHERE id=?", (now(), doc.id))
     return restored
+
+
+
+def _clean_version_name(name: str) -> str:
+    return "".join(c for c in name if unicodedata.category(c) != "Cc").strip()[:120]
+
+
+def _version_folder(doc: Document, version: str) -> Path:
+    if not re.fullmatch(r"\d{8}T\d{6}-\d{9}", version):
+        raise DocumentError("unknown snapshot")
+    source = _snapshot_dir(doc) / version
+    if source.is_symlink() or not (source / ".meta.json").is_file():
+        raise DocumentError("unknown snapshot")
+    return source
+
+
+def name_snapshot(doc: Document, snap_id: str, name: str) -> str:
+    """Set or clear a snapshot's display name without replacing its other metadata."""
+    clean = _clean_version_name(name)
+    with _lock(doc.id):
+        source = _version_folder(doc, snap_id) / ".meta.json"
+        meta = json.loads(source.read_text(encoding="utf-8"))
+        meta["name"] = clean
+        _atomic_write(source, json.dumps(meta, ensure_ascii=False).encode("utf-8"))
+    return clean
+
+
+def version_text(doc: Document, version: str, name: str) -> str:
+    folder = doc.folder if version == "current" else _version_folder(doc, version)
+    path = resolve_inside(folder, name)
+    if path.suffix.lower() not in TEXT_SUFFIXES:
+        raise DocumentError("only text files open in the editor")
+    return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+
+
+def diff_versions(doc: Document, a: str, b: str, name: str = "main.tex", context: int = 3) -> dict[str, Any]:
+    left = version_text(doc, a, name).splitlines()
+    right = version_text(doc, b, name).splitlines()
+    matcher = difflib.SequenceMatcher(None, left, right, autojunk=False)
+    added, removed = _change_counts(matcher)
+    hunks: list[dict[str, Any]] = []
+    total = 0
+    truncated = False
+    for group in matcher.get_grouped_opcodes(max(0, context)):
+        first, last = group[0], group[-1]
+        a_lines, b_lines = last[2] - first[1], last[4] - first[3]
+        hunk: dict[str, Any] = {
+            "a_start": first[1] + (1 if a_lines else 0), "a_lines": a_lines,
+            "b_start": first[3] + (1 if b_lines else 0), "b_lines": b_lines, "lines": []}
+        for tag, i, j, k, end in group:
+            pieces = ([(" ", left[i:j])] if tag == "equal" else
+                      [("-", left[i:j]), ("+", right[k:end])])
+            for op, lines in pieces:
+                for text in lines:
+                    if total == 4000:
+                        truncated = True
+                        break
+                    hunk["lines"].append({"op": op, "text": text})
+                    total += 1
+                if truncated:
+                    break
+            if truncated:
+                break
+        if hunk["lines"]:
+            hunks.append(hunk)
+        if truncated:
+            break
+    return {"file": name, "a": a, "b": b, "added": added, "removed": removed,
+            "truncated": truncated, "hunks": hunks}
+
+
+def _change_counts(matcher: difflib.SequenceMatcher[str]) -> tuple[int, int]:
+    added = removed = 0
+    for tag, i, j, k, end in matcher.get_opcodes():
+        if tag != "equal":
+            added += end - k
+            removed += j - i
+    return added, removed
+
+
+def snapshot_summaries(doc: Document) -> list[dict[str, Any]]:
+    snapshots = list_snapshots(doc)
+    older: dict[str, str] = {}
+    for snapshot in reversed(snapshots):
+        texts = {name: version_text(doc, snapshot["id"], name) for name in snapshot["files"]
+                 if Path(name).suffix.lower() in TEXT_SUFFIXES}
+        added = removed = 0
+        for name in texts.keys() | older.keys():
+            before, after = older.get(name, ""), texts.get(name, "")
+            if before != after:
+                counts = _change_counts(difflib.SequenceMatcher(None, before.splitlines(), after.splitlines(),
+                                                               autojunk=False))
+                added += counts[0]
+                removed += counts[1]
+        snapshot.update(added=added, removed=removed)
+        older = texts
+    return snapshots

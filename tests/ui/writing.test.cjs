@@ -897,3 +897,63 @@ test('a spelling choice is not applied when the word changed or the file was swi
   ctx.applySpellChoice({ action: 'replace', text: 'the' }, 4, 7, 'teh', 'en', editor);  // old editor
   assert.equal(now.value, 'one teh two');
 });
+
+// ---------- Version history: names, change counts, differences ----------
+test('a version is labelled by its name, else its note, with its change counts', () => {
+  const { ctx } = setup();
+  assert.equal(ctx.versionLabel({ id: 's', created_at: '2026-10-19T10:00:00', note: 'auto', name: '' }), '2026-10-19 10:00:00 · auto');
+  assert.equal(ctx.versionLabel({ id: 's', created_at: '2026-10-19T10:00:00', note: 'auto', name: 'Submitted' }), '2026-10-19 10:00:00 · Submitted');
+  assert.equal(ctx.changeCounts({ added: 12, removed: 3 }), '+12 −3');
+  assert.equal(ctx.changeCounts({ added: 0, removed: 0 }), 'no change');
+  assert.equal(ctx.changeCounts({}), '');
+});
+
+test('differences are drawn as hunks with added, removed and unchanged lines', () => {
+  const { ctx } = setup();
+  const box = ctx.renderDiff({ file: 'main.tex', added: 1, removed: 1, truncated: true, hunks: [
+    { a_start: 3, a_lines: 2, b_start: 3, b_lines: 2, lines: [
+      { op: ' ', text: 'same' }, { op: '-', text: 'old <b>' }, { op: '+', text: 'جدید' }] }] });
+  const rows = box.children;
+  assert.equal(rows[0].className, 'diff-hunk'); assert.match(rows[0].textContent, /line 3/);
+  assert.deepEqual([...rows.slice(1, 4).map(r => [r.className, r.textContent])],
+    [['diff-line ctx', 'same'], ['diff-line del', 'old <b>'], ['diff-line add', 'جدید']]);
+  assert.equal(rows[3].dir, 'auto');
+  assert.match(rows.at(-1).textContent, /only the first part/);
+});
+
+test('identical versions say so', () => {
+  const { ctx } = setup();
+  assert.match(ctx.renderDiff({ file: 'main.tex', added: 0, removed: 0, hunks: [] }).children[0].textContent, /No differences/);
+});
+
+test('saving a named version saves the text first, then names it', async () => {
+  const { ctx, $, calls } = setup({ get: url => (url.startsWith('/api/write/snapshots') ? { snapshots: [] } : null) });
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'edited'; area.fire('input');
+  $('write-version-name').value = '  Before submission ';
+  await ctx.saveNamedVersion();
+  const save = calls.findIndex(c => c[0] === '/api/write/save');
+  const snap = calls.findIndex(c => c[0] === '/api/write/snapshot');
+  assert.ok(save >= 0 && snap > save);
+  assert.equal(calls[snap][1].name, 'Before submission');
+  assert.equal($('write-version-name').value, '');
+});
+
+test('selecting a version shows its differences from the current text of the open file', async () => {
+  const { ctx, $, calls } = setup({ get: url => (url.startsWith('/api/write/diff') ?
+    { file: 'main.tex', added: 0, removed: 0, hunks: [] } : null) });
+  await ctx.openWriteDoc('d1');
+  await ctx.selectVersion('20261019T100000-000000001');
+  assert.ok(calls.some(c => c[0] === 'GET' && c[1] === '/api/write/diff?doc=d1&a=20261019T100000-000000001&b=current&file=main.tex'));
+  assert.match($('write-version-diff').children[0].textContent, /No differences/);
+});
+
+test('naming an existing version sends the new name and refreshes the list', async () => {
+  const { ctx, calls } = setup({ get: url => (url.startsWith('/api/write/snapshots') ? { snapshots: [] } : null) });
+  await ctx.openWriteDoc('d1');
+  ctx.window.prompt = () => 'Draft 2';
+  await ctx.nameVersion({ id: 's9', name: '' });
+  assert.deepEqual({ ...calls.find(c => c[0] === '/api/write/snapshot/name')[1] }, { doc: 'd1', snapshot: 's9', name: 'Draft 2' });
+  assert.ok(calls.some(c => c[0] === 'GET' && c[1].startsWith('/api/write/snapshots')));
+});

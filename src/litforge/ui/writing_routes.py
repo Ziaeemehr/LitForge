@@ -69,8 +69,11 @@ def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) ->
         return {"name": query.get("name") or "main.tex", "text": text, "hash": digest}
     if path == "/api/write/snapshots":
         doc = _doc(conn, app, query)
-        return {"snapshots": [{k: s[k] for k in ("id", "created_at", "note", "files")}
-                              for s in wd.list_snapshots(doc)]}
+        return {"snapshots": [{k: s[k] for k in ("id", "created_at", "note", "name", "files", "added", "removed")}
+                              for s in wd.snapshot_summaries(doc)]}
+    if path == "/api/write/diff":
+        return wd.diff_versions(_doc(conn, app, query), query.get("a") or "current",
+                                query.get("b") or "current", query.get("file") or "main.tex")
     if path == "/api/write/cite/search":
         doc = _doc(conn, app, query)
         q = query.get("q", "")
@@ -115,7 +118,11 @@ def post(app: App, conn: sqlite3.Connection, path: str, body: dict[str, Any]) ->
     if path == "/api/write/restore":
         return {"restored": wd.restore_snapshot(conn, doc, str(body.get("snapshot") or ""))}
     if path == "/api/write/snapshot":
-        return {"id": wd.create_snapshot(doc, str(body.get("note") or "manual")[:200])}
+        return {"id": wd.create_snapshot(doc, str(body.get("note") or "manual")[:200],
+                                         str(body.get("name") or ""))}
+    if path == "/api/write/snapshot/name":
+        snap_id = str(body.get("snapshot") or "")
+        return {"id": snap_id, "name": wd.name_snapshot(doc, snap_id, str(body.get("name") or ""))}
     if path == "/api/write/cite":
         return wcite.cite(conn, doc, str(body.get("paper_id") or ""), body.get("evidence_id") or None)
     if path == "/api/write/assist":

@@ -155,3 +155,69 @@ def test_restoring_the_oldest_snapshot_survives_rotation(env, monkeypatch) -> No
     expected = (doc.folder / ".snapshots" / oldest["id"] / "main.tex").read_text()
     assert "main.tex" in wd.restore_snapshot(conn, doc, oldest["id"])
     assert wd.read_file(doc, "main.tex")[0] == expected
+
+
+def test_named_versions(env, monkeypatch) -> None:
+    conn, paths = env
+    doc = wd.create_document(conn, paths, "demo", "d")
+    monkeypatch.setattr(wd, "SNAPSHOT_KEEP", 2)
+    pinned = wd.create_snapshot(doc, name="  Draft\x00\n  ")
+    assert wd.list_snapshots(doc)[0]["name"] == "Draft"
+    for _ in range(4):
+        wd.create_snapshot(doc)
+    assert len(wd.list_snapshots(doc)) == 3
+    wd.name_snapshot(doc, pinned, "x" * 130)
+    assert next(s for s in wd.list_snapshots(doc) if s["id"] == pinned)["name"] == "x" * 120
+    wd.name_snapshot(doc, pinned, "")
+    assert next(s for s in wd.list_snapshots(doc) if s["id"] == pinned)["name"] == ""
+    wd.create_snapshot(doc)
+    assert pinned not in {s["id"] for s in wd.list_snapshots(doc)}
+
+
+@pytest.mark.parametrize("bad", ["../x", "/tmp/x", "missing", "20261019T101500-123456789"])
+def test_version_bad_ids(env, bad) -> None:
+    conn, paths = env
+    doc = wd.create_document(conn, paths, "demo", "d")
+    with pytest.raises(DocumentError):
+        wd.name_snapshot(doc, bad, "name")
+    with pytest.raises(DocumentError):
+        wd.version_text(doc, bad, "main.tex")
+
+
+def test_version_text_security(env) -> None:
+    conn, paths = env
+    doc = wd.create_document(conn, paths, "demo", "d")
+    snap = wd.create_snapshot(doc)
+    folder = doc.folder / ".snapshots" / snap
+    (folder / "link.tex").symlink_to(doc.folder / "main.tex")
+    assert wd.version_text(doc, snap, "main.tex") == wd.version_text(doc, "current", "main.tex")
+    assert wd.version_text(doc, snap, "absent.tex") == ""
+    assert wd.version_text(doc, "current", "absent.tex") == ""
+    for name in ("../main.tex", str(doc.folder / "main.tex"), "link.tex", "figure.png"):
+        with pytest.raises(DocumentError):
+            wd.version_text(doc, snap, name)
+
+
+def test_version_diff_and_summaries(env) -> None:
+    conn, paths = env
+    doc = wd.create_document(conn, paths, "demo", "d")
+    (doc.folder / "main.tex").write_text("first\na\nb\nc\nd\n")
+    old = wd.create_snapshot(doc)
+    (doc.folder / "main.tex").write_text("a\nc\nb\nd\nlast\n")
+    (doc.folder / "extra.txt").write_text("extra\n")
+    new = wd.create_snapshot(doc)
+    assert wd.diff_versions(doc, new, "current")["hunks"] == []
+    diff = wd.diff_versions(doc, old, new)
+    assert (diff["added"], diff["removed"], diff["truncated"]) == (2, 2, False)
+    assert diff["hunks"] == [{"a_start": 1, "a_lines": 5, "b_start": 1, "b_lines": 5,
+                              "lines": [{"op": op, "text": text} for op, text in
+                                        [("-", "first"), (" ", "a"), ("+", "c"), (" ", "b"),
+                                         ("-", "c"), (" ", "d"), ("+", "last")]]}]
+    summaries = wd.snapshot_summaries(doc)
+    assert [(s["added"], s["removed"]) for s in summaries] == [(3, 2), (5, 0)]
+    (doc.folder / "main.tex").write_text("new\n" * 4100)
+    diff = wd.diff_versions(doc, old, "current")
+    assert diff["truncated"] and diff["added"] == 4100 and diff["removed"] == 5
+    assert sum(len(h["lines"]) for h in diff["hunks"]) == 4000
+    empty = wd.diff_versions(doc, "current", old, "missing.tex")
+    assert empty["hunks"] == []

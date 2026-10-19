@@ -2534,30 +2534,112 @@
     });
   }
 
+  /* Versions: the automatic versions kept while saving, named versions, and what changed. */
+  var VERS = { selected: null, list: [] };
+
+  function versionLabel(s) {
+    return String(s.created_at || s.id).replace('T', ' ').slice(0, 19) + ((s.name || s.note) ? ' · ' + (s.name || s.note) : '');
+  }
+
+  function changeCounts(s) {
+    if (s.added == null && s.removed == null) return '';
+    return (s.added || s.removed) ? '+' + (s.added || 0) + ' −' + (s.removed || 0) : 'no change';
+  }
+
   function showWriteVersions() {
     var box = $('write-versions');
     if (!box.hidden) { box.hidden = true; return Promise.resolve(); }
-    return saveWriteNow().then(function () {
-      return api('/api/write/snapshots?doc=' + encodeURIComponent(W.doc.id));
-    }).then(function (data) {
+    return saveWriteNow().then(loadVersions).then(function () {
+      box.hidden = false;
+      if (VERS.list.length) return selectVersion(VERS.list[0].id);
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function loadVersions() {
+    return api('/api/write/snapshots?doc=' + encodeURIComponent(W.doc.id)).then(function (data) {
+      VERS.list = data.snapshots || [];
       var list = $('write-version-list');
       list.replaceChildren();
-      (data.snapshots || []).forEach(function (s) {
+      VERS.list.forEach(function (s) {
         var li = document.createElement('li');
+        li.className = 'ver-row' + (s.name ? ' named' : '') + (s.id === VERS.selected ? ' on' : '');
         var label = document.createElement('span');
-        label.textContent = String(s.created_at || s.id).replace('T', ' ').slice(0, 19) + (s.note ? ' · ' + s.note : '');
+        label.className = 'ver-label'; label.dir = 'auto';
+        label.textContent = versionLabel(s);
+        var chip = document.createElement('small');
+        chip.className = 'ver-chip'; chip.textContent = changeCounts(s);
+        label.appendChild(chip);
+        label.onclick = function () { return selectVersion(s.id); };
         var restore = document.createElement('button');
         restore.className = 'btn small'; restore.textContent = 'Restore';
         restore.onclick = function () { return restoreWriteVersion(s.id); };
-        li.appendChild(label); li.appendChild(restore);
+        var name = document.createElement('button');
+        name.className = 'btn small ghost'; name.textContent = s.name ? 'Rename' : 'Name';
+        name.onclick = function () { return nameVersion(s); };
+        li.appendChild(label); li.appendChild(restore); li.appendChild(name);
         list.appendChild(li);
       });
-      if (!(data.snapshots || []).length) {
+      if (!VERS.list.length) {
         var none = document.createElement('li'); none.textContent = 'No versions yet; they are kept as you save.';
         list.appendChild(none);
       }
-      box.hidden = false;
+      var against = $('write-version-against'), keep = against.value || 'current';
+      var opts = [['current', 'Current text']].concat(VERS.list.map(function (s) { return [s.id, versionLabel(s)]; }));
+      against.replaceChildren.apply(against, opts.map(function (o) {
+        var opt = document.createElement('option'); opt.value = o[0]; opt.textContent = o[1]; return opt;
+      }));
+      against.value = opts.some(function (o) { return o[0] === keep; }) ? keep : 'current';
+    });
+  }
+
+  // The differences between version `id` and the "Compare with" choice (the current text by default).
+  function selectVersion(id) {
+    VERS.selected = id;
+    var against = $('write-version-against').value || 'current';
+    (document.querySelectorAll('#write-version-list .ver-row') || []).forEach(function (row, i) {
+      row.classList.toggle('on', VERS.list[i] && VERS.list[i].id === id);
+    });
+    return api('/api/write/diff?doc=' + encodeURIComponent(W.doc.id) + '&a=' + encodeURIComponent(id) + '&b=' +
+      encodeURIComponent(against) + '&file=' + encodeURIComponent(W.file)).then(function (d) {
+      var target = $('write-version-diff'), box = renderDiff(d);
+      target.replaceChildren.apply(target, box.children);
     }).catch(function (e) { toast(e.message); });
+  }
+
+  function renderDiff(d) {
+    var box = document.createElement('div');
+    var add = function (cls, text) {
+      var el = document.createElement('div'); el.className = cls; el.textContent = text; box.appendChild(el); return el;
+    };
+    if (!d.hunks || !d.hunks.length) { add('diff-none', 'No differences in ' + (d.file || 'this file') + '.'); return box; }
+    d.hunks.forEach(function (h) {
+      add('diff-hunk', 'line ' + h.b_start + (h.b_lines > 1 ? '–' + (h.b_start + h.b_lines - 1) : ''));
+      h.lines.forEach(function (l) {
+        add('diff-line ' + (l.op === '+' ? 'add' : l.op === '-' ? 'del' : 'ctx'), l.text).dir = 'auto';
+      });
+    });
+    if (d.truncated) add('diff-more', 'Showing only the first part of the differences.');
+    return box;
+  }
+
+  function saveNamedVersion() {
+    var input = $('write-version-name'), name = input.value.trim();
+    return saveWriteNow().then(function () {
+      if (W.dirty || W.conflictHash) { toast('Save or resolve the conflict first.'); return null; }
+      return post('/api/write/snapshot', { doc: W.doc.id, note: 'named', name: name }).then(function (r) {
+        input.value = '';
+        toast(name ? 'Version saved: ' + name : 'Version saved');
+        VERS.selected = r && r.id;
+        return loadVersions();
+      });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function nameVersion(s) {
+    var name = window.prompt('Name for this version (leave empty to remove the name)', s.name || '');
+    if (name === null) return Promise.resolve();
+    return post('/api/write/snapshot/name', { doc: W.doc.id, snapshot: s.id, name: name.trim() })
+      .then(loadVersions).catch(function (e) { toast(e.message); });
   }
 
   function restoreWriteVersion(id) {
@@ -3177,6 +3259,10 @@
     wireWriteGutter();
     wirePdfView();
     $('write-spell').onclick = function () { setSpell(!SPELL.on); };
+    $('write-version-save').onclick = saveNamedVersion;
+    $('write-version-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') saveNamedVersion(); });
+    $('write-version-against').onchange = function () { if (VERS.selected) selectVersion(VERS.selected); };
+    $('write-versions-close').onclick = function () { $('write-versions').hidden = true; };
     setSpell(store.get('spell', true));
     document.addEventListener('mousedown', function (e) {
       var menu = $('write-spell-menu');

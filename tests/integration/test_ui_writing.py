@@ -261,3 +261,31 @@ def test_synctex_being_written_gives_a_clear_404(server) -> None:
     (build / "main.synctex.gz").write_bytes(gzip.compress(b"SyncTeX Version:1\n" * 500)[:50])
     status, body = call(base, f"/api/write/synctex?doc={doc['id']}&file=main.tex&line=1")
     assert status == 404 and "compile" in body["error"]
+
+
+def test_version_history_routes(server) -> None:
+    base, _ = server
+    doc = create(base)
+    body = {"doc": doc["id"], "note": "checkpoint", "name": " Draft "}
+    status, snap = call(base, "/api/write/snapshot", body)
+    assert status == 200
+    status, listing = call(base, f"/api/write/snapshots?doc={doc['id']}")
+    assert status == 200
+    item = listing["snapshots"][0]
+    assert set(item) == {"id", "created_at", "note", "name", "files", "added", "removed"}
+    assert item["name"] == "Draft" and item["added"] > 0 and item["removed"] == 0
+    status, renamed = call(base, "/api/write/snapshot/name", {"doc": doc["id"], "snapshot": snap["id"],
+                                                              "name": " Final "})
+    assert status == 200 and renamed == {"id": snap["id"], "name": "Final"}
+    status, diff = call(base, f"/api/write/diff?doc={doc['id']}&a={snap['id']}&b=current&file=main.tex")
+    assert status == 200 and diff["hunks"] == [] and diff["file"] == "main.tex"
+    assert call(base, f"/api/write/diff?doc={doc['id']}")[1]["hunks"] == []
+    assert call(base, f"/api/write/diff?doc={doc['id']}&a=bad")[0] == 400
+    assert call(base, "/api/write/snapshot/name", {"doc": doc["id"], "snapshot": "../bad"})[0] == 400
+    for path in ("/api/write/snapshot", "/api/write/snapshot/name"):
+        assert call(base, path, body, headers={"Origin": "http://evil.example"})[0] == 403
+        assert call(base, path, {"doc": "unknown"})[0] == 404
+    for path in ("snapshots", "diff"):
+        assert call(base, f"/api/write/{path}?doc=unknown")[0] == 404
+    second = call(base, "/api/write/snapshot", body)[1]
+    assert second["id"] != snap["id"]

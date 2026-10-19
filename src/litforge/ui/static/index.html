@@ -490,7 +490,22 @@
         <button class="btn small" id="write-reload">Reload theirs</button>
         <button class="btn small" id="write-keep">Keep mine</button>
       </div>
-      <div id="write-versions" class="card write-versions" hidden><h3>Versions</h3><ul id="write-version-list"></ul></div>
+      <div id="write-versions" class="card write-versions" hidden>
+        <div class="ver-head">
+          <h3>Versions</h3>
+          <input id="write-version-name" maxlength="120" placeholder="Name this version, e.g. Before submission"
+            aria-label="Version name" dir="auto">
+          <button type="button" class="btn small" id="write-version-save" title="Keep the current text as a named version (never removed automatically)">Save version</button>
+          <span class="spacer"></span>
+          <label class="ver-against">Compare with
+            <select id="write-version-against" aria-label="Compare with"><option value="current">Current text</option></select></label>
+          <button type="button" class="sg-x" id="write-versions-close" aria-label="Close versions">×</button>
+        </div>
+        <div class="ver-body">
+          <ul id="write-version-list" aria-label="Versions"></ul>
+          <div id="write-version-diff" class="ver-diff" aria-live="polite"></div>
+        </div>
+      </div>
       <div id="write-cite-panel" class="card write-cite" hidden>
         <div class="write-cite-tabs"><button class="btn small on" id="write-cite-tab-lib" data-tab="library">Library</button><button class="btn small" id="write-cite-tab-ev" data-tab="evidence">Evidence</button></div>
         <input id="write-cite-q" placeholder="Search title, author, year, DOI or quote" aria-label="Search papers to cite">
