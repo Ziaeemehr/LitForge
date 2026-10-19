@@ -611,10 +611,10 @@ test('a library key arriving after leaving the file is not inserted anywhere', a
   const area = $('write-cm').children[0];
   area.value = 'Text \\cite{de}'; area.setSelectionRange(13, 13);
   const done = ctx.applyCiteCompletion({ source: 'library', paper_id: 'p2' }, 11, 13);
-  ctx.W.file = 'other.tex';
+  await ctx.openWriteFile('main.tex', true);  // leaving the file always replaces the editor
   release({ key: 'deco2014' });
   await done;
-  assert.equal(area.value, 'Text \\cite{de}');
+  assert.ok(!/deco2014/.test(ctx.W.editor.getText()));
   assert.ok(calls.some(c => c[0] === 'toast' && /deco2014/.test(c[1])));
 });
 
@@ -637,4 +637,72 @@ test('when the library search fails, \\cite{ still lists the document keys and t
   const result = await ctx.latexCompletionSource(fakeContext(text, text.length));
   assert.deepEqual([...result.options.map(o => o.label)], ['lee2021', 'Search the library and evidence…']);
   assert.equal(result.from, text.length - 1);
+});
+
+// Review (Codex) of the completion: late replies, broader prefixes after Backspace, label cache races.
+test('a late key for an empty \\cite{} goes where the cursor is, never at the old offset', async () => {
+  let release;
+  const { ctx, $ } = setup({ post: url => (url === '/api/write/cite' ? new Promise(r => { release = r; }) : null) });
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = '\\cite{} tail'; area.setSelectionRange(6, 6);
+  const done = ctx.applyCiteCompletion({ source: 'library', paper_id: 'p' }, 6, 6);
+  area.value = 'PREFIX \\cite{} tail'; area.setSelectionRange(13, 13);
+  release({ key: 'smith2020' });
+  await done;
+  assert.equal(area.value, 'PREFIX \\cite{smith2020} tail');
+});
+
+test('a late key is not inserted when the cursor has left the citation', async () => {
+  let release;
+  const { ctx, $, calls } = setup({ post: url => (url === '/api/write/cite' ? new Promise(r => { release = r; }) : null) });
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = '\\cite{} tail'; area.setSelectionRange(6, 6);
+  const done = ctx.applyCiteCompletion({ source: 'library', paper_id: 'p' }, 6, 6);
+  area.value = 'PREFIX \\cite{} tail'; area.setSelectionRange(17, 17);  // now in "tail"
+  release({ key: 'smith2020' });
+  await done;
+  assert.equal(area.value, 'PREFIX \\cite{} tail');
+  assert.ok(calls.some(c => c[0] === 'toast' && /smith2020/.test(c[1])));
+});
+
+test('a late key is dropped when the file was closed and opened again', async () => {
+  let release;
+  const { ctx, $, calls } = setup({ post: url => (url === '/api/write/cite' ? new Promise(r => { release = r; }) : null) });
+  await ctx.openWriteDoc('d1');
+  $('write-cm').children[0].value = '\\cite{}';
+  const done = ctx.applyCiteCompletion({ source: 'library', paper_id: 'p' }, 6, 6);
+  await ctx.openWriteFile('main.tex', true);  // same file name, new editor
+  release({ key: 'smith2020' });
+  await done;
+  assert.ok(!/smith2020/.test(ctx.W.editor.getText()));
+  assert.ok(calls.some(c => c[0] === 'toast' && /smith2020/.test(c[1])));
+});
+
+test('the command and environment lists are complete, so Backspace can widen them', () => {
+  const { ctx } = setup();
+  const labels = r => [...r.options.map(o => o.label)];
+  const text = '\\sec';
+  assert.ok(labels(ctx.latexCompletionSource(fakeContext(text, text.length))).includes('\\settextfont'));
+  const env = '\\begin{fig';
+  assert.ok(labels(ctx.latexCompletionSource(fakeContext(env, env.length))).includes('table'));
+});
+
+test('labels of other files: only the newest load is kept', async () => {
+  const pending = [];
+  const { ctx } = setup({ get: url => {
+    if (url.startsWith('/api/write/doc?')) return { id: 'd1', name: 'D', pdf: false,
+      files: [{ name: 'main.tex', kind: 'text' }, { name: 'a.tex', kind: 'text' }] };
+    if (url.includes('name=a.tex') && pending.length < 5) return new Promise(r => pending.push(r));
+    return null;
+  } });
+  await ctx.openWriteDoc('d1');           // load 1 (pending[0]) for main.tex
+  ctx.W.doc.files.push({ name: 'b.tex', kind: 'text' });
+  const second = ctx.loadOtherTexts();    // load 2 (pending[1])
+  pending[1]({ text: '\\label{new}' });
+  await second;
+  pending[0]({ text: '\\label{old}' });
+  await new Promise(r => setImmediate(r));
+  assert.ok(ctx.W.otherTexts.join(' ').includes('new') && !ctx.W.otherTexts.join(' ').includes('old'));
 });

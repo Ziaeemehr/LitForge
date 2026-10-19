@@ -2102,11 +2102,12 @@
     var doc = W.doc, names = (doc.files || []).filter(function (f) {
       return f.kind === 'text' && /\.tex$/i.test(f.name) && f.name !== W.file;
     }).map(function (f) { return f.name; });
-    W.otherTexts = [];
+    var token = {};  // only the newest load may fill the cache (switching files quickly starts several)
+    W.otherTexts = []; W.otherTextsToken = token;
     W.otherTextsLoading = Promise.all(names.map(function (name) {
       return api('/api/write/file?doc=' + encodeURIComponent(doc.id) + '&name=' + encodeURIComponent(name))
         .then(function (f) { return f.text; }).catch(function () { return ''; });
-    })).then(function (texts) { if (W.doc === doc) W.otherTexts = texts; });
+    })).then(function (texts) { if (W.doc === doc && W.otherTextsToken === token) W.otherTexts = texts; });
     return W.otherTextsLoading;
   }
 
@@ -2547,18 +2548,23 @@
       return $('write-cite-panel').hidden ? openWriteCite() : Promise.resolve();
     }
     if (opt.source === 'document') { W.editor.replace(from, to, opt.label); return Promise.resolve(); }
-    // The key comes from the server: by then the user may have typed on or left the file.
-    var doc = W.doc, file = W.file, typed = W.editor.getText().slice(from, to);
-    return post('/api/write/cite', { doc: doc.id, paper_id: opt.paper_id, evidence_id: null })
+    // The key comes from the server: by then the user may have typed on, moved, or left the file. The old
+    // offsets are used only when the text before them is unchanged; otherwise the key goes into the \cite{...}
+    // the cursor is in, and nowhere when the cursor has left it.
+    var editor = W.editor, start = Math.max(0, from - 40), before = editor.getText().slice(start, to);
+    var typed = editor.getText().slice(from, to);
+    return post('/api/write/cite', { doc: W.doc.id, paper_id: opt.paper_id, evidence_id: null })
       .then(function (res) {
-        if (W.doc !== doc || W.file !== file || !W.editor) { toast('Not inserted: ' + res.key + ' (the file changed)'); return; }
-        var text = W.editor.getText(), cursor = W.editor.selection().to;
-        if (text.slice(from, to) === typed) { W.editor.replace(from, to, res.key); return; }
+        var skip = function (why) { toast('Not inserted: ' + res.key + ' (' + why + '); its entry is in references.bib'); };
+        if (W.editor !== editor) return skip('the file was closed');
+        var text = editor.getText(), cursor = editor.selection().to;
+        if (text.slice(start, to) === before) return editor.replace(from, to, res.key);
+        if (!citeGroupAt(text, cursor)) return skip('the cursor left the citation');
         if (typed && text.slice(cursor - typed.length, cursor) === typed) {
-          W.editor.replace(cursor - typed.length, cursor, res.key); return;
+          return editor.replace(cursor - typed.length, cursor, res.key);
         }
         var edit = insertCiteKey(text, cursor, res.key);
-        if (edit) W.editor.replace(edit.from, edit.to, edit.insert);
+        if (edit) editor.replace(edit.from, edit.to, edit.insert);
       })
       .catch(function (e) { toast(e.message); });
   }
@@ -2580,7 +2586,8 @@
       };
     };
     if (c.kind === 'command') {
-      return { from: from, validFor: /^\\[a-zA-Z*]*$/, options: commandOptions(c.prefix, docCommands(text)).map(function (o) {
+      // The whole list: CodeMirror filters it as you type, and Backspace can widen it again.
+      return { from: from, validFor: /^\\[a-zA-Z*]*$/, options: commandOptions('', docCommands(text)).map(function (o) {
         var apply = put(o.apply, o.apply.length - o.back);
         return { label: o.label, detail: o.detail, type: 'keyword', apply: !chainsCompletion(o.apply) ? apply :
           function (view, completion, f, t) {
@@ -2598,7 +2605,7 @@
       }) };
     }
     if (c.kind === 'env') {
-      return { from: from, validFor: /^[a-zA-Z*]*$/, options: envOptions(c.prefix).map(function (o) {
+      return { from: from, validFor: /^[a-zA-Z*]*$/, options: envOptions('').map(function (o) {
         return { label: o.label, type: 'type', apply: function (view, completion, f, t) {
           var ins = envReplacement(o.label, c.begin, view.state.sliceDoc(t, view.state.doc.lineAt(t).to).trimEnd());
           put(ins.text, ins.cursor)(view, completion, f, t + ins.consume);
