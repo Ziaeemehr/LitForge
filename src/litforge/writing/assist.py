@@ -190,7 +190,7 @@ def run(conn: sqlite3.Connection, gateway: ModelGateway, doc: Document, req: Req
 
 
 def suggestion_from(conn: sqlite3.Connection, doc: Document, req: Request, content: dict[str, Any], model: str,
-                    file: str) -> dict[str, Any]:
+                    file: str, citations_in: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Turn a model reply into hunks with guard flags, recorded as a pending suggestion. Shared with the
     assistant chat, whose edits go through the same checks."""
     citations: list[dict[str, Any]] = []
@@ -203,6 +203,7 @@ def suggestion_from(conn: sqlite3.Connection, doc: Document, req: Request, conte
             flags.append(f"{dropped} citation(s) removed: their quote was not found in the evidence")
     else:
         new_text = restore(str(content.get("replacement") or ""), req.markers)
+        citations = list(citations_in or [])
         if _MARKER.search(new_text):
             flags.append("the model invented markers that stand for nothing")
     new_text = _keep_edges(sent, repair_escapes(new_text, sent))
@@ -356,7 +357,8 @@ def latex_flags(old: str, new: str, exempt: set[str] | None = None) -> list[str]
     lost_keys = set(cited_keys(old)) - set(cited_keys(new))
     if lost_keys:
         flags.append("citations dropped: " + ", ".join(sorted(lost_keys)[:8]))
-    if _brace_balance(old) != _brace_balance(new):  # a dropped } breaks the compile (seen in the real run)
+    (old_net, old_broken), (new_net, new_broken) = _brace_state(old), _brace_state(new)
+    if old_net != new_net or (new_broken and not old_broken):  # a dropped } breaks the compile (real run)
         flags.append("braces unbalanced: a { or } was added or dropped")
     lost_refs = {m.group(0) for m in _ARG_COMMANDS.finditer(old)} - {m.group(0) for m in _ARG_COMMANDS.finditer(new)}
     if lost_refs:
@@ -364,11 +366,30 @@ def latex_flags(old: str, new: str, exempt: set[str] | None = None) -> list[str]
     return flags
 
 
-def _brace_balance(text: str) -> int:
-    """Opening minus closing braces, leaving out escaped ones (\\{ \\}) and comments."""
-    text = re.sub(r"(?<!\\)%.*", "", text)
-    text = re.sub(r"\\[{}]", "", text)
-    return text.count("{") - text.count("}")
+_VERBATIM = re.compile(r"\\begin\{(verbatim\*?|lstlisting|minted)\}.*?\\end\{\1\}|\\verb\*?(.).*?\2", re.S)
+
+
+def _brace_state(text: str) -> tuple[int, bool]:
+    """Opening minus closing braces, and whether a } ever closes nothing. Escapes (\\{ \\} \\\\ \\%),
+    comments and verbatim text are read as LaTeX reads them."""
+    text = _VERBATIM.sub("", text)
+    depth, broken, i = 0, False, 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\":
+            i += 2  # the escaped character, whatever it is
+            continue
+        if ch == "%":
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            broken = broken or depth < 0
+        i += 1
+    return depth, broken
 
 
 _CONTROL = {"\t": "t", "\r": "r", "\f": "f", "\b": "b", "\n": "n"}

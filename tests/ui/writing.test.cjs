@@ -1125,3 +1125,46 @@ test('opening another document starts a new conversation', async () => {
   assert.equal(ctx.CHAT.turns.length, 0);
   assert.equal($('write-chat-log').children.length, 0);
 });
+
+// Review (Codex) of the assistant: approval covers exactly what is sent; late replies; typing meanwhile.
+test('after approval exactly the approved request is sent, even if the selection changed meanwhile', async () => {
+  let approveNow;
+  const { ctx, $, calls } = chatSetup(ANSWER, 'ask');
+  ctx.window.confirm = () => { approveNow(); return true; };
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Approved text. Secret text.'; area.setSelectionRange(0, 14);
+  approveNow = () => area.setSelectionRange(15, 27);  // the user selects something else while the dialog is open
+  $('write-chat-input').value = 'Shorter?';
+  await ctx.sendChat();
+  const sent = calls.filter(c => c[0] === '/api/write/chat').map(c => c[1]);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].approved, true);
+  assert.equal(sent[1].selection, 'Approved text.');
+});
+
+test('a message typed while the question was being sent is kept', async () => {
+  let release;
+  const { ctx, $ } = setup({ post: url => (url === '/api/write/chat' ? new Promise(r => { release = r; }) : null),
+    get: url => (url.startsWith('/api/jobs/') ? { status: 'done', report: ANSWER } : null) });
+  await ctx.openWriteDoc('d1');
+  $('write-chat-input').value = 'First?';
+  const done = ctx.sendChat();
+  $('write-chat-input').value = 'Second, being typed';
+  release({ id: 'job-chat', preview: { model: 'm', profile: 'local', remote: false }, sent: { characters: 1, evidence: 0 } });
+  await done;
+  assert.equal($('write-chat-input').value, 'Second, being typed');
+});
+
+test('a source inserted after switching documents goes nowhere', async () => {
+  let release;
+  const { ctx, $, calls } = setup({ post: url => (url === '/api/write/cite' ? new Promise(r => { release = r; }) : null) });
+  await ctx.openWriteDoc('d1');
+  const done = ctx.insertChatCitation(ANSWER.citations[0]);
+  await ctx.openWriteFile('main.tex', true);  // new editor (another document behaves the same)
+  $('write-cm').children[0].value = 'Other.';
+  release({ key: 'lee2021' });
+  await done;
+  assert.equal($('write-cm').children[0].value, 'Other.');
+  assert.ok(calls.some(c => c[0] === 'toast' && /lee2021/.test(c[1])));
+});

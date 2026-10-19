@@ -325,3 +325,15 @@ def test_unbalanced_braces_are_flagged() -> None:
     assert any("braces" in f for f in wa.latex_flags("\\lr{a b}.", "\\lr{a b."))
     assert not any("braces" in f for f in wa.latex_flags("\\lr{a b}.", "\\lr{a}."))
     assert not any("braces" in f for f in wa.latex_flags("50\\% \\{x\\}", "50\\% \\{y\\}"))  # escaped braces
+
+
+@pytest.mark.parametrize("old, new, flagged", [
+    ("{a}", "}a{", True),                       # same count, broken grouping
+    ("a \\\\{b}", "a \\\\{b", True),            # \\ is a line break; the brace after it is real
+    ("50\\%{a}", "50\\%{a", True),              # \% is not a comment
+    ("\\verb|{|", "\\verb|{| x", False),        # literal brace inside \verb
+    ("\\begin{verbatim}{\\end{verbatim}", "\\begin{verbatim}{ \\end{verbatim}", False),
+    ("x % {", "y % {", False),                  # a brace in a comment does not count
+])
+def test_brace_guard_reads_latex(old: str, new: str, flagged: bool) -> None:
+    assert any("braces" in f for f in wa.latex_flags(old, new)) is flagged

@@ -2399,10 +2399,12 @@
 
   function insertChatCitation(c) {
     if (!W.doc || !W.editor) return Promise.resolve();
+    var editor = W.editor;
     return post('/api/write/cite', { doc: W.doc.id, paper_id: c.paper_id, evidence_id: c.evidence_id || null })
       .then(function (res) {
-        var edit = insertCiteKey(W.editor.getText(), W.editor.selection().to, res.key);
-        if (edit) W.editor.replace(edit.from, edit.to, edit.insert);
+        if (W.editor !== editor) { toast('Not inserted: ' + res.key + ' (the file changed)'); return; }
+        var edit = insertCiteKey(editor.getText(), editor.selection().to, res.key);
+        if (edit) editor.replace(edit.from, edit.to, edit.insert);
       }).catch(function (e) { toast(e.message); });
   }
 
@@ -2416,15 +2418,24 @@
     });
   }
 
-  function sendChat(approved) {
+  // The request is built once: an approval covers exactly what was shown, even if the selection, the document or
+  // the input change while the dialog is open.
+  function sendChat() {
     var input = $('write-chat-input'), question = input.value.trim();
-    if (!question || !W.doc || !W.editor || (CHAT.busy && !approved)) return Promise.resolve();
+    if (!question || !W.doc || !W.editor || CHAT.busy) return Promise.resolve();
     var doc = W.doc, file = W.file, sel = W.editor.selection(), text = W.editor.getText();
     var range = sel.text ? { from: sel.from, to: sel.to, text: sel.text, doc: doc.id, file: file } : null;
     var body = { doc: doc.id, question: question, selection: sel.text || '', context: sel.text ? '' : chatContext(text, sel.from),
-      history: CHAT.turns.slice(-8), file: file, approved: !!approved };
+      history: CHAT.turns.slice(-8), file: file, approved: false };
     CHAT.busy = true;
     $('write-chat-status').textContent = 'Preparing…';
+    return postChat(body, { question: question, doc: doc, file: file, range: range })
+      .catch(function (e) { $('write-chat-status').textContent = e.message; })
+      .then(function (r) { CHAT.busy = false; return r; });
+  }
+
+  function postChat(body, ask) {
+    var input = $('write-chat-input'), question = ask.question, doc = ask.doc, file = ask.file, range = ask.range;
     return post('/api/write/chat', body).then(function (res) {
       if (res.needs_approval) {
         var p = res.preview;
@@ -2432,9 +2443,10 @@
           (res.sent.evidence ? ' and ' + res.sent.evidence + ' passages from the papers' : '') + ' to ' + p.model + ' (' +
           p.provider + ', cloud' + (p.max_cost_usd != null ? ', at most $' + p.max_cost_usd.toFixed(4) : '') + ')?');
         if (!ok) { $('write-chat-status').textContent = 'Not sent.'; return null; }
-        return sendChat(true);
+        return postChat(Object.assign({}, body, { approved: true }), ask);
       }
-      input.value = '';
+      if (W.doc !== doc) return null;  // another document is open now
+      if (input.value.trim() === question) input.value = '';  // keep anything typed meanwhile
       addChatMessage('user', question);
       CHAT.turns.push({ role: 'user', text: question });
       $('write-chat-status').textContent = 'Asking ' + (res.preview.model || res.preview.profile) +
@@ -2446,8 +2458,7 @@
         $('write-chat-status').textContent = '';
         if (report.suggestion && range && W.file === file) showWriteSuggestion(report.suggestion, range);
       });
-    }).catch(function (e) { $('write-chat-status').textContent = e.message; })
-      .then(function (r) { CHAT.busy = false; return r; });
+    });
   }
 
   /* PDF viewer (PDF.js) and SyncTeX jumps. PDF positions are points from the page's top-left corner. */
@@ -3377,9 +3388,9 @@
     $('write-spell').onclick = function () { setSpell(!SPELL.on); };
     $('write-chat-btn').onclick = function () { toggleChat(); };
     $('write-chat-close').onclick = function () { toggleChat(false); };
-    $('write-chat-send').onclick = function () { sendChat(false); };
+    $('write-chat-send').onclick = function () { sendChat(); };
     $('write-chat-input').addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendChat(false); }
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendChat(); }
     });
     $('write-version-save').onclick = saveNamedVersion;
     $('write-version-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') saveNamedVersion(); });

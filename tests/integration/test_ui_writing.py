@@ -332,3 +332,25 @@ def test_chat_local_job_and_cloud_approval(tmp_path: Path) -> None:
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_only_one_question_at_a_time_even_when_sent_together(tmp_path: Path) -> None:
+    import threading as _threading
+    import time as _time
+
+    httpd, base, fakes = _assist_server(tmp_path)
+    try:
+        doc = create(base)
+        fakes["local"].answer = lambda m: (_time.sleep(0.5), {"answer": "ok", "citations": []})[1]
+        body = {"doc": doc["id"], "question": "Q?", "file": "main.tex"}
+        statuses: list[int] = []
+        threads = [_threading.Thread(target=lambda: statuses.append(call(base, "/api/write/chat", body)[0]))
+                   for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert sorted(statuses).count(200) == 1, statuses
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

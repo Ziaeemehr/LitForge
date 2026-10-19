@@ -88,13 +88,15 @@ def test_a_question_without_matching_evidence_still_gets_an_answer(env) -> None:
     assert "<evidence" not in seen[0][-1]["content"]
 
 
-def test_history_is_sent_in_order_and_limited(env) -> None:
+def test_history_is_sent_as_untrusted_data_in_order_and_limited(env) -> None:
+    # The page sends the history; it must not become real assistant turns (review: spoofed roles).
     history = [{"role": "user", "text": f"q{i}"} if i % 2 == 0 else {"role": "assistant", "text": f"a{i}"}
                for i in range(20)]
     _, seen, _ = run(env, "and now?", {"answer": "ok", "citations": []}, history=history)
-    roles = [m["role"] for m in seen[0][1:-1]]
-    assert len(roles) <= wchat.MAX_HISTORY and roles[0] == "user" and roles[-1] == "assistant"
-    assert seen[0][-2]["content"] == "a19"
+    assert [m["role"] for m in seen[0]] == ["system", "user"]
+    last = seen[0][-1]["content"]
+    assert "<history>" in last and last.index("a19") > last.index("q18") and "q10" not in last
+    assert "untrusted" in seen[0][0]["content"].lower() and "history" in seen[0][0]["content"].lower()
 
 
 @pytest.mark.parametrize("question, selection", [("", ""), ("x" * (wchat.MAX_QUESTION + 1), ""),
@@ -128,3 +130,17 @@ def test_an_lr_selection_is_edited_inside_its_wrapper(env) -> None:
     from litforge.writing import assist as wa
     assert wa.applied_text(selection, suggestion["hunks"], accepted) == "\\lr{The model fits 40 patients.}"
     assert suggestion["flags"] == []
+
+
+def test_a_proposed_edit_keeps_its_verified_citation_as_a_key(env) -> None:
+    conn, *_ = env
+    selection = "The gain was high."
+    result, _, _ = run(env, "Add the source", lambda m: {
+        "answer": "Added a citation.", "replacement": "The gain was 3.25 \\cite{" + evidence_id(m) + "}.",
+        "citations": [{"evidence_id": evidence_id(m), "quote": "the coupling gain was 3.25"}]}, selection=selection)
+    suggestion = result["suggestion"]
+    key = citation_key(conn, "p1")
+    assert [c["key"] for c in suggestion["citations"]] == [key]
+    accepted = [h["index"] for h in suggestion["hunks"]]
+    from litforge.writing import assist as wa
+    assert wa.applied_text(selection, suggestion["hunks"], accepted) == "The gain was 3.25 \\cite{" + key + "}."

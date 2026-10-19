@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from typing import TYPE_CHECKING, Any
 
 from litforge.writing import assist as wassist
@@ -28,7 +29,8 @@ def _doc(conn: sqlite3.Connection, app: App, query: dict[str, Any]) -> wd.Docume
     return wd.get_document(conn, app.paths, str(query.get("doc") or ""))
 
 
-_SYNC_CACHE: dict[str, tuple[tuple[int, int], wsync.SyncTex]] = {}  # document id -> (file stamp, parsed)
+_SYNC_CACHE: dict[str, tuple[tuple[int, int], wsync.SyncTex]] = {}
+_START = threading.Lock()  # one model job per document and kind  # document id -> (file stamp, parsed)
 
 
 def synctex_lookup(doc: wd.Document, query: dict[str, str]) -> dict[str, Any] | None:
@@ -198,9 +200,6 @@ def chat(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str, A
         return {"needs_approval": True, "preview": preview, "sent": sent}
     file = str(body.get("file") or "main.tex")
     wd.resolve_inside(doc.folder, file)
-    if any(j.kind == "writing-chat" and j.status == "running" and j.project == doc.id for j in app.jobs.values()):
-        raise ValueError("the assistant is still answering the last question")
-
     def work(job: Job) -> None:
         job.messages.append(f"Asking {preview['model'] or preview['profile']}…")
         conn = app.db()
@@ -210,7 +209,10 @@ def chat(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str, A
         finally:
             conn.close()
 
-    job = app.start_job("writing-chat", doc.id, work)
+    with _START:  # the check and the start together: two requests at once cannot both get through
+        if any(j.kind == "writing-chat" and j.status == "running" and j.project == doc.id for j in app.jobs.values()):
+            raise ValueError("the assistant is still answering the last question")
+        job = app.start_job("writing-chat", doc.id, work)
     return {**job.__dict__, "preview": preview, "sent": sent}
 
 
@@ -230,9 +232,6 @@ def assist(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str,
         return {"needs_approval": True, "preview": preview, "sent": sent}
     file = str(body.get("file") or "main.tex")
     wd.resolve_inside(doc.folder, file)
-    if any(j.kind == "writing-assist" and j.status == "running" and j.project == doc.id for j in app.jobs.values()):
-        raise ValueError("a suggestion is already being prepared for this document")
-
     def work(job: Job) -> None:
         job.messages.append(f"Asking {preview['model'] or preview['profile']}…")
         conn = app.db()
@@ -243,5 +242,8 @@ def assist(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str,
         finally:
             conn.close()
 
-    job = app.start_job("writing-assist", doc.id, work)
+    with _START:
+        if any(j.kind == "writing-assist" and j.status == "running" and j.project == doc.id for j in app.jobs.values()):
+            raise ValueError("a suggestion is already being prepared for this document")
+        job = app.start_job("writing-assist", doc.id, work)
     return {**job.__dict__, "preview": preview, "sent": sent}

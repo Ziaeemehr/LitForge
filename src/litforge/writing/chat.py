@@ -37,6 +37,7 @@ class ChatRequest:
     question: str
     selection: str
     wrap: tuple[str, str] | None = None  # the selection's own \\lr{ ... }, kept out of the model's text
+    citation_request: assist.Request | None = None
     task: str = "write_chat"
     messages: list[dict[str, str]] = field(default_factory=list)
     packet: EvidencePacket | None = None
@@ -67,6 +68,7 @@ def prepare(conn: sqlite3.Connection, doc: Document, question: str, selection: s
                       wrap=assist.lr_wrapper(selection) if selection else None)
     shown = selection[len(req.wrap[0]):len(selection) - len(req.wrap[1])] if req.wrap else selection
     req.messages = write_chat_messages(question, shown, context, turns, papers, spans)
+    req.citation_request = assist.Request(action="chat", text=selection, task=req.task, evidence=req.evidence)
     # The draft is unpublished: marked sensitive, so a cloud route always needs the author's approval.
     manuscript = EvidenceItem(id="selection", paper_id="manuscript", text=(selection or context or question), page=1)
     req.packet = EvidencePacket(items=[manuscript, *(papers.items if papers else [])], sensitive=True)
@@ -80,7 +82,7 @@ def schema_for(req: ChatRequest) -> dict[str, Any]:
         return _SCHEMA
     # Models write the fields in this order; with replacement first, qwen3:8b put the new text there instead of
     # in the answer (real run, 2026-10-19).
-    props = _SCHEMA["properties"]
+    props: dict[str, Any] = _SCHEMA["properties"]  # type: ignore[assignment]
     ordered = {"replacement": props["replacement"], "answer": props["answer"], "citations": props["citations"]}
     return {**_SCHEMA, "properties": ordered, "required": ["replacement", *_SCHEMA["required"]]}
 
@@ -109,7 +111,14 @@ def run(conn: sqlite3.Connection, gateway: ModelGateway, doc: Document, req: Cha
         persian = bool(assist._PERSIAN.search(replacement)) and not assist._PERSIAN.search(req.selection)
         edit = assist.Request(action="translate-fa" if persian else "chat", text=req.selection, task=req.task,
                               evidence=req.evidence, wrap=req.wrap)
+        # \\cite{evidence id} in the edit becomes the paper's key when its quote was verified, so accepting it
+        # also registers the paper for references.bib.
+        assert req.citation_request is not None
+        replacement, cited, dropped = assist._resolve_citations(conn, req.citation_request, replacement,
+                                                                content.get("citations") or [])
+        if dropped:
+            flags.append(f"{dropped} citation(s) left out of the edit: their quote was not found in the evidence")
         suggestion = assist.suggestion_from(conn, doc, edit, {"replacement": replacement, "note": ""},
-                                            f"{reply.provider}:{reply.model}", file)
+                                            f"{reply.provider}:{reply.model}", file, citations_in=cited)
     return {"answer": str(content.get("answer") or "")[:6000], "citations": list(verified.values()),
             "flags": flags, "suggestion": suggestion, "model": reply.model, "provider": reply.provider}
