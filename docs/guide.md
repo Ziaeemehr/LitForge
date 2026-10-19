@@ -400,8 +400,15 @@ in another editor. Start from the **English article** or **Persian article** tem
 - **Editing.** The editor (CodeMirror) highlights LaTeX, searches (Ctrl/Cmd+F) and shows Persian lines right to
   left. It saves 2 seconds after you stop typing and when you leave the editor. If the file changed in another tab
   or editor, a banner asks whether to reload that version or keep yours; nothing is overwritten silently.
-- **Versions.** A version is kept at most every 2 minutes while you save (the last 30). **Versions** restores one;
-  the current text is kept as a version first.
+- **Versions.** A version is kept at most every 2 minutes while you save (the last 30 are kept; named versions are
+  never removed). **Versions** lists them with the lines added and removed, shows what changed in one (against the
+  version before it, the current text or any other version), saves a named version now (*Before submission*), and
+  restores one; the current text is kept as a version first.
+- **Text ↔ PDF.** Double-click a place in the PDF to open its line in the editor; **Find in PDF** (Ctrl/Cmd+Alt+J)
+  scrolls the PDF to the cursor's line and highlights it. The PDF pane zooms and fits its width.
+- **Spelling.** English and Persian words are checked as you write (commands, citation keys, labels, math and
+  comments are skipped); right-click an underlined word for suggestions, *Add to my dictionary* or *Ignore*. The
+  **Spelling** button turns it off. Persian words joined with a half-space pass when every part is a word.
 - **Compile** (Ctrl/Cmd+Enter) builds the PDF shown on the right. Errors and warnings appear under the editor with
   their line; click one to jump to it. Install the engine once in Settings → Optional tools (Tectonic); the first
   compile downloads the LaTeX packages it needs (about two minutes), later compiles take about a second and work
@@ -415,6 +422,11 @@ in another editor. Start from the **English article** or **Persian article** tem
   `references.bib`. Keys look like `lee2021brain` and never change once made. Entries you write yourself in
   `references.bib` are kept; LitForge rewrites only the block between its `% litforge:` markers. With the cursor
   in a `\cite{...}`, the palette offers **Show quote** for the passage the citation came from.
+- **Assistant** opens beside the editor: ask about your text or the project's papers. Answers quote the papers
+  (each quote is checked against the paper) and **Insert \\cite** adds a source at the cursor. With text selected you
+  can ask for a change; it comes back as a suggestion to accept or reject, with the same checks as the AI actions.
+  What is sent: your question, the selection (or a few lines around the cursor), the last messages and matching
+  passages from the project's papers. The local model is used unless you assign a cloud model to `write_chat`.
 - **AI** works on the selection only: **Fix this error** (click a compile error first), **Rewrite: clearer /
   shorter**, **Translate** to English or Persian, and **Suggest citations** from the project's evidence. The local
   model is used unless you assign a cloud model to the `write_fix`, `write_rewrite` or `write_cite` task; a cloud
