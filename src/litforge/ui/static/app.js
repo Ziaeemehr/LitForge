@@ -1865,9 +1865,25 @@
       },
       provide: function (f) { return CM.EditorView.decorations.from(f); }
     });
+    var setSpellMarks = CM.StateEffect.define();
+    var spellField = CM.StateField.define({
+      create: function () { return CM.Decoration.none; },
+      update: function (marks, tr) {
+        marks = marks.map(tr.changes);
+        tr.effects.forEach(function (e) {
+          if (!e.is(setSpellMarks)) return;
+          var len = tr.state.doc.length;
+          marks = CM.Decoration.set(e.value.filter(function (s) { return s.to <= len && s.from < s.to; }).map(function (s) {
+            return CM.Decoration.mark({ class: 'cm-misspelled' }).range(s.from, s.to);
+          }), true);
+        });
+        return marks;
+      },
+      provide: function (f) { return CM.EditorView.decorations.from(f); }
+    });
     var view = new CM.EditorView({
       parent: parent,
-      state: CM.EditorState.create({ doc: text, extensions: [markField,
+      state: CM.EditorState.create({ doc: text, extensions: [markField, spellField,
         CM.lineNumbers(), CM.highlightActiveLineGutter(), CM.history(), CM.foldGutter(), CM.drawSelection(),
         CM.indentOnInput(), CM.bracketMatching(), CM.closeBrackets(), CM.highlightActiveLine(),
         CM.highlightSelectionMatches(), CM.StreamLanguage.define(CM.stex),
@@ -1882,13 +1898,27 @@
           { key: 'Mod-Alt-j', run: function () { syncToPdf(); return true; } }]  // only when the list is open; otherwise Tab indents
           .concat(CM.searchKeymap, CM.historyKeymap, [CM.indentWithTab], CM.defaultKeymap)),
         CM.EditorView.updateListener.of(function (u) {
+          if (u.docChanged || u.viewportChanged) spellRefresh(u.view);
           if (u.docChanged) handlers.change();
           if (u.docChanged || u.selectionSet) handlers.cursor && handlers.cursor(u.view);
         }),
-        CM.EditorView.domEventHandlers({ blur: function () { handlers.blur(); } })
+        CM.EditorView.domEventHandlers({
+          blur: function () { handlers.blur(); },
+          contextmenu: function (e, v) {
+            var pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
+            var span = pos == null ? null : SPELL.spans.filter(function (s) { return s.from <= pos && pos <= s.to; })[0];
+            if (!span) return false;  // the browser's own menu elsewhere
+            e.preventDefault();
+            openSpellMenu(span, e.clientX, e.clientY);
+            return true;
+          }
+        })
       ] })
     });
     view.scrollDOM.addEventListener('scroll', function () { if (AI.pending) placeWriteSuggestion(AI.pending.range); });
+    view.litforgeSpell = function (spans) { view.dispatch({ effects: setSpellMarks.of(spans) }); };
+    SPELL.spans = [];
+    spellRefresh(view);
     return {
       view: view,
       getText: function () { return view.state.doc.toString(); },
@@ -2173,6 +2203,117 @@
     frame.hidden = !ready;
     if (ready) frame.src = url;
     return Promise.resolve();
+  }
+
+  /* Spell check: words from latex_words.js, checked in a worker (vendor/spell.worker.js) against the English and
+     Persian dictionaries; misspelled words are underlined, right-click offers suggestions. */
+  var SPELL = { on: true, cache: new Map(), worker: null, timer: null, seq: 0, waiting: {}, spans: [], view: null };
+
+  // What to underline in `text` (which starts at document offset `from`) and which words to ask the worker about.
+  function spellQuery(text, from, cache) {
+    var spans = [], unknown = [], asked = new Set();
+    window.LitForgeWords.latexWords(text, from).forEach(function (w) {
+      var key = w.lang + ':' + w.word, known = cache.get(key);
+      if (known === false) spans.push({ from: w.from, to: w.to, word: w.word, lang: w.lang });
+      else if (known === undefined && !asked.has(key)) { asked.add(key); unknown.push({ word: w.word, lang: w.lang }); }
+    });
+    return { spans: spans, unknown: unknown };
+  }
+
+  function spellMenu(word, suggestions) {
+    var items = suggestions.length ? suggestions.map(function (s) { return { label: s, action: 'replace', text: s }; }) :
+      [{ label: 'No suggestions', action: 'none' }];
+    return items.concat([{ label: 'Add to my dictionary', action: 'add' }, { label: 'Ignore', action: 'ignore' }]);
+  }
+
+  function applySpellChoice(item, from, to, word, lang) {
+    if (item.action === 'replace') { W.editor.replace(from, to, item.text); return; }
+    if (item.action === 'add') {
+      var words = store.get('spell-words', []);
+      if (words.indexOf(word) < 0) words = words.concat([word]);
+      store.set('spell-words', words);
+      if (SPELL.worker) SPELL.worker.postMessage({ type: 'personal', words: words });
+    }
+    if (item.action === 'add' || item.action === 'ignore') {
+      SPELL.cache.set(lang + ':' + word, true);  // "ignore" lasts until the page is reloaded
+      if (SPELL.view) spellRefresh(SPELL.view);
+    }
+  }
+
+  function setSpell(on) {
+    SPELL.on = !!on;
+    store.set('spell', SPELL.on);
+    $('write-spell').setAttribute('aria-pressed', String(SPELL.on));
+    if (SPELL.view) { if (SPELL.on) spellRefresh(SPELL.view); else spellShow(SPELL.view, []); }
+  }
+
+  function spellWorker() {
+    if (SPELL.worker || !window.Worker) return SPELL.worker;
+    SPELL.worker = new Worker('/static/vendor/spell.worker.js');
+    SPELL.worker.postMessage({ type: 'personal', words: store.get('spell-words', []) });
+    SPELL.worker.onmessage = function (e) {
+      var m = e.data || {};
+      if (m.type === 'checked') {
+        m.results.forEach(function (r) { SPELL.cache.set(r[0], r[1]); });
+        if (SPELL.view) spellRefresh(SPELL.view, true);
+      } else if (m.type === 'suggested' && SPELL.waiting[m.id]) {
+        SPELL.waiting[m.id](m.list); delete SPELL.waiting[m.id];
+      }
+    };
+    return SPELL.worker;
+  }
+
+  function spellShow(view, spans) {
+    SPELL.spans = spans;
+    if (view && view.litforgeSpell) view.litforgeSpell(spans);
+  }
+
+  // Check the visible part of the document (after a short pause in typing).
+  function spellRefresh(view, now) {
+    SPELL.view = view;
+    clearTimeout(SPELL.timer);
+    var run = function () {
+      if (!SPELL.on) { spellShow(view, []); return; }
+      var spans = [], unknown = [];
+      view.visibleRanges.forEach(function (r) {
+        var q = spellQuery(view.state.sliceDoc(r.from, r.to), r.from, SPELL.cache);
+        spans = spans.concat(q.spans); unknown = unknown.concat(q.unknown);
+      });
+      spellShow(view, spans);
+      if (unknown.length && spellWorker()) SPELL.worker.postMessage({ type: 'check', words: unknown });
+    };
+    if (now) run(); else SPELL.timer = setTimeout(run, 400);
+  }
+
+  function spellSuggest(word, lang) {
+    if (!spellWorker()) return Promise.resolve([]);
+    var id = ++SPELL.seq;
+    return new Promise(function (resolve) {
+      SPELL.waiting[id] = resolve;
+      SPELL.worker.postMessage({ type: 'suggest', id: id, word: word, lang: lang });
+      setTimeout(function () { if (SPELL.waiting[id]) { delete SPELL.waiting[id]; resolve([]); } }, 5000);
+    });
+  }
+
+  // Right-click on an underlined word: suggestions, add to the dictionary, ignore.
+  function openSpellMenu(span, x, y) {
+    var menu = $('write-spell-menu');
+    return spellSuggest(span.word, span.lang).then(function (list) {
+      var pane = menu.parentNode.getBoundingClientRect();
+      menu.replaceChildren();
+      spellMenu(span.word, list).forEach(function (item) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.setAttribute('role', 'menuitem'); b.textContent = item.label; b.dir = 'auto';
+        b.disabled = item.action === 'none';
+        if (item.action === 'add' || item.action === 'ignore') b.className = 'spell-extra' + (item.action === 'add' ? ' spell-sep' : '');
+        b.onclick = function () { menu.hidden = true; applySpellChoice(item, span.from, span.to, span.word, span.lang); };
+        menu.appendChild(b);
+      });
+      menu.style.left = Math.round(x - pane.left) + 'px'; menu.style.top = Math.round(y - pane.top + 4) + 'px';
+      menu.hidden = false;
+      var first = menu.querySelector('button:not([disabled])');
+      if (first) first.focus();
+    });
   }
 
   /* PDF viewer (PDF.js) and SyncTeX jumps. PDF positions are points from the page's top-left corner. */
@@ -3007,6 +3148,15 @@
     setWriteSplit(store.get('write-split', 50));
     wireWriteGutter();
     wirePdfView();
+    $('write-spell').onclick = function () { setSpell(!SPELL.on); };
+    setSpell(store.get('spell', true));
+    document.addEventListener('mousedown', function (e) {
+      var menu = $('write-spell-menu');
+      if (!menu.hidden && !menu.contains(e.target)) menu.hidden = true;
+    });
+    $('write-spell-menu').addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { $('write-spell-menu').hidden = true; if (W.editor && W.editor.view) W.editor.view.focus(); }
+    });
     window.addEventListener('resize', function () { if (AI.pending) placeWriteSuggestion(AI.pending.range); });
     window.addEventListener('beforeunload', function (e) {
       if (W.doc && W.dirty && !W.conflictHash) {  // keepalive lets the save finish while the page closes

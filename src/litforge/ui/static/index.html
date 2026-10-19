@@ -475,6 +475,7 @@
           <button type="button" id="write-versions-btn" title="Earlier versions of this document">Versions</button>
           <button type="button" id="write-rename">Rename</button>
           <button type="button" class="danger" id="write-delete" title="Move this document to the project's trash folder">Delete</button>
+          <button type="button" id="write-spell" aria-pressed="true" title="Check spelling (English and Persian); right-click an underlined word">Spelling</button>
           <button type="button" id="write-sync" title="Show the cursor's line in the PDF (Ctrl/Cmd+Alt+J)">Find in PDF</button>
           <button type="button" class="go" id="write-compile" title="Compile to PDF (Ctrl/Cmd+Enter)">Compile</button>
         </div>
@@ -493,6 +494,7 @@
       <div class="write-split" id="write-split" data-layout="split">
         <div class="write-left">
           <div id="write-cm" class="write-cm"></div>
+          <div id="write-spell-menu" class="spell-menu" role="menu" aria-label="Spelling" hidden></div>
           <div id="write-suggestion" class="write-suggestion" role="dialog" aria-labelledby="write-suggestion-title" hidden>
             <div class="sg-head"><b id="write-suggestion-title">Suggestion</b>
               <span id="write-suggestion-meta" class="sg-meta"></span>
@@ -725,6 +727,7 @@
   window.pdfjsLib = pdfjsLib;
   window.dispatchEvent(new Event('pdfjs-ready'));
 </script>
+<script src="/static/latex_words.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -564,6 +564,16 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .write-cm .cm-completionDetail { color: var(--muted); font-family: inherit; font-style: normal; margin-left: 8px;
   font-size: 12px; }
 .write-cm .cm-completionMatchedText { text-decoration: none; font-weight: 600; }
+.write-cm .cm-misspelled { text-decoration: underline wavy var(--bad); text-decoration-skip-ink: none;
+  text-underline-offset: 3px; }
+.spell-menu { position: absolute; z-index: 6; display: flex; flex-direction: column; min-width: 160px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--float); }
+.spell-menu button { border: 0; background: transparent; color: var(--ink); text-align: start; padding: 5px 10px;
+  border-radius: 7px; font-size: 13px; cursor: pointer; }
+.spell-menu button:hover, .spell-menu button:focus-visible { background: var(--accent-soft); outline: none; }
+.spell-menu button:disabled { color: var(--muted); cursor: default; background: transparent; }
+.spell-menu .spell-extra { color: var(--muted); font-size: 12px; }
+.spell-menu .spell-sep { border-top: 1px solid var(--line); border-radius: 0 0 7px 7px; margin-top: 2px; }
 .write-cm .cm-ai-range { background: var(--accent-soft); border-radius: 3px; }
 .write-cm .write-fallback { width: 100%; height: 100%; border: 0; resize: none; padding: 8px; background: var(--panel);
   color: var(--ink); font-family: ui-monospace, Menlo, Consolas, monospace; }

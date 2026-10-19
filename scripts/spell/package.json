@@ -1,0 +1,10 @@
+{
+  "name": "litforge-spell",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "dictionary-en": "4.0.0",
+    "dictionary-fa": "2.0.0",
+    "nspell": "2.1.5"
+  }
+}

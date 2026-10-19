@@ -25,3 +25,4 @@ build/
 # editor bundle build dependencies (see scripts/build_editor_bundle.md)
 scripts/editor_bundle/node_modules/
 scripts/pdfjs/node_modules/
+scripts/spell/node_modules/

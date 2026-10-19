@@ -34,7 +34,8 @@ function setup(routes = {}) {
     $, calls, files, timers, saved, segButtons, Promise, String, Object, Math, Date, Number,
     store: { get: (k, d) => (k in saved ? saved[k] : d), set: (k, v) => { saved[k] = v; } },
     document: { createElement: tag => new Element(tag), querySelectorAll: sel => (sel === '.seg [data-layout]' ? segButtons : []) },
-    window: { confirm: () => true, prompt: () => 'Renamed', addEventListener() {} },
+    window: { confirm: () => true, prompt: () => 'Renamed', addEventListener() {},
+      LitForgeWords: require('../../src/litforge/ui/static/latex_words.js') },
     projectName: () => 'demo', state: { projects: [{ name: 'demo' }] }, toast: msg => calls.push(['toast', msg]),
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: () => {},
     fetch: async () => ({ ok: true, json: async () => ({ name: 'figures/plot.png' }) }),
@@ -821,4 +822,42 @@ test('a late PDF → editor lookup is ignored after switching documents', async 
   await done;
   assert.equal(area.selectionStart, 0);
   assert.ok(!calls.some(c => c[0] === 'GET' && /doc=d2/.test(c[1])));
+});
+
+// ---------- Spell check ----------
+test('spell query: known-bad words become underlines, unknown words are asked once', () => {
+  const { ctx } = setup();
+  const cache = new Map([['en:teh', false], ['en:brain', true]]);
+  const q = ctx.spellQuery('The teh brain \\cite{teh} and teh مدل', 100, cache);
+  assert.deepEqual([...q.spans.map(s => [s.from, s.to, s.word])], [[104, 107, 'teh'], [129, 132, 'teh']]);
+  // unknown words are asked once each; the key inside \\cite{} is never checked
+  assert.deepEqual([...q.unknown.map(w => w.lang + ':' + w.word)], ['en:The', 'en:and', 'fa:مدل']);
+});
+
+test('the spelling menu offers suggestions, then add and ignore', () => {
+  const { ctx } = setup();
+  const items = ctx.spellMenu('teh', ['the', 'ten']);
+  assert.deepEqual([...items.map(i => i.label)], ['the', 'ten', 'Add to my dictionary', 'Ignore']);
+  assert.deepEqual([...ctx.spellMenu('xqzt', []).map(i => i.label)], ['No suggestions', 'Add to my dictionary', 'Ignore']);
+});
+
+test('choosing a suggestion replaces the word; adding remembers it for next time', async () => {
+  const { ctx, $, saved } = setup();
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'one teh two';
+  ctx.applySpellChoice({ action: 'replace', text: 'the' }, 4, 7, 'teh', 'en');
+  assert.equal(area.value, 'one the two');
+  ctx.applySpellChoice({ action: 'add' }, 0, 3, 'connectome', 'en');
+  assert.deepEqual([...saved['spell-words']], ['connectome']);
+  assert.equal(ctx.SPELL.cache.get('en:connectome'), true);
+});
+
+test('spell checking can be turned off and the choice is remembered', () => {
+  const { ctx, $, saved } = setup();
+  ctx.setSpell(false);
+  assert.equal(saved.spell, false);
+  assert.equal($('write-spell').attrs['aria-pressed'], 'false');
+  ctx.setSpell(true);
+  assert.equal($('write-spell').attrs['aria-pressed'], 'true');
 });
