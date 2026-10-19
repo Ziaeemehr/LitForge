@@ -828,8 +828,9 @@ test('a late PDF → editor lookup is ignored after switching documents', async 
 test('spell query: known-bad words become underlines, unknown words are asked once', () => {
   const { ctx } = setup();
   const cache = new Map([['en:teh', false], ['en:brain', true]]);
-  const q = ctx.spellQuery('The teh brain \\cite{teh} and teh مدل', 100, cache);
-  assert.deepEqual([...q.spans.map(s => [s.from, s.to, s.word])], [[104, 107, 'teh'], [129, 132, 'teh']]);
+  const text = 'The teh brain \\cite{teh} and teh مدل';
+  const q = ctx.spellQuery(text, [[0, text.length]], cache);
+  assert.deepEqual([...q.spans.map(s => [s.from, s.to, s.word])], [[4, 7, 'teh'], [29, 32, 'teh']]);
   // unknown words are asked once each; the key inside \\cite{} is never checked
   assert.deepEqual([...q.unknown.map(w => w.lang + ':' + w.word)], ['en:The', 'en:and', 'fa:مدل']);
 });
@@ -868,4 +869,31 @@ test('the spelling menu opens above the word when there is no room below, and st
   assert.deepEqual({ ...ctx.menuPosition(pane, 300, 120, 180, 160) }, { left: 200, top: 74 });   // below the click
   assert.deepEqual({ ...ctx.menuPosition(pane, 300, 420, 180, 160) }, { left: 200, top: 206 });  // above: 420-50-160-4
   assert.deepEqual({ ...ctx.menuPosition(pane, 690, 120, 180, 160) }, { left: 414, top: 74 });   // pulled in from the right
+});
+
+test('spell query reads the whole text for context but reports only words in the visible ranges', () => {
+  const { ctx } = setup();
+  const text = '\\begin{align}\nx &= teh\\\\\ny &= wrod\n\\end{align}\nvisible teh';
+  const visible = [[text.indexOf('y &='), text.length]];
+  const q = ctx.spellQuery(text, visible, new Map([['en:teh', false]]));
+  assert.deepEqual([...q.spans.map(s => s.word)], ['teh']);       // only the prose one, not inside align
+  assert.equal(q.spans[0].from, text.lastIndexOf('teh'));
+  assert.deepEqual([...q.unknown.map(w => w.word)], ['visible']);  // "wrod" is math: never asked
+});
+
+test('a spelling choice is not applied when the word changed or the file was switched meanwhile', async () => {
+  const { ctx, $, calls } = setup();
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'one teh two';
+  const editor = ctx.W.editor;
+  area.value = 'xx one teh two';  // typed before the word while the menu was open
+  ctx.applySpellChoice({ action: 'replace', text: 'the' }, 4, 7, 'teh', 'en', editor);
+  assert.equal(area.value, 'xx one teh two');
+  assert.ok(calls.some(c => c[0] === 'toast' && /changed/.test(c[1])));
+  await ctx.openWriteFile('main.tex', true);
+  const now = $('write-cm').children[0];
+  now.value = 'one teh two';
+  ctx.applySpellChoice({ action: 'replace', text: 'the' }, 4, 7, 'teh', 'en', editor);  // old editor
+  assert.equal(now.value, 'one teh two');
 });

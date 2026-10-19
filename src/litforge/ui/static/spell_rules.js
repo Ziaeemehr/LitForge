@@ -7,6 +7,8 @@
     return word.replace(/ي/g, 'ی').replace(/ك/g, 'ک');
   }
 
+  var CACHE_LIMIT = 20000;  // distinct words remembered; cleared when full so long sessions do not grow
+
   function makeChecker(dictionaries, personalWords) {
     var personal = new Set(personalWords || []);
     var cache = new Map();
@@ -25,10 +27,14 @@
       var dict = dictionaries[lang];
       if (!dict) return true;  // no dictionary for this language: nothing is flagged
       var key = lang + ':' + word;
-      if (!cache.has(key)) cache.set(key, inDictionary(dict, word, lang));
+      if (!cache.has(key)) {
+        if (cache.size >= CACHE_LIMIT) cache.clear();
+        cache.set(key, inDictionary(dict, word, lang));
+      }
       return cache.get(key);
     }
     check.add = function (word) { personal.add(word); };
+    check.cacheSize = function () { return cache.size; };
     check.setPersonal = function (words) { personal = new Set(words || []); };
     check.suggest = function (word, lang) {
       var dict = dictionaries[lang];
@@ -44,7 +50,14 @@
     return check;
   }
 
-  var api = { makeChecker: makeChecker };
+  // Results for the words whose language has a dictionary loaded; the others stay unanswered so the page asks
+  // again later (a failed download must not make every word "correct").
+  function answer(words, check, loaded) {
+    return words.filter(function (w) { return loaded[w.lang]; })
+      .map(function (w) { return [w.lang + ':' + w.word, check(w.word, w.lang)]; });
+  }
+
+  var api = { makeChecker: makeChecker, answer: answer };
   root.LitForgeSpellRules = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
 })(this);

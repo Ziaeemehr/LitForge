@@ -33,9 +33,12 @@ test('all nonprose commands consume optional and balanced nested arguments', () 
     'include', 'bibliography', 'bibliographystyle', 'url', 'newcommand',
     'renewcommand', 'def', 'settextfont', 'setlatintextfont', 'setmathfont',
     'color', 'hspace', 'vspace', 'setlength', 'addtolength'];
+  const twoArguments = new Set(['newcommand', 'renewcommand', 'setlength', 'addtolength']);
   for (const name of names) {
     const prefix = '\\' + name + '* [option {nested}] {hidden {deep} words}{more} ';
-    assert.deepEqual(latexWords(prefix + 'Visible'), [en('Visible', prefix.length, prefix.length + 7)], name);
+    const words = latexWords(prefix + 'Visible').map(w => w.word);
+    // one-argument commands skip only their argument: the next group is prose (review finding)
+    assert.deepEqual(words, twoArguments.has(name) ? ['Visible'] : ['more', 'Visible'], name);
   }
   const prefix = '\\cite{hidden \\} still {nested} % } ignored\n more} ';
   assert.deepEqual(latexWords(prefix + 'Prose'), [en('Prose', prefix.length, prefix.length + 5)]);
@@ -157,4 +160,13 @@ test('200 KB mixed document completes well under 200 ms', () => {
 
 test('a diacritic inside a Persian word does not split it', () => {
   assert.deepEqual(latexWords('مُدل خوب'), [fa('مدل', 0, 4), fa('خوب', 5, 8)]);
+});
+
+test('commands with one argument skip only that argument (review: the next group is prose)', () => {
+  assert.deepEqual(latexWords('\\label{x}{Misspeled prose}').map(w => w.word), ['Misspeled', 'prose']);
+  assert.deepEqual(latexWords('\\begin{document}{Misspeled}').map(w => w.word), ['Misspeled']);
+  // the column spec of a table and both arguments of \newcommand / \setlength are not prose
+  assert.deepEqual(latexWords('\\begin{tabular}{lll} cell \\end{tabular}').map(w => w.word), ['cell']);
+  assert.deepEqual(latexWords('\\newcommand{\\tvb}[1]{TVB body} after').map(w => w.word), ['after']);
+  assert.deepEqual(latexWords('\\setlength{\\parskip}{1em} words').map(w => w.word), ['words']);
 });

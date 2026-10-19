@@ -3,6 +3,9 @@
 
   var ignored = /^(?:ref|eqref|pageref|autoref|cref|Cref|nameref|label|usepackage|documentclass|begin|end|includegraphics|input|include|bibliography|bibliographystyle|url|newcommand|renewcommand|def|settextfont|setlatintextfont|setmathfont|color|hspace|vspace|setlength|addtolength)$/;
   var mathEnvironment = /^(?:equation|align|gather|multline|eqnarray)\*?$|^(?:math|displaymath)$/;
+  // Required arguments to skip (default 1); environments whose \begin takes more (column specs, widths).
+  var arity = { newcommand: 2, renewcommand: 2, setlength: 2, addtolength: 2 };
+  var envArity = { tabular: 1, 'tabular*': 2, tabularx: 2, array: 1, longtable: 1, minipage: 1, multicols: 1 };
 
   function english(c) { return /[A-Za-z]/.test(c || ''); }
   function persian(c) {
@@ -100,21 +103,30 @@
         var skip = ignored.test(cmd.name) || /cite/i.test(cmd.name);
         var firstOnly = cmd.name === 'href' || cmd.name === 'textcolor';
         if (skip || firstOnly) {
+          // Skip only the command's own arguments: optional [...] groups and its required {...} groups.
+          var need = firstOnly ? 1 : (arity[cmd.name] || 1), inMath = false;
           i = space(i);
           if ((cmd.name === 'def' || cmd.name === 'newcommand' || cmd.name === 'renewcommand') && text[i] === '\\') {
             i = command(i).end;
-            if (cmd.name === 'def') while (i < length && text[i] !== '{') i++;
+            need = cmd.name === 'def' ? 1 : need - 1;
+            if (cmd.name === 'def') while (i < length && text[i] !== '{' && text[i] !== '\n') i++;
           }
-          while (i < length) {
+          while (i < length && need > 0) {
             i = space(i);
-            if (text[i] !== '[' && text[i] !== '{') break;
+            if (text[i] === '[') { i = group(i); continue; }
+            if (text[i] !== '{') break;
             start = i;
             i = group(i);
-            if (cmd.name === 'begin' && text[start] === '{') {
+            need--;
+            if (cmd.name === 'begin') {
               var env = text.slice(start + 1, i - 1);
-              if (mathEnvironment.test(env)) { i = environment(i, env); break; }
+              if (mathEnvironment.test(env)) { i = environment(i, env); inMath = true; break; }
+              need += envArity[env] || 0;
             }
-            if (firstOnly && text[start] === '{') break;
+          }
+          if (cmd.name === 'begin' && !inMath) {  // \begin{figure}[h]
+            var after = space(i);
+            if (text[after] === '[') i = group(after);
           }
         }
         continue;

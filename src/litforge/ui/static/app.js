@@ -1905,8 +1905,14 @@
         CM.EditorView.domEventHandlers({
           blur: function () { handlers.blur(); },
           contextmenu: function (e, v) {
-            var pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
-            var span = pos == null ? null : SPELL.spans.filter(function (s) { return s.from <= pos && pos <= s.to; })[0];
+            var pos = v.posAtCoords({ x: e.clientX, y: e.clientY }), span = null;
+            if (pos != null) {  // the underline as it is now (decorations follow edits at once)
+              v.state.field(spellField).between(pos, pos, function (from, to) {
+                var word = v.state.sliceDoc(from, to);
+                span = { from: from, to: to, word: word, lang: /[\u0600-\u06ff]/.test(word) ? 'fa' : 'en' };
+                return false;
+              });
+            }
             if (!span) return false;  // the browser's own menu elsewhere
             e.preventDefault();
             openSpellMenu(span, e.clientX, e.clientY);
@@ -2209,10 +2215,12 @@
      Persian dictionaries; misspelled words are underlined, right-click offers suggestions. */
   var SPELL = { on: true, cache: new Map(), worker: null, timer: null, seq: 0, waiting: {}, spans: [], view: null };
 
-  // What to underline in `text` (which starts at document offset `from`) and which words to ask the worker about.
-  function spellQuery(text, from, cache) {
+  // What to underline and which words to ask the worker about. The whole text is read so a formula or comment
+  // that starts above the screen is still known; only words inside `ranges` ([from, to] pairs) are reported.
+  function spellQuery(text, ranges, cache) {
     var spans = [], unknown = [], asked = new Set();
-    window.LitForgeWords.latexWords(text, from).forEach(function (w) {
+    window.LitForgeWords.latexWords(text, 0).forEach(function (w) {
+      if (!ranges.some(function (r) { return w.from < r[1] && w.to > r[0]; })) return;
       var key = w.lang + ':' + w.word, known = cache.get(key);
       if (known === false) spans.push({ from: w.from, to: w.to, word: w.word, lang: w.lang });
       else if (known === undefined && !asked.has(key)) { asked.add(key); unknown.push({ word: w.word, lang: w.lang }); }
@@ -2226,8 +2234,16 @@
     return items.concat([{ label: 'Add to my dictionary', action: 'add' }, { label: 'Ignore', action: 'ignore' }]);
   }
 
-  function applySpellChoice(item, from, to, word, lang) {
-    if (item.action === 'replace') { W.editor.replace(from, to, item.text); return; }
+  function applySpellChoice(item, from, to, word, lang, editor) {
+    if (item.action === 'replace') {
+      editor = editor || W.editor;
+      if (W.editor !== editor || editor.getText().slice(from, to) !== word) {
+        toast('The text changed; right-click the word again.');
+        return;
+      }
+      editor.replace(from, to, item.text);
+      return;
+    }
     if (item.action === 'add') {
       var words = store.get('spell-words', []);
       if (words.indexOf(word) < 0) words = words.concat([word]);
@@ -2254,6 +2270,7 @@
     SPELL.worker.onmessage = function (e) {
       var m = e.data || {};
       if (m.type === 'checked') {
+        if (SPELL.cache.size > 20000) SPELL.cache.clear();  // bounded, like the worker's
         m.results.forEach(function (r) { SPELL.cache.set(r[0], r[1]); });
         if (SPELL.view) spellRefresh(SPELL.view, true);
       } else if (m.type === 'suggested' && SPELL.waiting[m.id]) {
@@ -2274,13 +2291,10 @@
     clearTimeout(SPELL.timer);
     var run = function () {
       if (!SPELL.on) { spellShow(view, []); return; }
-      var spans = [], unknown = [];
-      view.visibleRanges.forEach(function (r) {
-        var q = spellQuery(view.state.sliceDoc(r.from, r.to), r.from, SPELL.cache);
-        spans = spans.concat(q.spans); unknown = unknown.concat(q.unknown);
-      });
-      spellShow(view, spans);
-      if (unknown.length && spellWorker()) SPELL.worker.postMessage({ type: 'check', words: unknown });
+      var q = spellQuery(view.state.doc.toString(), view.visibleRanges.map(function (r) { return [r.from, r.to]; }),
+        SPELL.cache);
+      spellShow(view, q.spans);
+      if (q.unknown.length && spellWorker()) SPELL.worker.postMessage({ type: 'check', words: q.unknown });
     };
     if (now) run(); else SPELL.timer = setTimeout(run, 400);
   }
@@ -2305,8 +2319,9 @@
 
   // Right-click on an underlined word: suggestions, add to the dictionary, ignore.
   function openSpellMenu(span, x, y) {
-    var menu = $('write-spell-menu');
+    var menu = $('write-spell-menu'), editor = W.editor;
     return spellSuggest(span.word, span.lang).then(function (list) {
+      if (W.editor !== editor) return;  // the file changed while the suggestions were prepared
       var pane = menu.parentNode.getBoundingClientRect();
       menu.replaceChildren();
       spellMenu(span.word, list).forEach(function (item) {
@@ -2314,7 +2329,10 @@
         b.type = 'button'; b.setAttribute('role', 'menuitem'); b.textContent = item.label; b.dir = 'auto';
         b.disabled = item.action === 'none';
         if (item.action === 'add' || item.action === 'ignore') b.className = 'spell-extra' + (item.action === 'add' ? ' spell-sep' : '');
-        b.onclick = function () { menu.hidden = true; applySpellChoice(item, span.from, span.to, span.word, span.lang); };
+        b.onclick = function () {
+          menu.hidden = true;
+          applySpellChoice(item, span.from, span.to, span.word, span.lang, editor);
+        };
         menu.appendChild(b);
       });
       menu.style.left = '0px'; menu.style.top = '0px';

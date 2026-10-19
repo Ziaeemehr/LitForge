@@ -44,3 +44,16 @@ test('two swapped neighbouring letters are suggested first (nspell missed "the" 
   assert.deepEqual(check.suggest('teh', 'en'), ['the', 'ten', 'eh']);
   assert.deepEqual(check.suggest('barin', 'en').slice(0, 1), ['brain']);
 });
+
+test('the cache is bounded', () => {
+  const check = makeChecker({ en: { correct: () => true, suggest: () => [] } }, []);
+  for (let i = 0; i < 25000; i++) check('w' + i, 'en');
+  assert.ok(check.cacheSize() <= 20000);
+});
+
+test('answers are only given for languages whose dictionary is loaded, so they can be asked again', () => {
+  const { answer } = require('../../src/litforge/ui/static/spell_rules.js');
+  const check = makeChecker({ en: { correct: w => w === 'ok', suggest: () => [] } }, []);
+  const words = [{ word: 'ok', lang: 'en' }, { word: 'xx', lang: 'en' }, { word: 'مدل', lang: 'fa' }];
+  assert.deepEqual(answer(words, check, { en: true }), [['en:ok', true], ['en:xx', false]]);
+});
