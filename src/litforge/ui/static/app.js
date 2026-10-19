@@ -2426,6 +2426,7 @@
   }
 
   var AI = { pending: null };
+  var FIX_CONTEXT = 5;
 
   function writeAiRange(action) {
     if (action === 'fix') {
@@ -2433,7 +2434,8 @@
       if (!err || !err.line) return { problem: 'Click a compile error first, then choose "Fix this error".' };
       if (err.file && err.file !== W.file) return { problem: 'Open ' + err.file + ' to fix this error.' };
       var lines = W.editor.getText().split('\n').length;
-      var first = Math.max(1, err.line - 15), last = Math.min(lines, err.line + 15);
+      // ±5 lines: with ±15 both local models (gemma4, qwen3:8b) looped and cut the reply off (real run, 2026-10-19).
+      var first = Math.max(1, err.line - FIX_CONTEXT), last = Math.min(lines, err.line + FIX_CONTEXT);
       var from = W.editor.lineRange(first).from, to = W.editor.lineRange(last).to;
       return { from: from, to: to, text: W.editor.getText().slice(from, to), error: err.message, first_line: first,
         error_line: err.line };
@@ -2495,6 +2497,11 @@
       var p = document.createElement('p'); p.className = 'flag'; p.textContent = '⚠ ' + f; parts.push(p);
     });
     s.hunks.forEach(function (h) { parts.push(suggestionHunk(h)); });
+    if (!s.hunks.length) {  // seen in the real run: a model may return the text unchanged
+      var same = document.createElement('p');
+      same.className = 'sg-same'; same.textContent = 'The model returned the text unchanged.';
+      parts.push(same);
+    }
     s.citations.forEach(function (c) {
       var q = document.createElement('p');
       q.className = 'quote'; q.dir = 'auto';

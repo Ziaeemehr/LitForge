@@ -329,6 +329,9 @@ class ModelGateway:
                 and re.fullmatch(r"model \S+ is not pulled; run `ollama pull \S+`", str(exc)))
         ):
             return exc
+        if not remote and isinstance(exc, LlmError) and "repeat limit" in str(exc):  # Ollama stopped a loop
+            return LlmError("the local model got stuck repeating itself and was stopped; "
+                            "try again or use another model")
         if isinstance(exc, LlmUnavailable):
             return LlmUnavailable("model provider unavailable")
         if isinstance(exc, LlmError):

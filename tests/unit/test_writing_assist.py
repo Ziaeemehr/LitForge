@@ -52,9 +52,9 @@ def test_rewrite_hunks_and_record(env) -> None:
     assert wa.applied_text(result["original"], result["hunks"], [0]) == "We analysed the data."
     assert hunk["flags"] == []
     row = conn.execute("SELECT task, prompt_version, status FROM writing_suggestions").fetchone()
-    assert tuple(row) == ("write_rewrite", "write-v1", "pending")
+    assert tuple(row) == ("write_rewrite", "write-v2", "pending")
     call = conn.execute("SELECT task, prompt_version FROM model_calls").fetchone()
-    assert tuple(call) == ("write_rewrite", "write-v1")
+    assert tuple(call) == ("write_rewrite", "write-v2")
 
 
 def test_invented_numbers_flagged(env) -> None:
@@ -97,7 +97,8 @@ def test_fix_error_sends_only_the_excerpt(env) -> None:
     result = wa.run(conn, gw, doc, req, "main.tex")
     assert wa.applied_text(req.text, result["hunks"], [0]) == "\\textbf{x}\n"
     user = seen[0][-1]["content"]
-    assert "\\textbff{x}" in user and 'first_line="12"' in user and "Undefined control sequence." in user
+    assert "\\textbff{x}" in user and "Undefined control sequence." in user
+    assert "first_line" not in user and "12" not in user  # models copied line numbers into the fix
     with pytest.raises(wa.AssistError):
         wa.prepare(conn, doc, "fix", "x", error="")
 
@@ -210,3 +211,110 @@ def test_hunk_offsets_are_code_points_with_emoji() -> None:
     hunks = wa.diff_hunks(old, new)
     assert old[hunks[0]["start"]:hunks[0]["end"]] == "خوب"
     assert wa.applied_text(old, hunks, [0]) == new
+
+
+def test_fix_names_the_error_line_without_numbers(env) -> None:
+    conn, paths, doc, _ = env
+    req = wa.prepare(conn, doc, "fix", "a\n\\sectoin{x}\nb\n", error="Undefined control sequence.",
+                     first_line=7, error_line=8)
+    user = req.messages[-1]["content"]
+    assert "<error_line>\\sectoin{x}</error_line>" in user and "7" not in user and "8" not in user
+
+
+def test_lr_wrapper_is_kept_out_of_the_model_text_and_put_back(env) -> None:
+    conn, paths, doc, _ = env
+    seen: list[list[dict[str, str]]] = []
+    gw, _ = gateway(conn, answer=lambda m: seen.append(m) or {"replacement": "The model fits 40 patients.",
+                                                               "note": "clearer"})
+    text = "\\lr{The model that we use was fitted to the data of 40 patients.}\n"
+    result = wa.run(conn, gw, doc, wa.prepare(conn, doc, "clearer", text), "main.tex")
+    assert "\\lr" not in seen[0][-1]["content"]
+    assert result["flags"] == []
+    accepted = [h["index"] for h in result["hunks"]]
+    assert wa.applied_text(text, result["hunks"], accepted) == "\\lr{The model fits 40 patients.}\n"
+
+
+def test_persian_translation_of_an_lr_passage_drops_the_wrapper_without_a_flag(env) -> None:
+    conn, paths, doc, _ = env
+    gw, _ = gateway(conn, {"replacement": "مدل روی داده‌های ۴۰ بیمار برازش شد.", "note": "fa"})
+    text = "\\lr{The model was fitted to the data of 40 patients.}"
+    result = wa.run(conn, gw, doc, wa.prepare(conn, doc, "translate-fa", text), "main.tex")
+    assert not any("dropped" in f for f in result["flags"])
+    accepted = [h["index"] for h in result["hunks"]]
+    assert wa.applied_text(text, result["hunks"], accepted) == "مدل روی داده‌های ۴۰ بیمار برازش شد."
+
+
+@pytest.mark.parametrize("text, wrapped", [
+    ("\\lr{a {b} c}", True), ("  \\lr{a}\n", True), ("\\lr{a} b \\lr{c}", False), ("x \\lr{a}", False),
+    ("\\lr{a", False), ("\\lr{a \\} b}", True)])
+def test_lr_wrapper_detection(text: str, wrapped: bool) -> None:
+    assert (wa.lr_wrapper(text) is not None) is wrapped
+
+
+def test_persian_selection_without_evidence_explains_why(env) -> None:
+    conn, paths, doc, _ = env
+    with pytest.raises(wa.AssistError, match="Persian text rarely matches"):
+        wa.prepare(conn, doc, "cite", "شبکه‌های مغزی نزدیک به نقطه‌ی بحرانی کار می‌کنند.")
+
+
+def test_a_local_model_stuck_in_a_loop_gets_a_readable_error(env) -> None:
+    from litforge.llm.base import LlmError
+
+    conn, paths, doc, _ = env
+
+    def stuck(messages):
+        raise LlmError('Ollama error 500: {"error":"prediction aborted, token repeat limit reached"}')
+
+    gw, _ = gateway(conn, answer=stuck)
+    with pytest.raises(LlmError, match="stuck repeating itself"):
+        wa.run(conn, gw, doc, wa.prepare(conn, doc, "translate-fa", "The model."), "main.tex")
+
+
+def test_rewrite_sends_markers_for_citations_and_math_and_restores_them(env) -> None:
+    conn, paths, doc, _ = env
+    seen: list[list[dict[str, str]]] = []
+    text = r"We used TVB \cite{old2020} with $\alpha=0.5$ as in Section~\ref{sec:a}."
+
+    def answer(messages):
+        seen.append(messages)
+        return {"replacement": "TVB \u27e61\u27e7 was used with \u27e62\u27e7 (Section~\u27e63\u27e7).", "note": "ok"}
+
+    gw, _ = gateway(conn, answer=answer)
+    result = wa.run(conn, gw, doc, wa.prepare(conn, doc, "clearer", text), "main.tex")
+    sent = seen[0][-1]["content"]
+    assert "\\cite" not in sent and "$" not in sent and "\u27e61\u27e7" in sent
+    assert result["flags"] == []
+    accepted = [h["index"] for h in result["hunks"]]
+    assert wa.applied_text(text, result["hunks"], accepted) == \
+        r"TVB \cite{old2020} was used with $\alpha=0.5$ (Section~\ref{sec:a})."
+
+
+def test_a_lost_or_invented_marker_is_flagged(env) -> None:
+    result = suggest(env, "shorter", r"A claim \cite{old2020} here.",
+                     {"replacement": "A claim \u27e69\u27e7.", "note": ""})
+    assert "citations dropped: old2020" in result["flags"]
+    assert "the model invented markers that stand for nothing" in result["flags"]
+
+
+def test_protect_skips_nested_spans() -> None:
+    masked, markers = wa.protect(r"$x \ref{a}$ and \cite{b}")
+    assert masked == "\u27e61\u27e7 and \u27e62\u27e7" and markers == [r"$x \ref{a}$", r"\cite{b}"]
+
+
+def test_reply_budget_grows_with_the_selection(env) -> None:
+    conn, paths, doc, _ = env
+    short = wa.prepare(conn, doc, "shorter", "One sentence.")
+    long = wa.prepare(conn, doc, "fix", "x" * 3000, error="Undefined control sequence.")
+    assert wa.output_cap(short) == 1024 + 13 and wa.output_cap(long) == 4024
+    assert wa.output_cap(wa.prepare(conn, doc, "fix", "x" * 12000, error="e")) == 8192
+    gw, _ = gateway(conn, {"replacement": "x" * 3000})
+    assert wa.preview(gw, long).max_output_tokens == 4024
+
+
+@pytest.mark.parametrize("action", ["fix", "shorter", "cite"])
+def test_the_first_system_message_describes_the_reply_schema(env, action: str) -> None:
+    conn, paths, doc, _ = env
+    req = wa.prepare(conn, doc, action, "Results: the coupling gain was 3.25 across 40 subjects.",
+                     error="Undefined control sequence.")
+    first = req.messages[0]
+    assert first["role"] == "system" and first["content"].endswith(json.dumps(req.schema, sort_keys=True))

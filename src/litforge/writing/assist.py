@@ -56,6 +56,8 @@ class Request:
     error: str = ""
     first_line: int = 1
     error_line: int = 0  # 1-based line of the error inside the excerpt, for "fix"
+    wrap: tuple[str, str] | None = None  # the selection's own "\\lr{" ... "}", kept out of the model's text
+    markers: list[str] = field(default_factory=list)  # \\cite/\\ref/\\label and math behind ⟦1⟧, ⟦2⟧ ... (rewrite)
     task: str = ""
     messages: list[dict[str, str]] = field(default_factory=list)
     packet: EvidencePacket | None = None
@@ -74,26 +76,100 @@ def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, err
         raise AssistError(f"select at most {MAX_SELECTION} characters")
     req = Request(action=action, text=text, error=error, first_line=first_line, task=ACTIONS[action],
                   error_line=max(0, error_line - first_line + 1) if error_line else 0)
+    if action != "fix":
+        req.wrap = lr_wrapper(text)
+    sent = model_text(req)
     # The user's draft is unpublished work: mark it sensitive so a cloud route always needs approval.
     selection = EvidenceItem(id="selection", paper_id="manuscript", text=text, page=1)
     if action == "fix":
         if not error.strip():
             raise AssistError("choose a compile error to fix")
-        req.messages, req.schema = write_fix_messages(error[:2000], text, first_line), _REPLACEMENT
+        lines = text.split("\n")
+        line = lines[req.error_line - 1] if 0 < req.error_line <= len(lines) else ""
+        req.messages, req.schema = write_fix_messages(error[:2000], text, line), _REPLACEMENT
         req.packet = EvidencePacket(items=[selection], sensitive=True)
     elif action == "cite":
-        hits = retrieve_for_question(conn, _plain(text), doc.project_id, k=8, max_per_paper=2)
+        hits = retrieve_for_question(conn, _plain(sent), doc.project_id, k=8, max_per_paper=2)
         if not hits:
-            raise AssistError("no evidence in this project's papers matches the selection")
+            hint = ("; evidence is found by the papers' own words, so Persian text rarely matches English papers"
+                    if _PERSIAN.search(sent) else "")
+            raise AssistError("no evidence in this project's papers matches the selection" + hint)
         spans = record_spans(conn, hits)
         packet = to_packet(spans, sensitive=True, max_chars_per_item=1500)
-        req.messages, req.schema = write_cite_messages(text, packet, spans), _CITED
+        req.messages, req.schema = write_cite_messages(sent, packet, spans), _CITED
         req.packet = EvidencePacket(items=[selection, *packet.items], sensitive=True)
         req.evidence = {s.id: s for s in spans}
     else:
-        req.messages, req.schema = write_rewrite_messages(text, action), _REPLACEMENT
+        masked, req.markers = protect(sent)
+        req.messages, req.schema = write_rewrite_messages(masked, action), _REPLACEMENT
         req.packet = EvidencePacket(items=[selection], sensitive=True)
+    # The schema in words, in the first system message: without it gemma4 looped on fixes until the token
+    # limit; with it the reply was valid every time (real run, 2026-10-19). Ollama's format option alone was not enough.
+    req.messages[0] = {**req.messages[0], "content": req.messages[0]["content"] +
+                       " Return only valid JSON for this schema: " + json.dumps(req.schema, sort_keys=True)}
     return req
+
+
+_PERSIAN = re.compile(r"[\u0600-\u06FF]")
+
+
+def lr_wrapper(text: str) -> tuple[str, str] | None:
+    """When the whole selection is one \\lr{...} (an English passage in a Persian document), return the parts
+    around its content. The model then sees only the English text; models tended to drop the wrapper."""
+    stripped = text.strip()
+    if not stripped.startswith("\\lr{") or not stripped.endswith("}"):
+        return None
+    depth = 0
+    for i, ch in enumerate(stripped[3:], 3):
+        if ch == "{" and stripped[i - 1] != "\\":
+            depth += 1
+        elif ch == "}" and stripped[i - 1] != "\\":
+            depth -= 1
+            if depth == 0 and i != len(stripped) - 1:
+                return None  # the first group closes early: "\\lr{a} b \\lr{c}"
+    if depth != 0:
+        return None
+    lead = text[:len(text) - len(text.lstrip())]
+    trail = text[len(text.rstrip()):]
+    return lead + "\\lr{", "}" + trail
+
+
+_MARKER = re.compile(r"\u27e6\s*(\d+)\s*\u27e7")
+
+
+def protect(text: str) -> tuple[str, list[str]]:
+    """Put citations, references, labels and math behind numbered markers, so a rewrite cannot alter them.
+    Models garbled \\cite (gemma4 wrote \\text{\\textbackslash cite{...}}) and rewrapped math in the real run."""
+    found = sorted({(m.start(), m.end()) for pattern in (_KEYED, _MATH) for m in pattern.finditer(text)})
+    spans: list[tuple[int, int]] = []
+    for start, end in found:  # drop spans inside an earlier one (a \\ref inside $...$)
+        if not spans or start >= spans[-1][1]:
+            spans.append((start, end))
+    out, markers, pos = [], [], 0
+    for start, end in spans:
+        markers.append(text[start:end])
+        out.append(text[pos:start] + f"\u27e6{len(markers)}\u27e7")
+        pos = end
+    return "".join(out) + text[pos:], markers
+
+
+def restore(text: str, markers: list[str]) -> str:
+    """Put the originals back; a marker the model invented stays visible (and is flagged)."""
+    def back(match: re.Match[str]) -> str:
+        index = int(match.group(1)) - 1
+        return markers[index] if 0 <= index < len(markers) else match.group(0)
+
+    return _MARKER.sub(back, text)
+
+
+def output_cap(req: Request) -> int:
+    """The reply repeats the whole selection, so its token budget grows with it (about a token per character
+    for Persian). The flat 1024 default cut gemma4's fixes off mid-string in the real run."""
+    return min(8192, 1024 + len(req.text) + (1024 if req.action == "cite" else 0))
+
+
+def model_text(req: Request) -> str:
+    return req.text[len(req.wrap[0]):len(req.text) - len(req.wrap[1])] if req.wrap else req.text
 
 
 def _plain(text: str) -> str:
@@ -102,27 +178,34 @@ def _plain(text: str) -> str:
 
 def preview(gateway: ModelGateway, req: Request, profile: str | None = None) -> CallPreview:
     assert req.packet is not None
-    return gateway.preview(req.task, req.packet, req.messages, profile, schema=req.schema)
+    return gateway.preview(req.task, req.packet, req.messages, profile, output_cap(req), schema=req.schema)
 
 
 def run(conn: sqlite3.Connection, gateway: ModelGateway, doc: Document, req: Request, file: str,
         approved: bool = False, profile: str | None = None) -> dict[str, Any]:
     assert req.packet is not None
     reply = gateway.call(req.task, req.packet, req.messages, req.schema, profile=profile, approved=approved,
-                         prompt_version=WRITE_PROMPT_VERSION)
+                         max_output_tokens=output_cap(req), prompt_version=WRITE_PROMPT_VERSION)
     content = reply.content
     citations: list[dict[str, Any]] = []
     flags: list[str] = []
+    sent = model_text(req)
     if req.action == "cite":
         new_text, citations, dropped = _resolve_citations(conn, req, str(content.get("text") or ""),
                                                           content.get("citations") or [])
         if dropped:
             flags.append(f"{dropped} citation(s) removed: their quote was not found in the evidence")
     else:
-        new_text = str(content.get("replacement") or "")
-    new_text = _keep_edges(req.text, repair_escapes(new_text, req.text))
+        new_text = restore(str(content.get("replacement") or ""), req.markers)
+        if _MARKER.search(new_text):
+            flags.append("the model invented markers that stand for nothing")
+    new_text = _keep_edges(sent, repair_escapes(new_text, sent))
     if not new_text.strip():
         raise AssistError("the model returned no text")
+    sent_new = new_text
+    if req.wrap:  # put the \\lr{...} back, except around a Persian translation, which must not be in it
+        lead, trail = req.wrap[0][:-4], req.wrap[1][1:]
+        new_text = lead + new_text + trail if req.action == "translate-fa" else req.wrap[0] + new_text + req.wrap[1]
     allowed = _numbers(req.text).union(*(numbers(span.text) for span in req.evidence.values()))
     known = set(cited_keys(req.text)) | {c["key"] for c in citations}
     exempt: set[str] | None = None
@@ -131,7 +214,7 @@ def run(conn: sqlite3.Connection, gateway: ModelGateway, doc: Document, req: Req
     if req.action == "fix" and req.error_line:  # the broken command on the error line is meant to change
         lines = req.text.split("\n")
         exempt = set(_COMMAND.findall(lines[req.error_line - 1])) if req.error_line <= len(lines) else set()
-    flags += latex_flags(req.text, new_text, exempt)
+    flags += latex_flags(sent, sent_new, exempt)
     hunks = [_flag_hunk(h, allowed, known, conn) for h in diff_hunks(req.text, new_text)]
     if req.action == "cite":
         for hunk in hunks:

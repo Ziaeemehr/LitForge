@@ -197,7 +197,8 @@ evidence link stored and shown.
 api.py, server.py, app.js; tests tests/unit/test_writing_assist.py, tests/ui/writing.test.cjs.
 
 **Produces:**
-- `fix_error(doc, error)`: sends the error message and ±15 lines around it; returns a replacement for that range.
+- `fix_error(doc, error)`: sends the error message and ±5 lines around it (±15 made local models loop); returns a
+  replacement for that range.
 - `rewrite(selection, mode)`: modes clearer / shorter / translate (to English or Persian); returns new text.
 - `suggest_citations(selection)`: retrieval from the project evidence (existing `retrieve_for_question`), the model
   picks which spans support which sentence; returns the text with `\cite{key}` inserted plus the quotes used.
@@ -246,7 +247,20 @@ two with text). Citing from the Write view (library and evidence tabs) put both 
 a Persian line, synced `references.bib` and compiled in 1.1 s with no warnings; the evidence citation stored its
 evidence id. Found and fixed: English references came out in reversed word order in the Persian PDF; the Persian
 template now uses `plain-fa` (persian-bib). Documents made from the old template keep `plain` until edited.
-Still to do: the three AI actions with a real local model.
+
+**Real run, part 2 (2026-10-19, Ollama, gemma4 6.6 GB and qwen3:8b):** seven cases (fix a misspelt `\sectoin`,
+shorter Persian, clearer English, translate both ways, citations for an English and a Persian sentence), run six
+times through the page's API while fixing what they showed. Fixed in LitForge: the fix prompt's `first_line`
+attribute was copied into replies (now no line numbers); ±15 lines made both models loop (now ±5); the flat 1024-token
+reply cap cut fixes off (now grows with the selection); gemma4 looped on fixes until the schema was also stated in the
+first system message; `\lr{...}` passages lost their wrapper (now kept out of the model's text and put back, dropped
+on purpose for a Persian translation); gemma4 garbled `\cite` and qwen3 rewrapped math (citations, references and math
+now travel as ⟦n⟧ markers); single-backslash LaTeX made replies invalid JSON (lenient loader); "provider failed"
+hid Ollama's repeat-limit stop; unchanged replies showed an empty bar; Persian selections find no English evidence
+(now explained). Final run: both models fix the error exactly; gemma4's shorter, clearer and translate-en replies
+have no flags; every remaining model mistake was flagged by the guards (qwen3 turning markers into `\cite{1}`,
+gemma4 pasting the quote into the text for citations, an added `\textsuperscript`). No unflagged invented number or
+citation in any run. The suggestion bar showed beside the real text in the browser.
 
 **Acceptance (v1):**
 - English and Persian templates compile out of the box with the chosen engine; recompile of a 10-page document

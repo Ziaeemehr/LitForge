@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 from litforge.llm.base import InvalidModelJson, LlmError, LlmUnavailable, ModelReply, ModelTextReply, ModelUsage
 from litforge.llm.http import open_url
-from litforge.llm.json_schema import check_json_structure
+from litforge.llm.json_schema import check_json_structure, loads_model_json
 from litforge.llm.secrets import KeyStore
 
 
@@ -98,7 +98,7 @@ class OpenAICompatibleClient:
                 if not isinstance(content, str):
                     raise ValueError("content is not text")
                 return ModelTextReply(content=content, provider=self.provider, model=self.model, usage=tokens)
-            parsed = json.loads(content)
+            parsed = loads_model_json(content)
             if not isinstance(parsed, dict):
                 raise ValueError("content is not an object")
             check_json_structure(parsed, schema)

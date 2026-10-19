@@ -2,7 +2,25 @@
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
+
+# A backslash JSON does not allow (\\c, \\s, \\l ... as in a LaTeX \\cite written without doubling) or a \\u
+# that is not followed by four hex digits.
+_BAD_ESCAPE = re.compile(r'(?<!\\)((?:\\\\)*)\\(?![\\"/bfnrt]|u[0-9a-fA-F]{4})')
+
+
+def loads_model_json(content: str) -> Any:
+    """json.loads, and when that fails, once more with stray backslashes doubled: models writing LaTeX often
+    send \\cite{a} where JSON needs \\\\cite{a}. Valid JSON is never changed."""
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        repaired = _BAD_ESCAPE.sub(lambda m: m.group(1) + "\\\\", content)
+        if repaired == content:
+            raise
+        return json.loads(repaired)
 
 
 def check_json_structure(value: dict[str, Any], schema: dict[str, Any]) -> None:

@@ -11,7 +11,7 @@ from litforge.llm.evidence import EvidencePacket
 ASK_PROMPT_VERSION = "ask-v4"
 AUDIT_PROMPT_VERSION = "audit-v2"
 MATRIX_PROMPT_VERSION = "matrix-v2"
-WRITE_PROMPT_VERSION = "write-v1"
+WRITE_PROMPT_VERSION = "write-v2"  # v2: no line numbers in the fix excerpt; \lr{...} unwrapped
 
 CITATION_TEXT_RULE = "Do not write evidence IDs in the text; put them only in evidence_ids. "
 
@@ -75,17 +75,21 @@ def _manuscript(text: str) -> str:
     return text.replace("</", "<\u200b/")
 
 
-def write_fix_messages(error: str, text: str, first_line: int) -> list[dict[str, str]]:
+def write_fix_messages(error: str, text: str, error_line: str = "") -> list[dict[str, str]]:
+    # No line numbers anywhere: models copied a first_line attribute into the reply (real run, 2026-10-19).
+    where = f"<error_line>{_manuscript(error_line)}</error_line>\n" if error_line.strip() else ""
     return [dict(role="system", content="You fix LaTeX compile errors. " + _LATEX_RULES +
                  "Change as little as possible: only what the error needs. Return JSON with replacement: the whole "
-                 "given excerpt with the fix applied (same lines, unchanged where not needed), and note: one short "
-                 "sentence on what you changed."),
-            dict(role="user", content=f"<error>{_manuscript(error)}</error>\n<excerpt first_line=\"{first_line}\">"
+                 "given excerpt with the fix applied (same lines, unchanged where not needed, no line numbers), and "
+                 "note: one short sentence on what you changed."),
+            dict(role="user", content=f"<error>{_manuscript(error)}</error>\n{where}<excerpt>"
                  f"{_manuscript(text)}</excerpt>")]
 
 
 def write_rewrite_messages(text: str, mode: str) -> list[dict[str, str]]:
     return [dict(role="system", content=_REWRITE_MODES[mode] + " " + _LATEX_RULES +
+                 "Markers like \u27e61\u27e7 stand for citations, references and math: keep every marker exactly "
+                 "once, unchanged, next to the words it belongs to. "
                  "Return JSON with replacement (the new text) and note (one short sentence)."),
             dict(role="user", content=f"<text>{_manuscript(text)}</text>")]
 

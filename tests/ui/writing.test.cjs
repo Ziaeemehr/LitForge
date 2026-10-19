@@ -326,9 +326,9 @@ test('fix needs a clicked error and sends the lines around it', async () => {
   const assist = calls.find(c => c[0] === '/api/write/assist');
   assert.ok(assist, JSON.stringify(calls.slice(-3)));
   const sent = assist[1];
-  assert.equal(sent.first_line, 5);
-  assert.equal(sent.text.split('\n')[0], 'line5');
-  assert.equal(sent.text.split('\n').at(-1), 'line35');
+  assert.equal(sent.first_line, 15);
+  assert.equal(sent.text.split('\n')[0], 'line15');
+  assert.equal(sent.text.split('\n').at(-1), 'line25');
   assert.equal(sent.error, 'Undefined control sequence.');
 });
 
@@ -466,4 +466,13 @@ test('the floating bar stays inside the editor pane', () => {
   ctx.W.editor.coords = () => ({ top: 640, bottom: 660 });  // below the pane
   ctx.placeWriteSuggestion({ to: 0 });
   assert.equal(box.style.top, '294px');
+});
+
+test('a suggestion without changes says so', async () => {
+  const { ctx, $ } = aiSetup({ ...REPORT, hunks: [], flags: [] });
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Intro: one two three.'; area.setSelectionRange(7, 20);
+  await ctx.runWriteAi('shorter', false);
+  assert.ok($('write-suggestion-hunks').children.some(c => c.textContent === 'The model returned the text unchanged.'));
 });

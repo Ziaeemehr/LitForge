@@ -17,7 +17,7 @@ from litforge.llm import LlmUnavailable as LlmUnavailable
 from litforge.llm import ModelReply
 from litforge.llm.base import InvalidModelJson, ModelTextReply, ModelUsage
 from litforge.llm.http import open_url
-from litforge.llm.json_schema import check_json_structure
+from litforge.llm.json_schema import check_json_structure, loads_model_json
 from litforge.llm.openai_compatible import schema_messages
 
 
@@ -93,7 +93,7 @@ class OllamaClient:
             return ModelTextReply(content=content, provider="ollama", model=self.name,
                                   usage=usage)
         try:
-            result = json.loads(content)
+            result = loads_model_json(content)
             if not isinstance(result, dict):
                 raise ValueError("model reply is not a JSON object")
             check_json_structure(result, schema)
