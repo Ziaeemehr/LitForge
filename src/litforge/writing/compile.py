@@ -219,9 +219,21 @@ def macos_profile(folder: Path, readable: list[Path], writable: list[Path], scra
     return "\n".join(lines) + "\n"
 
 
+# Linux: start from an empty root and mount only what an engine needs, read-only. Home folders, /tmp, /var, /mnt,
+# /media, /srv, /root and most of /etc are absent, so a document cannot read them. `-try` skips missing paths.
+BWRAP_SYSTEM = ["/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32"]
+BWRAP_ETC = ["/etc/ssl", "/etc/ca-certificates", "/etc/pki", "/etc/resolv.conf", "/etc/hosts", "/etc/nsswitch.conf",
+             "/etc/gai.conf", "/etc/localtime", "/etc/fonts", "/etc/texmf", "/etc/alternatives", "/etc/ld.so.cache",
+             "/etc/ld.so.conf", "/etc/ld.so.conf.d"]
+BWRAP_VAR = ["/var/lib/texmf", "/var/cache/fontconfig"]
+
+
 def bwrap_argv(folder: Path, readable: list[Path], writable: list[Path], network: bool = True) -> list[str]:
-    argv = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
-            "--tmpfs", str(Path.home()), "--die-with-parent", "--unshare-pid"]
+    argv = ["bwrap"]
+    for mount in [*BWRAP_SYSTEM, *BWRAP_ETC, *BWRAP_VAR]:
+        argv += ["--ro-bind-try", mount, mount]
+    argv += ["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", str(Path.home()),
+             "--die-with-parent", "--unshare-pid"]
     if not network:
         argv.append("--unshare-net")
     for path in readable:

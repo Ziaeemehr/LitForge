@@ -49,10 +49,10 @@ def sync_bib(conn: sqlite3.Connection, doc: Document, extra_paper_ids: list[str]
             ids.setdefault(paper_id, None)
     for paper_id in extra_paper_ids or []:
         ids.setdefault(paper_id, None)
-    from litforge.writing.documents import _lock
+    from litforge.writing.documents import _lock, resolve_inside
 
-    with _lock(doc.id):
-        return write_bib(conn, list(ids), doc.folder / "references.bib")
+    with _lock(doc.id):  # resolve_inside refuses a references.bib that is a link to a file elsewhere
+        return write_bib(conn, list(ids), resolve_inside(doc.folder, "references.bib"))
 
 
 def _version(conn: sqlite3.Connection, paper_id: str) -> str | None:

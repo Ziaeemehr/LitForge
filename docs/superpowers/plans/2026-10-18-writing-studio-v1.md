@@ -230,6 +230,15 @@ guide section if needed.
   local Gemma, rewrite a paragraph shorter, add citations to a paragraph; record times and any guard flags.
 - Three review rounds before merge (Codex and/or a reviewer agent), each followed by fixes with regression tests.
 
+**Review round 3 (2026-10-19, Codex, Linux):** six findings, all fixed with regression tests. Linux compile no
+longer mounts the whole disk: `bwrap` starts from an empty root with `/usr`, the library folders and a short list of
+`/etc` files, so `/etc/passwd` and other outside files cannot be read (tested with a real `bwrap`). A
+`references.bib` that is a symlink is refused before the bibliography is synced. Switching files, closing a document
+and restoring a version no longer drop unsaved text after a conflict or failed save. An AI suggestion belongs to its
+document and file and is dropped (recorded as rejected) when the user moves on; the floating bar stays inside the
+pane. Open: the macOS profile still allows reads outside its denied folders (system folders such as `/Library`),
+not tested on this machine.
+
 **Acceptance (v1):**
 - English and Persian templates compile out of the box with the chosen engine; recompile of a 10-page document
   in under ~5 s warm.

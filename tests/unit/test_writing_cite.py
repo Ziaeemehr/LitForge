@@ -83,3 +83,15 @@ def test_cite_refuses_papers_outside_the_project(env) -> None:
 def test_cited_keys_more_forms() -> None:
     text = "\\Citet{d} \\cites{e}{f} x\\\\% \\cite{g}\n\\cite[see][p.~2]{a} 5\\% \\citeauthor*{b}"
     assert wc.cited_keys(text) == ["d", "e", "f", "a", "b"]
+
+
+def test_sync_bib_refuses_a_references_bib_that_links_outside(env, tmp_path: Path) -> None:
+    conn, paths, doc, _ = env
+    secret = tmp_path / "secret.bib"
+    secret.write_text("@misc{secret, note = {private}}\n")
+    bib = doc.folder / "references.bib"
+    bib.unlink()
+    bib.symlink_to(secret)
+    with pytest.raises(wd.DocumentError):
+        wc.sync_bib(conn, doc, ["p1"])
+    assert bib.is_symlink() and secret.read_text() == "@misc{secret, note = {private}}\n"

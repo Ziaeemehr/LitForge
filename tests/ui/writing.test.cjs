@@ -66,7 +66,7 @@ function setup(routes = {}) {
       return { ok: true };
     }
   });
-  vm.runInContext(block + '\nthis.W = W;', ctx);
+  vm.runInContext(block + '\nthis.W = W; this.AI_pending = function () { return AI.pending; };', ctx);
   return { ctx, $, calls, timers, files, saved, segButtons };
 }
 
@@ -388,4 +388,82 @@ test('closing a suggestion clears the highlight in the editor', async () => {
   await ctx.applyWriteSuggestion();
   assert.equal(marks[marks.length - 1], null);
   assert.equal($('write-suggestion').hidden, true);
+});
+
+// Review round 3: unsaved text must survive file switches, closing and restoring; suggestions stay with their file.
+test('switching files is refused while a conflict holds unsaved text', async () => {
+  const { ctx, $, calls, files } = setup();
+  await ctx.openWriteDoc('d1');
+  files['main.tex'] = { text: 'changed elsewhere', hash: 'other' };
+  const area = $('write-cm').children[0];
+  area.value = 'mine'; area.fire('input');
+  assert.equal(await ctx.openWriteFile('refs.tex'), false);
+  assert.equal($('write-cm').children[0].value, 'mine');
+  assert.ok(!calls.some(c => c[0] === 'GET' && /name=refs\.tex/.test(c[1])));
+  assert.ok(calls.some(c => c[0] === 'toast' && /conflict/i.test(c[1])));
+});
+
+test('closing keeps the document open when the save fails', async () => {
+  const fail = { on: false };
+  const { ctx, $ } = setup({ post: url => (fail.on && url === '/api/write/save' ? Promise.reject(new Error('disk full')) : null) });
+  await ctx.openWriteDoc('d1');
+  fail.on = true;
+  const area = $('write-cm').children[0];
+  area.value = 'unsaved words'; area.fire('input');
+  await ctx.closeWriteDoc(false);
+  assert.ok(ctx.W.doc, 'the document is still open');
+  assert.equal(ctx.W.editor.getText(), 'unsaved words');
+  assert.equal($('write-editor').hidden, false);
+});
+
+test('restore saves the editor first, so the kept version has the latest text', async () => {
+  const { ctx, $, calls } = setup();
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'typed after opening versions'; area.fire('input');
+  await ctx.restoreWriteVersion('s1');
+  const save = calls.findIndex(c => c[0] === '/api/write/save' && c[1].text === 'typed after opening versions');
+  const restore = calls.findIndex(c => c[0] === '/api/write/restore');
+  assert.ok(save >= 0 && restore > save, 'save before restore');
+});
+
+test('a suggestion is dropped (and recorded as rejected) when the file changes; it never applies elsewhere', async () => {
+  const { ctx, $, calls } = aiSetup(REPORT);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Intro: one two three.'; area.setSelectionRange(7, 20);
+  await ctx.runWriteAi('shorter', false);
+  assert.equal($('write-suggestion').hidden, false);
+  await ctx.openWriteFile('main.tex');  // re-open (the same happens for another file or document)
+  assert.equal($('write-suggestion').hidden, true);
+  assert.deepEqual([...calls.find(c => c[0] === '/api/write/assist/decide')[1].accepted], []);
+  $('write-cm').children[0].value = 'Intro: one two three.';
+  await ctx.applyWriteSuggestion();
+  assert.equal($('write-cm').children[0].value, 'Intro: one two three.');
+});
+
+test('a reply for a file the user left is not shown', async () => {
+  const { ctx, $, calls } = aiSetup(REPORT);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Intro: one two three.'; area.setSelectionRange(7, 20);
+  $('write-suggestion').hidden = true;  // as in index.html
+  const range = { from: 7, to: 20, text: 'one two three', doc: 'd1', file: 'other.tex' };
+  await ctx.pollWriteAi({ id: 'job-ai' }, range);
+  assert.equal($('write-suggestion').hidden, true);  // never shown
+  assert.equal(ctx.AI_pending(), null);
+  assert.ok(calls.some(c => c[0] === '/api/write/assist/decide'));
+});
+
+test('the floating bar stays inside the editor pane', () => {
+  const { ctx, $ } = setup();
+  const box = $('write-suggestion');
+  box.parentNode = { getBoundingClientRect: () => ({ top: 100, height: 400 }) };
+  box.offsetHeight = 100;
+  ctx.W.editor = { coords: () => ({ top: 20, bottom: 40 }), mark() {} };  // text scrolled above the pane
+  ctx.placeWriteSuggestion({ to: 0 });
+  assert.equal(box.style.top, '6px');
+  ctx.W.editor.coords = () => ({ top: 640, bottom: 660 });  // below the pane
+  ctx.placeWriteSuggestion({ to: 0 });
+  assert.equal(box.style.top, '294px');
 });

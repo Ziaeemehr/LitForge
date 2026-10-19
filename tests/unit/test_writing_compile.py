@@ -147,6 +147,32 @@ def test_bwrap_hides_home(tmp_path: Path) -> None:
     argv = wc.bwrap_argv(tmp_path / "doc", [], [tmp_path / "doc" / ".build"])
     assert ["--tmpfs", str(Path.home())] in [argv[i:i + 2] for i in range(len(argv))]
     assert argv[-1] == "--" and "--unshare-pid" in argv
+    assert ["--ro-bind", "/", "/"] not in [argv[i:i + 3] for i in range(len(argv))]  # no whole-disk mount
+
+
+def test_bwrap_reads_only_the_document_and_system_files(tmp_path: Path) -> None:
+    import shutil
+    import subprocess
+
+    if not shutil.which("bwrap"):
+        pytest.skip("bwrap is not installed")
+    folder = tmp_path / "doc"
+    (folder / ".build").mkdir(parents=True)
+    (folder / "main.tex").write_text("inside")
+    (tmp_path / "secret.txt").write_text("outside")
+    argv = wc.bwrap_argv(folder, [], [folder / ".build"], network=False)
+    probe = subprocess.run([*argv, "/bin/sh", "-c", "true"], capture_output=True)
+    if probe.returncode != 0:
+        pytest.skip("bwrap cannot create a sandbox here: " + probe.stderr.decode(errors="replace")[:200])
+
+    def run(script: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([*argv, "/bin/sh", "-c", script], capture_output=True, text=True)
+
+    assert run("cat main.tex").stdout == "inside"
+    for outside in [tmp_path / "secret.txt", Path("/etc/passwd"), Path("/etc/shadow"), Path("/root"), Path("/var/log")]:
+        assert run(f"cat {outside} || ls {outside}").returncode != 0, outside
+    assert run("echo x > .build/out && cat .build/out").stdout == "x\n"
+    assert run("echo x > main.tex").returncode != 0  # the source is read-only
 
 
 def _tarball(payload: bytes) -> bytes:

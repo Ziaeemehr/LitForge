@@ -1885,6 +1885,7 @@
         CM.EditorView.domEventHandlers({ blur: function () { handlers.blur(); } })
       ] })
     });
+    view.scrollDOM.addEventListener('scroll', function () { if (AI.pending) placeWriteSuggestion(AI.pending.range); });
     return {
       view: view,
       getText: function () { return view.state.doc.toString(); },
@@ -2065,10 +2066,19 @@
     }).catch(function (e) { toast(e.message); });
   }
 
-  function openWriteFile(name) {
+  // Unsaved text is never dropped: the switch waits for the save and is refused while a conflict or a failed
+  // save leaves text that is only in the editor. `discard` is for "Reload theirs" and restore, which mean it.
+  // Resolves to true when the file was opened.
+  function openWriteFile(name, discard) {
     var load = function () {
+      if (!discard && (W.dirty || W.conflictHash)) {
+        $('write-file').value = W.file;
+        toast(W.conflictHash ? 'Resolve the conflict first (reload or keep mine).' : 'Not saved yet; try again in a moment.');
+        return false;
+      }
       return api('/api/write/file?doc=' + encodeURIComponent(W.doc.id) + '&name=' + encodeURIComponent(name))
         .then(function (file) {
+          dropWriteSuggestion();
           if (W.editor) W.editor.destroy();
           W.file = file.name; W.hash = file.hash; W.dirty = false; W.conflictHash = null;
           $('write-file').value = file.name;
@@ -2077,9 +2087,11 @@
             change: writeChanged, blur: function () { if (W.dirty) saveWriteNow(); }, compile: compileWrite
           });
           writeSaveState('Saved');
+          return true;
         });
     };
-    return (W.dirty ? saveWriteNow() : Promise.resolve()).then(load).catch(function (e) { toast(e.message); });
+    return (W.dirty && !discard ? saveWriteNow() : Promise.resolve()).then(load)
+      .catch(function (e) { toast(e.message); return false; });
   }
 
   function writeChanged() {
@@ -2128,8 +2140,7 @@
   }
 
   function reloadTheirs() {
-    W.dirty = false;
-    return openWriteFile(W.file);
+    return openWriteFile(W.file, true);
   }
 
   function showWritePdf(ready) {
@@ -2156,8 +2167,8 @@
 
   function jumpToWriteLine(item) {
     W.lastError = item;
-    var target = item.file && item.file !== W.file ? openWriteFile(item.file) : Promise.resolve();
-    return target.then(function () { if (W.editor) W.editor.gotoLine(item.line); });
+    var target = item.file && item.file !== W.file ? openWriteFile(item.file) : Promise.resolve(true);
+    return target.then(function (opened) { if (opened && W.editor) W.editor.gotoLine(item.line); });
   }
 
   function compileWrite() {
@@ -2206,7 +2217,7 @@
         label.textContent = String(s.created_at || s.id).replace('T', ' ').slice(0, 19) + (s.note ? ' · ' + s.note : '');
         var restore = document.createElement('button');
         restore.className = 'btn small'; restore.textContent = 'Restore';
-        restore.onclick = function () { restoreWriteVersion(s.id); };
+        restore.onclick = function () { return restoreWriteVersion(s.id); };
         li.appendChild(label); li.appendChild(restore);
         list.appendChild(li);
       });
@@ -2220,11 +2231,14 @@
 
   function restoreWriteVersion(id) {
     if (!window.confirm('Restore this version? The current text is kept as a version first.')) return Promise.resolve();
-    return post('/api/write/restore', { doc: W.doc.id, snapshot: id }).then(function () {
-      $('write-versions').hidden = true;
-      W.dirty = false;
-      return openWriteFile(W.file);
-    }).then(function () { toast('Version restored'); }).catch(function (e) { toast(e.message); });
+    // Save what is in the editor first, so the version kept before restoring holds the latest text.
+    return saveWriteNow().then(function () {
+      if (W.dirty || W.conflictHash) { toast('Save or resolve the conflict before restoring.'); return null; }
+      return post('/api/write/restore', { doc: W.doc.id, snapshot: id }).then(function () {
+        $('write-versions').hidden = true;
+        return openWriteFile(W.file, true);
+      }).then(function () { toast('Version restored'); });
+    }).catch(function (e) { toast(e.message); });
   }
 
   function uploadWriteFigure(file) {
@@ -2256,7 +2270,11 @@
 
   function closeWriteDoc(skipSave) {
     return (skipSave || !W.doc ? Promise.resolve() : saveWriteNow()).then(function () {
-      if (W.conflictHash && !skipSave) return;
+      if (!skipSave && (W.conflictHash || W.dirty)) {
+        toast(W.conflictHash ? 'Resolve the conflict first (reload or keep mine).' : 'Not saved yet; the document stays open.');
+        return;
+      }
+      dropWriteSuggestion();
       if (W.editor) W.editor.destroy();
       W.doc = null; W.editor = null; W.dirty = false;
       $('write-editor').hidden = true; $('write-home').hidden = false;
@@ -2429,6 +2447,7 @@
     if (!W.doc || !W.editor || !action) return Promise.resolve();
     var range = AI.range && approved ? AI.range : writeAiRange(action);
     if (range.problem) { toast(range.problem); return Promise.resolve(); }
+    range.doc = W.doc.id; range.file = W.file;
     AI.range = range;
     var body = { doc: W.doc.id, action: action, text: range.text, error: range.error || '', first_line: range.first_line || 1, error_line: range.error_line || 0,
       file: W.file, approved: !!approved };
@@ -2456,6 +2475,10 @@
       }
       if (j.status === 'failed') { $('write-compile-state').textContent = j.error || 'The model call failed'; return; }
       $('write-compile-state').textContent = '';
+      if (!W.doc || W.doc.id !== range.doc || W.file !== range.file) {  // the user moved on; record it as rejected
+        post('/api/write/assist/decide', { doc: range.doc, suggestion: j.report.id, accepted: [] }).catch(function () {});
+        return;
+      }
       showWriteSuggestion(j.report, range);
     });
   }
@@ -2505,8 +2528,21 @@
     if (!at || !box.parentNode || !box.parentNode.getBoundingClientRect) return;
     var pane = box.parentNode.getBoundingClientRect(), height = box.offsetHeight || 120;
     var below = at.bottom - pane.top + 6, above = at.top - pane.top - height - 6;
-    var top = below + height <= pane.height ? below : Math.max(6, above);
+    var top = below + height <= pane.height ? below : above;
+    top = Math.max(6, Math.min(top, pane.height - height - 6));
     box.style.top = Math.round(top) + 'px'; box.style.bottom = 'auto';
+  }
+
+  // Leaving the file or document drops an open suggestion (recorded as rejected) so it can never be applied to
+  // other text.
+  function dropWriteSuggestion() {
+    var pending = AI.pending;
+    AI.pending = null; AI.range = null;
+    hideWriteSuggestion();
+    if (pending) {
+      post('/api/write/assist/decide', { doc: pending.range.doc || (W.doc && W.doc.id), suggestion: pending.suggestion.id,
+        accepted: [] }).catch(function () {});
+    }
   }
 
   function hideWriteSuggestion() {
@@ -2553,6 +2589,7 @@
     var pending = AI.pending;
     if (!pending) return Promise.resolve();
     var s = pending.suggestion, range = pending.range;
+    if (range.doc && (!W.doc || W.doc.id !== range.doc || W.file !== range.file)) { dropWriteSuggestion(); return Promise.resolve(); }
     var accepted = s.hunks.filter(function (h) { return pending.accepted[h.index]; }).map(function (h) { return h.index; });
     if (accepted.length && W.editor.getText().slice(range.from, range.to) !== s.original) {
       toast('The text changed since the request; ask again.');
@@ -2605,6 +2642,7 @@
     setWriteLayout(store.get('write-layout', 'split'));
     setWriteSplit(store.get('write-split', 50));
     wireWriteGutter();
+    window.addEventListener('resize', function () { if (AI.pending) placeWriteSuggestion(AI.pending.range); });
     window.addEventListener('beforeunload', function (e) {
       if (W.doc && W.dirty && !W.conflictHash) {  // keepalive lets the save finish while the page closes
         fetch('/api/write/save', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
