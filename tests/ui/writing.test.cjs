@@ -767,3 +767,11 @@ test('without PDF.js the browser\'s own viewer is used', async () => {
   assert.match($('write-pdf').src, /\/api\/write\/pdf\?doc=d1/);
   assert.equal($('write-pdf').hidden, false);
 });
+
+test('in fit mode the PDF is re-fitted when its pane changes width, not for small changes', () => {
+  const { ctx } = setup();
+  assert.equal(ctx.needsRefit(400, 640, true), true);
+  assert.equal(ctx.needsRefit(400, 410, true), false);
+  assert.equal(ctx.needsRefit(400, 640, false), false);  // the user chose a zoom: keep it
+  assert.equal(ctx.needsRefit(0, 640, true), false);     // hidden pane (Editor only) has no width
+});

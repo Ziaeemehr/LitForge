@@ -2237,6 +2237,11 @@
     $('write-pdf-page').textContent = PDFV.pages.length ? current + ' / ' + PDFV.pages.length : '';
   }
 
+  // Fit mode follows the pane: dragging the divider or switching layout changes its width.
+  function needsRefit(oldWidth, newWidth, fit) {
+    return fit && oldWidth > 0 && newWidth > 0 && Math.abs(newWidth - oldWidth) > 24;
+  }
+
   function pdfPoint(rect, clientX, clientY, scale) {
     return { x: Math.round((clientX - rect.left) / scale * 100) / 100,
       y: Math.round((clientY - rect.top) / scale * 100) / 100 };
@@ -2288,6 +2293,15 @@
       syncFromPdf(Number(wrap.dataset.page), p.x, p.y);
     });
     box.addEventListener('scroll', showPdfPageNumber);
+    if (window.ResizeObserver) {
+      var width = 0, timer = null;
+      new ResizeObserver(function () {
+        var now = box.clientWidth;
+        if (!needsRefit(width, now, PDFV.fit)) { if (!width) width = now; return; }
+        clearTimeout(timer);
+        timer = setTimeout(function () { width = box.clientWidth; zoomPdf(0); }, 200);
+      }).observe(box);
+    }
     $('write-pdf-in').onclick = function () { zoomPdf(1.2); };
     $('write-pdf-out').onclick = function () { zoomPdf(1 / 1.2); };
     $('write-pdf-fit').onclick = function () { zoomPdf(0); };
