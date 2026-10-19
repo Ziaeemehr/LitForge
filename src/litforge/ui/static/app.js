@@ -2498,6 +2498,14 @@
     return out;
   }
 
+  // A completed argument (label, \\end name): when its closing brace follows right away, step past it.
+  function closedReplacement(text, after) {
+    if (after.charAt(0) === '}') {
+      return { text: text + '}', cursor: text.length + 1, consume: 1 };
+    }
+    return { text: text, cursor: text.length, consume: 0 };
+  }
+
   function envOptions(prefix) {
     return LATEX_ENVS.filter(function (e) { return e.indexOf(prefix) === 0; }).map(function (e) { return { label: e }; });
   }
@@ -2506,7 +2514,8 @@
   // is added and the cursor goes inside, also when the editor's own auto-closed } is all that follows (it is
   // replaced: `consume`). When more follows, or after \end{, only the name is completed.
   function envReplacement(name, isBegin, after) {
-    if (!isBegin || (after !== '' && after !== '}')) return { text: name, cursor: name.length, consume: 0 };
+    if (!isBegin) return closedReplacement(name, after);
+    if (after !== '' && after !== '}') return { text: name, cursor: name.length, consume: 0 };
     return { text: name + '}\n  \n\\end{' + name + '}', cursor: name.length + 4, consume: after.length };
   }
 
@@ -2538,8 +2547,19 @@
       return $('write-cite-panel').hidden ? openWriteCite() : Promise.resolve();
     }
     if (opt.source === 'document') { W.editor.replace(from, to, opt.label); return Promise.resolve(); }
-    return post('/api/write/cite', { doc: W.doc.id, paper_id: opt.paper_id, evidence_id: null })
-      .then(function (res) { W.editor.replace(from, to, res.key); })
+    // The key comes from the server: by then the user may have typed on or left the file.
+    var doc = W.doc, file = W.file, typed = W.editor.getText().slice(from, to);
+    return post('/api/write/cite', { doc: doc.id, paper_id: opt.paper_id, evidence_id: null })
+      .then(function (res) {
+        if (W.doc !== doc || W.file !== file || !W.editor) { toast('Not inserted: ' + res.key + ' (the file changed)'); return; }
+        var text = W.editor.getText(), cursor = W.editor.selection().to;
+        if (text.slice(from, to) === typed) { W.editor.replace(from, to, res.key); return; }
+        if (typed && text.slice(cursor - typed.length, cursor) === typed) {
+          W.editor.replace(cursor - typed.length, cursor, res.key); return;
+        }
+        var edit = insertCiteKey(text, cursor, res.key);
+        if (edit) W.editor.replace(edit.from, edit.to, edit.insert);
+      })
       .catch(function (e) { toast(e.message); });
   }
 
@@ -2561,7 +2581,10 @@
     }
     if (c.kind === 'ref') {
       return { from: from, validFor: /^[^{}]*$/, options: docLabels([text].concat(W.otherTexts || [])).map(function (l) {
-        return { label: l, type: 'variable' };
+        return { label: l, type: 'variable', apply: function (view, completion, f, t) {
+          var ins = closedReplacement(l, view.state.sliceDoc(t, view.state.doc.lineAt(t).to));
+          put(ins.text, ins.cursor)(view, completion, f, t + ins.consume);
+        } };
       }) };
     }
     if (c.kind === 'env') {

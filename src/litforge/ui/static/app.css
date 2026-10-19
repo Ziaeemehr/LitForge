@@ -554,7 +554,8 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .write-cm .tok-comment { color: var(--cm-comment); font-style: italic; }
 .write-cm .tok-invalid { color: var(--bad); }
 /* Autocomplete list under the cursor; always left to right, also on Persian lines. */
-.write-cm .cm-tooltip-autocomplete { direction: ltr; background: var(--panel); border: 1px solid var(--line);
+.write-cm .cm-tooltip-autocomplete { direction: ltr; max-width: min(34em, 90vw); background: var(--panel);
+  border: 1px solid var(--line);
   border-radius: 10px; box-shadow: var(--float); overflow: hidden; }
 .write-cm .cm-tooltip-autocomplete > ul { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px;
   max-height: 16em; }

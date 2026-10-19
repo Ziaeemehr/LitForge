@@ -518,7 +518,9 @@ test('choosing an environment adds the matching \\end and puts the cursor inside
   // the editor auto-closes { with }: that brace is replaced, not taken as "already closed" (real run)
   assert.deepEqual({ ...ctx.envReplacement('itemize', true, '}') }, { ...full, consume: 1 });
   assert.deepEqual({ ...ctx.envReplacement('itemize', true, '}[t]') }, { text: 'itemize', cursor: 7, consume: 0 });
-  assert.deepEqual({ ...ctx.envReplacement('itemize', false, '}') }, { text: 'itemize', cursor: 7, consume: 0 });
+  // after \\end{ the name is completed and the cursor steps past the closing brace
+  assert.deepEqual({ ...ctx.envReplacement('itemize', false, '}') }, { text: 'itemize}', cursor: 8, consume: 1 });
+  assert.deepEqual({ ...ctx.envReplacement('itemize', false, '') }, { text: 'itemize', cursor: 7, consume: 0 });
 });
 
 test('cite options: keys in this document first, then library papers, then the full search', () => {
@@ -578,4 +580,40 @@ test('library papers whose key or first author starts with the typed text come f
                 { paper_id: 'p3', key: null, title: 'Ongoing activity', year: 2012, authors: ['Deco, G.'] },
                 { paper_id: 'p4', key: 'deco2014', title: 'Identification', year: 2014, authors: ['Deco, G.'] }];
   assert.deepEqual([...ctx.citeOptions('de', [], rows).map(o => o.paper_id || o.source)], ['p4', 'p3', 'p1', 'p2', 'search']);
+});
+
+test('a picked label steps past the closing brace', () => {
+  const { ctx } = setup();
+  assert.deepEqual({ ...ctx.closedReplacement('sec:intro', '}') }, { text: 'sec:intro}', cursor: 10, consume: 1 });
+  assert.deepEqual({ ...ctx.closedReplacement('sec:intro', '') }, { text: 'sec:intro', cursor: 9, consume: 0 });
+  assert.deepEqual({ ...ctx.closedReplacement('sec:intro', ', x}') }, { text: 'sec:intro', cursor: 9, consume: 0 });
+  // mid-sentence: \\ref{▌} and more
+  assert.deepEqual({ ...ctx.closedReplacement('sec:intro', '} and more') }, { text: 'sec:intro}', cursor: 10, consume: 1 });
+});
+
+test('a library key arriving after the text changed is added at the cursor, not at the old place', async () => {
+  let release;
+  const { ctx, $ } = setup({ post: url => (url === '/api/write/cite' ? new Promise(r => { release = r; }) : null) });
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Text \\cite{de}'; area.setSelectionRange(13, 13);
+  const done = ctx.applyCiteCompletion({ source: 'library', paper_id: 'p2' }, 11, 13);
+  area.value = 'New start. Text \\cite{de}'; area.setSelectionRange(24, 24);  // typed while waiting
+  release({ key: 'deco2014' });
+  await done;
+  assert.equal(area.value, 'New start. Text \\cite{deco2014}');
+});
+
+test('a library key arriving after leaving the file is not inserted anywhere', async () => {
+  let release;
+  const { ctx, $, calls } = setup({ post: url => (url === '/api/write/cite' ? new Promise(r => { release = r; }) : null) });
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Text \\cite{de}'; area.setSelectionRange(13, 13);
+  const done = ctx.applyCiteCompletion({ source: 'library', paper_id: 'p2' }, 11, 13);
+  ctx.W.file = 'other.tex';
+  release({ key: 'deco2014' });
+  await done;
+  assert.equal(area.value, 'Text \\cite{de}');
+  assert.ok(calls.some(c => c[0] === 'toast' && /deco2014/.test(c[1])));
 });
