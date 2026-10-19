@@ -69,9 +69,10 @@ def search_library(conn: sqlite3.Connection, project_id: str, query: str, limit:
     for term in terms:
         sql += """ AND (lower(coalesce(p.title,'')) LIKE ? ESCAPE '\\'
                    OR lower(coalesce(p.authors_json,'')) LIKE ? ESCAPE '\\' OR CAST(p.year AS TEXT)=?
-                   OR lower(coalesce(p.doi,''))=? OR lower(coalesce(k.key,''))=?)"""
-        like = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        params += [like, like, term, term, term]
+                   OR lower(coalesce(p.doi,''))=? OR lower(coalesce(k.key,'')) LIKE ? ESCAPE '\\')"""
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = "%" + escaped + "%"
+        params += [like, like, term, term, escaped + "%"]  # a key matches from its start, as typed in \\cite{
     sql += " ORDER BY p.year DESC, p.title LIMIT ?"
     params.append(limit)
     out = []

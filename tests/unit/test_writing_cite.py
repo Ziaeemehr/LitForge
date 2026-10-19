@@ -95,3 +95,10 @@ def test_sync_bib_refuses_a_references_bib_that_links_outside(env, tmp_path: Pat
     with pytest.raises(wd.DocumentError):
         wc.sync_bib(conn, doc, ["p1"])
     assert bib.is_symlink() and secret.read_text() == "@misc{secret, note = {private}}\n"
+
+
+def test_search_library_matches_the_start_of_a_citation_key(env) -> None:
+    conn, paths, doc, _ = env
+    key = citation_key(conn, "p1")
+    assert [r["paper_id"] for r in wc.search_library(conn, doc.project_id, key[:-2])] == ["p1"]
+    assert wc.search_library(conn, doc.project_id, key[2:6] + "zz") == []

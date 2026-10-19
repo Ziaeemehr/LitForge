@@ -617,3 +617,24 @@ test('a library key arriving after leaving the file is not inserted anywhere', a
   assert.equal(area.value, 'Text \\cite{de}');
   assert.ok(calls.some(c => c[0] === 'toast' && /deco2014/.test(c[1])));
 });
+
+test('picking \\cite, \\ref or \\begin from the command list opens the next list at once', () => {
+  const { ctx } = setup();
+  for (const c of ['\\cite{}', '\\citep{}', '\\ref{}', '\\eqref{}', '\\begin{}', '\\end{}']) assert.equal(ctx.chainsCompletion(c), true, c);
+  for (const c of ['\\textbf{}', '\\section{}', '\\maketitle']) assert.equal(ctx.chainsCompletion(c), false, c);
+});
+
+function fakeContext(text, pos) {
+  const start = text.lastIndexOf('\n', pos - 1) + 1, end = text.indexOf('\n', pos);
+  const line = { from: start, to: end < 0 ? text.length : end, text: text.slice(start, end < 0 ? text.length : end) };
+  return { pos, state: { doc: { lineAt: () => line, toString: () => text }, sliceDoc: (a, b) => text.slice(a, b) } };
+}
+
+test('when the library search fails, \\cite{ still lists the document keys and the full search', async () => {
+  const { ctx } = setup({ get: url => (url.startsWith('/api/write/cite/search') ? Promise.reject(new Error('offline')) : null) });
+  await ctx.openWriteDoc('d1');
+  const text = 'A \\cite{lee2021} and \\cite{l';
+  const result = await ctx.latexCompletionSource(fakeContext(text, text.length));
+  assert.deepEqual([...result.options.map(o => o.label)], ['lee2021', 'Search the library and evidence…']);
+  assert.equal(result.from, text.length - 1);
+});

@@ -7,11 +7,11 @@ import { searchKeymap, highlightSelectionMatches, openSearchPanel } from "@codem
 import { StreamLanguage, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter,
   indentOnInput } from "@codemirror/language";
 import { stex } from "@codemirror/legacy-modes/mode/stex";
-import { autocompletion, closeBrackets, acceptCompletion } from "@codemirror/autocomplete";
+import { autocompletion, closeBrackets, acceptCompletion, startCompletion } from "@codemirror/autocomplete";
 import { classHighlighter } from "@lezer/highlight";
 
 window.LitForgeCM = { EditorState, Compartment, StateEffect, StateField, EditorView, keymap, lineNumbers,
   highlightActiveLine, highlightActiveLineGutter, drawSelection, Decoration, placeholder, defaultKeymap, history,
   historyKeymap, indentWithTab, undo, redo, searchKeymap, highlightSelectionMatches, openSearchPanel,
   StreamLanguage, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter, indentOnInput, stex,
-  autocompletion, closeBrackets, acceptCompletion, classHighlighter };
+  autocompletion, closeBrackets, acceptCompletion, startCompletion, classHighlighter };

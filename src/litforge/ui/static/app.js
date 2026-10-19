@@ -2563,6 +2563,11 @@
       .catch(function (e) { toast(e.message); });
   }
 
+  // After these commands the next list (keys, labels, environments) is wanted at once.
+  function chainsCompletion(insert) {
+    return /^\\(?:[a-zA-Z]*cite[a-zA-Z]*|ref|eqref|autoref|cref|Cref|pageref|nameref|begin|end)\{\}$/.test(insert);
+  }
+
   // CodeMirror completion source built on the functions above.
   function latexCompletionSource(context) {
     var line = context.state.doc.lineAt(context.pos);
@@ -2576,7 +2581,12 @@
     };
     if (c.kind === 'command') {
       return { from: from, validFor: /^\\[a-zA-Z*]*$/, options: commandOptions(c.prefix, docCommands(text)).map(function (o) {
-        return { label: o.label, detail: o.detail, type: 'keyword', apply: put(o.apply, o.apply.length - o.back) };
+        var apply = put(o.apply, o.apply.length - o.back);
+        return { label: o.label, detail: o.detail, type: 'keyword', apply: !chainsCompletion(o.apply) ? apply :
+          function (view, completion, f, t) {
+            apply(view, completion, f, t);
+            setTimeout(function () { window.LitForgeCM.startCompletion(view); });
+          } };
       }) };
     }
     if (c.kind === 'ref') {
