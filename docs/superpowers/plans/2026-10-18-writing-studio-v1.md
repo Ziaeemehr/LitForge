@@ -239,6 +239,15 @@ document and file and is dropped (recorded as rejected) when the user moves on; 
 pane. Open: the macOS profile still allows reads outside its denied folders (system folders such as `/Library`),
 not tested on this machine.
 
+**Real run, part 1 (2026-10-19, Linux x86_64, scratch data):** Tectonic 0.17.0 installed with the SHA check (22.7 MB).
+Persian template: cold compile 102 s (package download), warm 0.8 s, offline recompile 0.8 s; English template 2.5 s
+first time; all inside the new `bwrap` sandbox with no extra mounts. Three papers imported by DOI (OA PDFs fetched,
+two with text). Citing from the Write view (library and evidence tabs) put both keys in one `\cite{...}` at the end of
+a Persian line, synced `references.bib` and compiled in 1.1 s with no warnings; the evidence citation stored its
+evidence id. Found and fixed: English references came out in reversed word order in the Persian PDF; the Persian
+template now uses `plain-fa` (persian-bib). Documents made from the old template keep `plain` until edited.
+Still to do: the three AI actions with a real local model.
+
 **Acceptance (v1):**
 - English and Persian templates compile out of the box with the chosen engine; recompile of a 10-page document
   in under ~5 s warm.

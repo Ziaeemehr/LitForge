@@ -32,6 +32,8 @@ def test_create_from_templates(env, template: str) -> None:
     if template == "persian":
         assert "fonts/Vazirmatn-Regular.ttf" in names
         assert "xepersian" in wd.read_file(doc, "main.tex")[0]
+        # English references must run left to right inside Persian text (found in the real run, 2026-10-19).
+        assert "\\bibliographystyle{plain-fa}" in wd.read_file(doc, "main.tex")[0]
     second = wd.create_document(conn, paths, "demo", "My Paper", template)
     assert second.slug == "my-paper-2"
     assert [d.id for d in wd.list_documents(conn, paths, "demo")].count(doc.id) == 1
