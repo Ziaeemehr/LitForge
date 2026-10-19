@@ -289,3 +289,46 @@ def test_version_history_routes(server) -> None:
         assert call(base, f"/api/write/{path}?doc=unknown")[0] == 404
     second = call(base, "/api/write/snapshot", body)[1]
     assert second["id"] != snap["id"]
+
+
+def test_chat_local_job_and_cloud_approval(tmp_path: Path) -> None:
+    from litforge.config import ModelProfileConfig, TaskModelConfig
+    from litforge.llm.budget import Pricing
+
+    def cloud(config) -> None:
+        config.models.policy = "ask_before_cloud"
+        config.privacy.allow_cloud = True
+        config.models.profiles["remote"] = ModelProfileConfig(
+            provider="openai_compatible", model="big", remote=True,
+            pricing=Pricing(input_per_million_usd=1, output_per_million_usd=2))
+        config.models.tasks["write_chat"] = TaskModelConfig(profile="remote")
+
+    httpd, base, fakes = _assist_server(tmp_path)
+    try:
+        doc = create(base)
+        fakes["local"].answer = lambda m: {"answer": "Use tabular.", "citations": []}
+        body = {"doc": doc["id"], "question": "How do I make a table?", "selection": "", "context": "x",
+                "history": [], "file": "main.tex"}
+        status, job = call(base, "/api/write/chat", body)
+        assert status == 200 and job["preview"]["remote"] is False, job
+        report = wait_job(base, job["id"])["report"]
+        assert report["answer"] == "Use tabular." and report["suggestion"] is None
+        assert call(base, "/api/write/chat", {**body, "question": ""})[0] == 400
+        assert call(base, "/api/write/chat", body, headers={"Origin": "http://evil.example"})[0] == 403
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    httpd, base, fakes = _assist_server(tmp_path / "cloud", cloud)
+    try:
+        doc = create(base)
+        body = {"doc": doc["id"], "question": "Shorter?", "selection": "Some text.", "file": "main.tex"}
+        status, res = call(base, "/api/write/chat", body)
+        assert status == 200 and res["needs_approval"] and res["preview"]["model"] == "big"
+        assert fakes["remote"].calls == 0
+        fakes["remote"].answer = lambda m: {"answer": "Done.", "citations": [], "replacement": "Text."}
+        _, job = call(base, "/api/write/chat", {**body, "approved": True})
+        done = wait_job(base, job["id"])
+        assert done["status"] == "done" and fakes["remote"].calls == 1 and done["report"]["suggestion"]["hunks"]
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

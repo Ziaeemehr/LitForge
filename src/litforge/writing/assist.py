@@ -186,7 +186,13 @@ def run(conn: sqlite3.Connection, gateway: ModelGateway, doc: Document, req: Req
     assert req.packet is not None
     reply = gateway.call(req.task, req.packet, req.messages, req.schema, profile=profile, approved=approved,
                          max_output_tokens=output_cap(req), prompt_version=WRITE_PROMPT_VERSION)
-    content = reply.content
+    return suggestion_from(conn, doc, req, reply.content, f"{reply.provider}:{reply.model}", file)
+
+
+def suggestion_from(conn: sqlite3.Connection, doc: Document, req: Request, content: dict[str, Any], model: str,
+                    file: str) -> dict[str, Any]:
+    """Turn a model reply into hunks with guard flags, recorded as a pending suggestion. Shared with the
+    assistant chat, whose edits go through the same checks."""
     citations: list[dict[str, Any]] = []
     flags: list[str] = []
     sent = model_text(req)
@@ -224,30 +230,40 @@ def run(conn: sqlite3.Connection, gateway: ModelGateway, doc: Document, req: Req
     conn.execute(
         """INSERT INTO writing_suggestions(id, document_id, task, model, prompt_version, file, original, hunks_json,
            flags_json, citations_json, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', ?)""",
-        (suggestion_id, doc.id, req.task, f"{reply.provider}:{reply.model}", WRITE_PROMPT_VERSION, file, req.text,
+        (suggestion_id, doc.id, req.task, model, WRITE_PROMPT_VERSION, file, req.text,
          dumps(hunks), dumps(flags), dumps(citations), now()))
-    return {"id": suggestion_id, "task": req.task, "action": req.action, "model": reply.model,
-            "provider": reply.provider, "note": str(content.get("note") or "")[:500], "original": req.text,
+    provider, _, model_name = model.partition(":")
+    return {"id": suggestion_id, "task": req.task, "action": req.action, "model": model_name,
+            "provider": provider, "note": str(content.get("note") or "")[:500], "original": req.text,
             "hunks": hunks, "flags": flags, "citations": citations}
+
+
+def verify_quotes(conn: sqlite3.Connection, evidence: dict[str, Any],
+                  raw: list[Any]) -> tuple[dict[str, dict[str, Any]], int]:
+    """The citations whose quote really is in their evidence span (by evidence id), and how many were not."""
+    verified: dict[str, dict[str, Any]] = {}
+    rejected = 0
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        evidence_id, quote = str(item.get("evidence_id") or ""), html.unescape(str(item.get("quote") or ""))
+        span = evidence.get(evidence_id)
+        if evidence_id in verified:
+            continue
+        located = QuoteLocator(span.text).locate(quote) if span is not None and len(quote.split()) >= 2 else None
+        if span is None or located is None:
+            rejected += 1
+            continue
+        verified[evidence_id] = {"evidence_id": evidence_id, "paper_id": span.paper_id,
+                                 "key": citation_key(conn, span.paper_id), "page": span.page,
+                                 "title": span.title, "quote": span.text[located[0]:located[1]]}
+    return verified, rejected
 
 
 def _resolve_citations(conn: sqlite3.Connection, req: Request, text: str,
                        raw: list[Any]) -> tuple[str, list[dict[str, Any]], int]:
     """Keep only citations whose quote is really in the evidence; turn evidence ids into citation keys."""
-    verified: dict[str, dict[str, Any]] = {}
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        evidence_id, quote = str(item.get("evidence_id") or ""), html.unescape(str(item.get("quote") or ""))
-        span = req.evidence.get(evidence_id)
-        if span is None or evidence_id in verified or len(quote.split()) < 2:
-            continue
-        located = QuoteLocator(span.text).locate(quote)
-        if located is None:
-            continue
-        verified[evidence_id] = {"evidence_id": evidence_id, "paper_id": span.paper_id,
-                                 "key": citation_key(conn, span.paper_id), "page": span.page,
-                                 "title": span.title, "quote": span.text[located[0]:located[1]]}
+    verified, _ = verify_quotes(conn, req.evidence, raw)
     dropped = 0
 
     def replace(match: re.Match[str]) -> str:

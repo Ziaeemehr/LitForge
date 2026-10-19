@@ -1032,3 +1032,96 @@ test('when the compared version is gone after a refresh, the differences are fet
   await ctx.loadVersions();
   assert.ok(calls.some(c => c[0] === 'GET' && c[1] === '/api/write/diff?doc=d1&a=s1&b=s2&file=main.tex'));
 });
+
+// ---------- Assistant chat ----------
+function chatSetup(report, approval) {
+  const env = setup({
+    get: url => (url.startsWith('/api/jobs/job-chat') ? { status: 'done', report } : null),
+    post: (url, body) => {
+      if (url === '/api/write/chat') {
+        if (approval && !body.approved) return { needs_approval: true, sent: { characters: 10, evidence: 2 },
+          preview: { model: 'big-cloud', provider: 'openrouter', remote: true, max_cost_usd: 0.002 } };
+        return { id: 'job-chat', preview: { model: 'gemma', profile: 'local', remote: false }, sent: { characters: 10, evidence: 1 } };
+      }
+      if (url === '/api/write/cite') return { key: body.paper_id === 'p1' ? 'lee2021' : 'k' };
+      return null;
+    } });
+  env.ctx.window.confirm = msg => { env.calls.push(['confirm', msg]); return approval !== 'deny'; };
+  return env;
+}
+const ANSWER = { answer: 'The gain was 3.25.', flags: [], suggestion: null, model: 'gemma', provider: 'ollama',
+  citations: [{ key: 'lee2021', paper_id: 'p1', page: 4, quote: 'the coupling gain was 3.25', evidence_id: 'e1' }] };
+
+test('the context around the cursor is a few lines on each side', () => {
+  const { ctx } = setup();
+  const text = Array.from({ length: 40 }, (_, i) => 'l' + i).join('\n');
+  const c = ctx.chatContext(text, text.indexOf('l20'));
+  assert.ok(c.startsWith('l12') && c.endsWith('l28'));
+});
+
+test('a question sends the selection, the history and gets an answer with its sources', async () => {
+  const { ctx, $, calls } = chatSetup(ANSWER);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Intro. Gain is high.'; area.setSelectionRange(7, 20);
+  $('write-chat-input').value = 'What gain was used?';
+  await ctx.sendChat();
+  const sent = calls.find(c => c[0] === '/api/write/chat')[1];
+  assert.equal(sent.question, 'What gain was used?'); assert.equal(sent.selection, 'Gain is high.');
+  assert.equal(sent.context, ''); assert.deepEqual([...sent.history], []);
+  assert.equal($('write-chat-input').value, '');
+  const log = $('write-chat-log').children;
+  assert.equal(log[0].className, 'chat-msg user'); assert.equal(log[0].children[0].textContent, 'What gain was used?');
+  assert.equal(log[1].className, 'chat-msg assistant'); assert.equal(log[1].children[0].textContent, 'The gain was 3.25.');
+  assert.match(log[1].children[1].children[0].textContent, /lee2021 · p\.4/);
+  await ctx.sendChat();  // empty input: nothing is sent
+  assert.equal(calls.filter(c => c[0] === '/api/write/chat').length, 1);
+  $('write-chat-input').value = 'And the subjects?';
+  await ctx.sendChat();
+  const second = calls.filter(c => c[0] === '/api/write/chat')[1][1];
+  assert.deepEqual([...second.history.map(t => t.role + ':' + t.text)], ['user:What gain was used?', 'assistant:The gain was 3.25.']);
+});
+
+test('inserting a source adds \\cite{key} at the cursor and registers the paper', async () => {
+  const { ctx, $, calls } = chatSetup(ANSWER);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Gain was high.'; area.setSelectionRange(14, 14);
+  await ctx.insertChatCitation(ANSWER.citations[0]);
+  assert.equal(area.value, 'Gain was high.\\cite{lee2021}');
+  assert.equal(calls.find(c => c[0] === '/api/write/cite')[1].evidence_id, 'e1');
+});
+
+test('an edit proposed by the assistant opens the usual suggestion bar for the selection', async () => {
+  const suggestion = { id: 's1', task: 'write_chat', provider: 'ollama', model: 'gemma', note: '', flags: [],
+    original: 'Gain is high.', citations: [], hunks: [{ index: 0, start: 8, end: 12, old: 'high', new: '3.25', flags: [] }] };
+  const { ctx, $ } = chatSetup({ ...ANSWER, suggestion });
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Intro. Gain is high.'; area.setSelectionRange(7, 20);
+  $('write-chat-input').value = 'Use the number';
+  await ctx.sendChat();
+  assert.equal($('write-suggestion').hidden, false);
+  await ctx.applyWriteSuggestion();
+  assert.equal(area.value, 'Intro. Gain is 3.25.');
+});
+
+test('a cloud route asks first; declining sends nothing', async () => {
+  const { ctx, $, calls } = chatSetup(ANSWER, 'deny');
+  await ctx.openWriteDoc('d1');
+  $('write-chat-input').value = 'Question?';
+  await ctx.sendChat();
+  assert.match(calls.find(c => c[0] === 'confirm')[1], /big-cloud/);
+  assert.equal(calls.filter(c => c[0] === '/api/write/chat').length, 1);
+  assert.equal($('write-chat-input').value, 'Question?');  // kept so it can be sent again
+});
+
+test('opening another document starts a new conversation', async () => {
+  const { ctx, $ } = chatSetup(ANSWER);
+  await ctx.openWriteDoc('d1');
+  $('write-chat-input').value = 'Q?';
+  await ctx.sendChat();
+  await ctx.openWriteDoc('d1');
+  assert.equal(ctx.CHAT.turns.length, 0);
+  assert.equal($('write-chat-log').children.length, 0);
+});

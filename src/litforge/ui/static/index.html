@@ -481,6 +481,7 @@
             </div>
           </details>
           <button type="button" id="write-spell" aria-pressed="true" title="Check spelling (English and Persian); right-click an underlined word">Spelling</button>
+          <button type="button" id="write-chat-btn" aria-pressed="false" title="Ask the assistant about your text or the project's papers">Assistant</button>
           <button type="button" id="write-sync" title="Show the cursor's line in the PDF (Ctrl/Cmd+Alt+J)">Find in PDF</button>
           <button type="button" class="go" id="write-compile" title="Compile to PDF (Ctrl/Cmd+Enter)">Compile</button>
         </div>
@@ -527,6 +528,17 @@
           aria-label="Resize the editor and the PDF" aria-valuemin="20" aria-valuemax="80" aria-valuenow="50"
           title="Drag to resize; double-click to reset"></div>
         <div class="write-right">
+          <section id="write-chat" class="write-chat" aria-label="Assistant" hidden>
+            <div class="chat-head"><b>Assistant</b><span id="write-chat-status" class="chat-status" role="status" aria-live="polite"></span>
+              <span class="spacer"></span><button type="button" class="sg-x" id="write-chat-close" aria-label="Close the assistant">×</button></div>
+            <div id="write-chat-log" class="chat-log" aria-live="polite"></div>
+            <div class="chat-input">
+              <textarea id="write-chat-input" rows="2" dir="auto" aria-label="Message to the assistant"
+                placeholder="Ask about your text or the project's papers. Select text first to have it changed."></textarea>
+              <button type="button" class="btn small primary" id="write-chat-send" title="Send (Ctrl/Cmd+Enter)">Send</button>
+            </div>
+            <p class="chat-scope">Sent: your question, the selected text (or a few lines around the cursor), the last messages and matching passages from the project's papers. Changes are only proposed; nothing changes until you accept.</p>
+          </section>
           <p id="write-compile-state" class="muted" role="status" aria-live="polite"></p>
           <div id="write-pdfview" class="pdfview" hidden>
             <div class="pdf-bar" role="toolbar" aria-label="PDF">

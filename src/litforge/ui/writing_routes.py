@@ -6,6 +6,7 @@ import sqlite3
 from typing import TYPE_CHECKING, Any
 
 from litforge.writing import assist as wassist
+from litforge.writing import chat as wchat
 from litforge.writing import cite as wcite
 from litforge.writing import compile as wc
 from litforge.writing import documents as wd
@@ -127,6 +128,8 @@ def post(app: App, conn: sqlite3.Connection, path: str, body: dict[str, Any]) ->
         return wcite.cite(conn, doc, str(body.get("paper_id") or ""), body.get("evidence_id") or None)
     if path == "/api/write/assist":
         return assist(app, conn, doc, body)
+    if path == "/api/write/chat":
+        return chat(app, conn, doc, body)
     if path == "/api/write/assist/decide":
         return wassist.decide(conn, doc, str(body.get("suggestion") or ""), list(body.get("accepted") or []))
     if path == "/api/write/compile":
@@ -175,6 +178,40 @@ def install_tectonic_job(app: App, body: dict[str, Any]) -> Job:
         job.report = wc.install_tectonic(app.paths, job.messages.append)
 
     return app.start_job("tectonic-install", "", work)
+
+
+def chat(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str, Any]) -> Any:
+    """The assistant, like assist(): preview first, approval for a cloud route, then a job whose report is the
+    answer (and, for an edit of the selection, a suggestion to accept or reject)."""
+    history = body.get("history") if isinstance(body.get("history"), list) else []
+    args = (str(body.get("question") or ""), str(body.get("selection") or ""), str(body.get("context") or ""),
+            history)
+    req = wchat.prepare(conn, doc, *args)
+    gateway = app.make_gateway(conn)
+    preview = wchat.preview(gateway, req).model_dump()
+    sent = {"characters": len(req.question) + len(req.selection or str(body.get("context") or "")[:wchat.MAX_CONTEXT]),
+            "evidence": len(req.evidence)}
+    if preview["blocked_reason"]:
+        raise ValueError(f"the model route is blocked: {preview['blocked_reason']}")
+    approved = body.get("approved") is True
+    if preview["requires_approval"] and not approved:
+        return {"needs_approval": True, "preview": preview, "sent": sent}
+    file = str(body.get("file") or "main.tex")
+    wd.resolve_inside(doc.folder, file)
+    if any(j.kind == "writing-chat" and j.status == "running" and j.project == doc.id for j in app.jobs.values()):
+        raise ValueError("the assistant is still answering the last question")
+
+    def work(job: Job) -> None:
+        job.messages.append(f"Asking {preview['model'] or preview['profile']}…")
+        conn = app.db()
+        try:
+            job.report = wchat.run(conn, app.make_gateway(conn), doc, wchat.prepare(conn, doc, *args), file,
+                                   approved=approved)
+        finally:
+            conn.close()
+
+    job = app.start_job("writing-chat", doc.id, work)
+    return {**job.__dict__, "preview": preview, "sent": sent}
 
 
 def assist(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str, Any]) -> Any:

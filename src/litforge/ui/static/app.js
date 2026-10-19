@@ -2090,6 +2090,7 @@
   function openWriteDoc(id) {
     return api('/api/write/doc?doc=' + encodeURIComponent(id)).then(function (doc) {
       W.doc = doc;
+      resetChat();  // one conversation per open document
       $('write-home').hidden = true; $('write-editor').hidden = false;
       $('write-title').textContent = doc.name; $('write-title').dir = 'auto';
       var select = $('write-file');
@@ -2343,6 +2344,110 @@
       var first = menu.querySelector('button:not([disabled])');
       if (first) first.focus();
     });
+  }
+
+  /* Assistant: questions about the text and the project's papers; answers carry verified quotes; an edit of the
+     selection comes back as an ordinary suggestion (accept or reject). One conversation per open document. */
+  var CHAT = { turns: [], busy: false };
+
+  function chatContext(text, pos) {  // a few lines on each side of the cursor when nothing is selected
+    var lines = text.split('\n'), at = text.slice(0, pos).split('\n').length - 1;
+    return lines.slice(Math.max(0, at - 8), at + 9).join('\n').slice(0, 6000);
+  }
+
+  function resetChat() {
+    CHAT.turns = []; CHAT.busy = false;
+    $('write-chat-log').replaceChildren();
+    $('write-chat-status').textContent = '';
+  }
+
+  function toggleChat(open) {
+    var chat = $('write-chat');
+    chat.hidden = open === undefined ? !chat.hidden : !open;
+    $('write-chat-btn').setAttribute('aria-pressed', String(!chat.hidden));
+    if (!chat.hidden && $('write-chat-input').focus) $('write-chat-input').focus();
+  }
+
+  function addChatMessage(role, text, citations, flags) {
+    var msg = document.createElement('div');
+    msg.className = 'chat-msg ' + role;
+    var body = document.createElement('p');
+    body.className = 'chat-text'; body.dir = 'auto'; body.textContent = text;
+    msg.appendChild(body);
+    if (citations && citations.length) {
+      var sources = document.createElement('div');
+      sources.className = 'chat-sources';
+      citations.forEach(function (c) {
+        var src = document.createElement('div');
+        src.className = 'src'; src.dir = 'auto';
+        src.textContent = c.key + ' · p.' + c.page + ' · “' + c.quote + '”';
+        var insert = document.createElement('button');
+        insert.type = 'button'; insert.className = 'btn small'; insert.textContent = 'Insert \\cite';
+        insert.title = 'Cite ' + c.key + ' at the cursor';
+        insert.onclick = function () { return insertChatCitation(c); };
+        sources.appendChild(src); sources.appendChild(insert);
+      });
+      msg.appendChild(sources);
+    }
+    (flags || []).forEach(function (f) {
+      var p = document.createElement('p'); p.className = 'flag'; p.textContent = '⚠ ' + f; msg.appendChild(p);
+    });
+    $('write-chat-log').appendChild(msg);
+    if (msg.scrollIntoView) msg.scrollIntoView({ block: 'end' });
+    return msg;
+  }
+
+  function insertChatCitation(c) {
+    if (!W.doc || !W.editor) return Promise.resolve();
+    return post('/api/write/cite', { doc: W.doc.id, paper_id: c.paper_id, evidence_id: c.evidence_id || null })
+      .then(function (res) {
+        var edit = insertCiteKey(W.editor.getText(), W.editor.selection().to, res.key);
+        if (edit) W.editor.replace(edit.from, edit.to, edit.insert);
+      }).catch(function (e) { toast(e.message); });
+  }
+
+  function pollChat(job) {
+    return api('/api/jobs/' + encodeURIComponent(job.id)).then(function (j) {
+      if (j.status === 'running') {
+        return new Promise(function (resolve) { setTimeout(resolve, 800); }).then(function () { return pollChat(job); });
+      }
+      if (j.status === 'failed') throw new Error(j.error || 'The assistant could not answer');
+      return j.report;
+    });
+  }
+
+  function sendChat(approved) {
+    var input = $('write-chat-input'), question = input.value.trim();
+    if (!question || !W.doc || !W.editor || (CHAT.busy && !approved)) return Promise.resolve();
+    var doc = W.doc, file = W.file, sel = W.editor.selection(), text = W.editor.getText();
+    var range = sel.text ? { from: sel.from, to: sel.to, text: sel.text, doc: doc.id, file: file } : null;
+    var body = { doc: doc.id, question: question, selection: sel.text || '', context: sel.text ? '' : chatContext(text, sel.from),
+      history: CHAT.turns.slice(-8), file: file, approved: !!approved };
+    CHAT.busy = true;
+    $('write-chat-status').textContent = 'Preparing…';
+    return post('/api/write/chat', body).then(function (res) {
+      if (res.needs_approval) {
+        var p = res.preview;
+        var ok = window.confirm('Send your question, ' + res.sent.characters + ' characters of your text' +
+          (res.sent.evidence ? ' and ' + res.sent.evidence + ' passages from the papers' : '') + ' to ' + p.model + ' (' +
+          p.provider + ', cloud' + (p.max_cost_usd != null ? ', at most $' + p.max_cost_usd.toFixed(4) : '') + ')?');
+        if (!ok) { $('write-chat-status').textContent = 'Not sent.'; return null; }
+        return sendChat(true);
+      }
+      input.value = '';
+      addChatMessage('user', question);
+      CHAT.turns.push({ role: 'user', text: question });
+      $('write-chat-status').textContent = 'Asking ' + (res.preview.model || res.preview.profile) +
+        (res.preview.remote ? ' (cloud)' : ' (local)') + '…';
+      return pollChat(res).then(function (report) {
+        if (W.doc !== doc) return;  // another document is open now
+        addChatMessage('assistant', report.answer || '(no answer)', report.citations, report.flags);
+        CHAT.turns.push({ role: 'assistant', text: report.answer || '' });
+        $('write-chat-status').textContent = '';
+        if (report.suggestion && range && W.file === file) showWriteSuggestion(report.suggestion, range);
+      });
+    }).catch(function (e) { $('write-chat-status').textContent = e.message; })
+      .then(function (r) { CHAT.busy = false; return r; });
   }
 
   /* PDF viewer (PDF.js) and SyncTeX jumps. PDF positions are points from the page's top-left corner. */
@@ -3270,6 +3375,12 @@
     wireWriteGutter();
     wirePdfView();
     $('write-spell').onclick = function () { setSpell(!SPELL.on); };
+    $('write-chat-btn').onclick = function () { toggleChat(); };
+    $('write-chat-close').onclick = function () { toggleChat(false); };
+    $('write-chat-send').onclick = function () { sendChat(false); };
+    $('write-chat-input').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendChat(false); }
+    });
     $('write-version-save').onclick = saveNamedVersion;
     $('write-version-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') saveNamedVersion(); });
     $('write-version-against').onchange = function () { if (VERS.selected) selectVersion(VERS.selected); };
