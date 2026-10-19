@@ -476,3 +476,106 @@ test('a suggestion without changes says so', async () => {
   await ctx.runWriteAi('shorter', false);
   assert.ok($('write-suggestion-hunks').children.some(c => c.textContent === 'The model returned the text unchanged.'));
 });
+
+// ---------- Autocomplete (\ commands, \ref{ labels, \begin{ environments, \cite{ keys) ----------
+test('latexContext finds what is being completed before the cursor', () => {
+  const { ctx } = setup();
+  const c = s => { const r = ctx.latexContext(s); return r && { kind: r.kind, prefix: r.prefix, start: r.start }; };
+  assert.deepEqual(c('text \\sec'), { kind: 'command', prefix: 'sec', start: 5 });
+  assert.deepEqual(c('text \\'), { kind: 'command', prefix: '', start: 5 });
+  assert.equal(c('a line break \\\\'), null);  // \\ is a line break, not a command
+  assert.deepEqual(c('see \\ref{sec:mo'), { kind: 'ref', prefix: 'sec:mo', start: 9 });
+  assert.deepEqual(c('\\eqref{'), { kind: 'ref', prefix: '', start: 7 });
+  assert.deepEqual(c('\\begin{fi'), { kind: 'env', prefix: 'fi', start: 7 });
+  assert.deepEqual(c('\\cite{a, de'), { kind: 'cite', prefix: 'de', start: 9 });
+  assert.deepEqual(c('\\citep[p.~2]{'), { kind: 'cite', prefix: '', start: 13 });
+  assert.equal(c('plain words'), null);
+  assert.equal(c('\\cite{done} more'), null);
+});
+
+test('labels and own commands are read from the document text', () => {
+  const { ctx } = setup();
+  assert.deepEqual([...ctx.docLabels(['\\label{sec:a} x \\label{fig:b}', '\\label{sec:a}\\label{eq:c}'])],
+    ['sec:a', 'fig:b', 'eq:c']);
+  assert.deepEqual([...ctx.docCommands('\\newcommand{\\tvb}{TVB} \\newcommand\\R{\\mathbb{R}} \\renewcommand*{\\vec}[1]{x}')],
+    ['tvb', 'R', 'vec']);
+});
+
+test('command options: common LaTeX and xepersian commands plus the document\'s own, filtered by prefix', () => {
+  const { ctx } = setup();
+  const labels = ctx.commandOptions('sec', []).map(o => o.label);
+  assert.ok(labels.includes('\\section') && labels.includes('\\subsection') === false);
+  assert.ok(ctx.commandOptions('l', []).some(o => o.label === '\\lr'));
+  assert.ok(ctx.commandOptions('tv', ['tvb']).some(o => o.label === '\\tvb'));
+  assert.equal(ctx.commandOptions('section', [])[0].apply, '\\section{}');
+});
+
+test('choosing an environment adds the matching \\end and puts the cursor inside', () => {
+  const { ctx } = setup();
+  assert.ok(ctx.envOptions('fi').some(o => o.label === 'figure'));
+  const full = { text: 'itemize}\n  \n\\end{itemize}', cursor: 11 };
+  assert.deepEqual({ ...ctx.envReplacement('itemize', true, '') }, { ...full, consume: 0 });
+  // the editor auto-closes { with }: that brace is replaced, not taken as "already closed" (real run)
+  assert.deepEqual({ ...ctx.envReplacement('itemize', true, '}') }, { ...full, consume: 1 });
+  assert.deepEqual({ ...ctx.envReplacement('itemize', true, '}[t]') }, { text: 'itemize', cursor: 7, consume: 0 });
+  assert.deepEqual({ ...ctx.envReplacement('itemize', false, '}') }, { text: 'itemize', cursor: 7, consume: 0 });
+});
+
+test('cite options: keys in this document first, then library papers, then the full search', () => {
+  const { ctx } = setup();
+  const rows = [{ paper_id: 'p1', key: 'deco2012ongoing', title: 'Ongoing', year: 2012, authors: ['Deco, G.'] },
+                { paper_id: 'p2', key: null, title: 'Identification of optimal', year: 2014, authors: ['Deco, G.'] }];
+  const opts = ctx.citeOptions('de', ['deco2012ongoing', 'sanz2013'], rows);
+  assert.deepEqual([...opts.map(o => o.source)], ['document', 'library', 'search']);
+  assert.equal(opts[0].label, 'deco2012ongoing');
+  assert.match(opts[1].detail, /Deco.*2014/);
+  assert.equal(opts.at(-1).label, 'Search the library and evidence…');
+});
+
+test('typing \\cite{ no longer opens the large panel; the search row does', async () => {
+  const { ctx, $ } = setup();
+  await ctx.openWriteDoc('d1');
+  $('write-cite-panel').hidden = true;
+  const area = $('write-cm').children[0];
+  area.value = 'Text \\cite{'; area.setSelectionRange(11, 11); area.fire('input');
+  assert.equal($('write-cite-panel').hidden, true);
+  await ctx.applyCiteCompletion({ source: 'search' }, 11, 11);
+  assert.equal($('write-cite-panel').hidden, false);
+});
+
+test('a library paper chosen from the list is registered for references.bib and its key inserted', async () => {
+  const { ctx, $, calls } = setup({ post: url => (url === '/api/write/cite' ? { key: 'deco2014identification' } : null) });
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Text \\cite{de}'; area.setSelectionRange(13, 13);
+  await ctx.applyCiteCompletion({ source: 'library', paper_id: 'p2' }, 11, 13);
+  assert.equal(area.value, 'Text \\cite{deco2014identification}');
+  assert.equal(calls.find(c => c[0] === '/api/write/cite')[1].paper_id, 'p2');
+});
+
+test('labels from the document\'s other .tex files are available to \\ref{', async () => {
+  const { ctx } = setup({ get: url => {
+    if (url.startsWith('/api/write/doc?')) return { id: 'd1', name: 'Draft', pdf: false,
+      files: [{ name: 'main.tex', kind: 'text' }, { name: 'methods.tex', kind: 'text' }, { name: 'references.bib', kind: 'text' }] };
+    if (url.includes('name=methods.tex')) return { name: 'methods.tex', text: '\\section{M}\\label{sec:methods}', hash: 'm' };
+    return null;
+  } });
+  await ctx.openWriteDoc('d1');
+  await ctx.W.otherTextsLoading;
+  assert.deepEqual([...ctx.docLabels([ctx.W.editor.getText()].concat(ctx.W.otherTexts))], ['sec:methods']);
+});
+
+test('the key being typed is not offered as a key "in this document"', () => {
+  const { ctx } = setup();
+  const text = '\\cite{a} x \\cite{de}';
+  assert.deepEqual([...ctx.docCiteKeys(text, 18, 20)], ['a']);
+});
+
+test('library papers whose key or first author starts with the typed text come first', () => {
+  const { ctx } = setup();
+  const rows = [{ paper_id: 'p1', key: 'jirsa2017', title: 'Brain models', year: 2017, authors: ['Jirsa, V.'] },
+                { paper_id: 'p2', key: 'sanz2013', title: 'The Virtual Brain', year: 2013, authors: ['Sanz Leon, P.'] },
+                { paper_id: 'p3', key: null, title: 'Ongoing activity', year: 2012, authors: ['Deco, G.'] },
+                { paper_id: 'p4', key: 'deco2014', title: 'Identification', year: 2014, authors: ['Deco, G.'] }];
+  assert.deepEqual([...ctx.citeOptions('de', [], rows).map(o => o.paper_id || o.source)], ['p4', 'p3', 'p1', 'p2', 'search']);
+});

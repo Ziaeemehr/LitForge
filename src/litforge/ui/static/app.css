@@ -553,6 +553,16 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .write-cm .tok-punctuation, .write-cm .tok-bracket, .write-cm .tok-meta { color: var(--muted); }
 .write-cm .tok-comment { color: var(--cm-comment); font-style: italic; }
 .write-cm .tok-invalid { color: var(--bad); }
+/* Autocomplete list under the cursor; always left to right, also on Persian lines. */
+.write-cm .cm-tooltip-autocomplete { direction: ltr; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; box-shadow: var(--float); overflow: hidden; }
+.write-cm .cm-tooltip-autocomplete > ul { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px;
+  max-height: 16em; }
+.write-cm .cm-tooltip-autocomplete > ul > li { padding: 4px 10px; color: var(--ink); }
+.write-cm .cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--accent-soft); color: var(--ink); }
+.write-cm .cm-completionDetail { color: var(--muted); font-family: inherit; font-style: normal; margin-left: 8px;
+  font-size: 12px; }
+.write-cm .cm-completionMatchedText { text-decoration: none; font-weight: 600; }
 .write-cm .cm-ai-range { background: var(--accent-soft); border-radius: 3px; }
 .write-cm .write-fallback { width: 100%; height: 100%; border: 0; resize: none; padding: 8px; background: var(--panel);
   color: var(--ink); font-family: ui-monospace, Menlo, Consolas, monospace; }

@@ -406,7 +406,11 @@ in another editor. Start from the **English article** or **Persian article** tem
   their line; click one to jump to it. Install the engine once in Settings → Optional tools (Tectonic); the first
   compile downloads the LaTeX packages it needs (about two minutes), later compiles take about a second and work
   offline.
-- **Cite** (or type `\cite{`) searches the project's papers, or quotes in them under **Evidence**. The key is
+- **Completion.** A small list appears under the cursor while you type: LaTeX and `xepersian` commands after `\`
+  (with your own `\newcommand`s), the document's labels inside `\ref{`, environments inside `\begin{` (the
+  matching `\end` is added) and keys inside `\cite{`: the ones already in the document first, then the project's
+  papers. Enter or Tab picks, Esc closes; the last row of the `\cite{` list opens the full search.
+- **Cite** searches the project's papers, or quotes in them under **Evidence**. The key is
   inserted at the cursor (or added to the `\cite{...}` you are in) and the paper's entry is written to
   `references.bib`. Keys look like `lee2021brain` and never change once made. Entries you write yourself in
   `references.bib` are kept; LitForge rewrites only the block between its `% litforge:` markers. With the cursor

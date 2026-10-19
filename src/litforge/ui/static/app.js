@@ -1871,12 +1871,14 @@
         CM.lineNumbers(), CM.highlightActiveLineGutter(), CM.history(), CM.foldGutter(), CM.drawSelection(),
         CM.indentOnInput(), CM.bracketMatching(), CM.closeBrackets(), CM.highlightActiveLine(),
         CM.highlightSelectionMatches(), CM.StreamLanguage.define(CM.stex),
+        CM.autocompletion({ override: [latexCompletionSource], icons: false }),
         // Stable tok-* classes instead of the built-in palette, so app.css colours them for light and dark.
         CM.classHighlighter ? CM.syntaxHighlighting(CM.classHighlighter) :
           CM.syntaxHighlighting(CM.defaultHighlightStyle, { fallback: true }),
         CM.EditorView.lineWrapping, CM.EditorView.perLineTextDirection.of(true), autoDirection(CM),
         CM.keymap.of([{ key: 'Mod-s', run: function () { handlers.blur(); return true; } },
-          { key: 'Mod-Enter', run: function () { handlers.compile(); return true; } }]
+          { key: 'Mod-Enter', run: function () { handlers.compile(); return true; } },
+          { key: 'Tab', run: CM.acceptCompletion }]  // only when the list is open; otherwise Tab indents
           .concat(CM.searchKeymap, CM.historyKeymap, [CM.indentWithTab], CM.defaultKeymap)),
         CM.EditorView.updateListener.of(function (u) {
           if (u.docChanged) handlers.change();
@@ -2087,6 +2089,7 @@
             change: writeChanged, blur: function () { if (W.dirty) saveWriteNow(); }, compile: compileWrite
           });
           writeSaveState('Saved');
+          loadOtherTexts();
           return true;
         });
     };
@@ -2094,9 +2097,21 @@
       .catch(function (e) { toast(e.message); return false; });
   }
 
+  // The other .tex files of the document, read once per file switch, so \ref{ also offers their labels.
+  function loadOtherTexts() {
+    var doc = W.doc, names = (doc.files || []).filter(function (f) {
+      return f.kind === 'text' && /\.tex$/i.test(f.name) && f.name !== W.file;
+    }).map(function (f) { return f.name; });
+    W.otherTexts = [];
+    W.otherTextsLoading = Promise.all(names.map(function (name) {
+      return api('/api/write/file?doc=' + encodeURIComponent(doc.id) + '&name=' + encodeURIComponent(name))
+        .then(function (f) { return f.text; }).catch(function () { return ''; });
+    })).then(function (texts) { if (W.doc === doc) W.otherTexts = texts; });
+    return W.otherTextsLoading;
+  }
+
   function writeChanged() {
     W.dirty = true;
-    maybeOpenCiteFromTyping();
     writeSaveState('Edited');
     clearTimeout(W.timer);
     W.timer = setTimeout(saveWriteNow, W.SAVE_DELAY);
@@ -2418,11 +2433,167 @@
       }).catch(function (e) { toast(e.message); });
   }
 
-  function maybeOpenCiteFromTyping() {
-    if (!W.editor) return;
-    var sel = W.editor.selection();
-    var before = W.editor.getText().slice(Math.max(0, sel.from - 12), sel.from);
-    if (/\\[a-zA-Z]*cite[a-zA-Z]*\{$/.test(before) && $('write-cite-panel').hidden) openWriteCite();
+  /* Autocomplete: a small list under the cursor after \, inside \ref{, \begin{ and \cite{. Offline, no model. */
+  var LATEX_COMMANDS = [
+    ['section', 1], ['subsection', 1], ['subsubsection', 1], ['paragraph', 1], ['section*', 1], ['subsection*', 1],
+    ['cite', 1], ['citep', 1], ['citet', 1], ['ref', 1], ['eqref', 1], ['autoref', 1], ['label', 1],
+    ['textbf', 1], ['textit', 1], ['emph', 1], ['texttt', 1], ['underline', 1], ['footnote', 1], ['url', 1],
+    ['href', 2], ['includegraphics', 1], ['caption', 1], ['centering', 0], ['item', 0], ['frac', 2], ['sqrt', 1],
+    ['mathbf', 1], ['mathrm', 1], ['mathcal', 1], ['left', 0], ['right', 0], ['alpha', 0], ['beta', 0],
+    ['gamma', 0], ['delta', 0], ['epsilon', 0], ['lambda', 0], ['mu', 0], ['sigma', 0], ['tau', 0], ['omega', 0],
+    ['sum', 0], ['int', 0], ['partial', 0], ['dot', 1], ['hat', 1], ['bar', 1], ['vec', 1], ['cdot', 0],
+    ['times', 0], ['leq', 0], ['geq', 0], ['approx', 0], ['infty', 0], ['title', 1], ['author', 1], ['date', 1],
+    ['maketitle', 0], ['tableofcontents', 0], ['bibliography', 1], ['bibliographystyle', 1], ['usepackage', 1],
+    ['newcommand', 2], ['input', 1], ['include', 1], ['hline', 0], ['newline', 0], ['noindent', 0],
+    ['vspace', 1], ['hspace', 1], ['begin', 1], ['end', 1],
+    // xepersian
+    ['lr', 1], ['rl', 1], ['latin', 1], ['persian', 1], ['settextfont', 1], ['setlatintextfont', 1]];
+  var LATEX_ENVS = ['figure', 'figure*', 'table', 'table*', 'tabular', 'equation', 'equation*', 'align', 'align*',
+    'itemize', 'enumerate', 'description', 'abstract', 'center', 'quote', 'minipage', 'thebibliography',
+    'document', 'latin', 'persian'];
+
+  // What is being completed just before the cursor (`before` is the line up to the cursor), or null.
+  function latexContext(before) {
+    var m = /\\[a-zA-Z]*cite[a-zA-Z]*\*?(?:\[[^\]]*\])*\{([^{}]*)$/.exec(before);
+    if (m) {
+      var prefix = m[1].split(',').pop().replace(/^\s+/, '');
+      return { kind: 'cite', prefix: prefix, start: before.length - prefix.length };
+    }
+    if ((m = /\\(?:ref|eqref|autoref|cref|Cref|pageref|nameref)\{([^{}]*)$/.exec(before))) {
+      return { kind: 'ref', prefix: m[1], start: before.length - m[1].length };
+    }
+    if ((m = /\\(begin|end)\{([a-zA-Z*]*)$/.exec(before))) {
+      return { kind: 'env', prefix: m[2], start: before.length - m[2].length, begin: m[1] === 'begin' };
+    }
+    if ((m = /(^|[^\\])\\([a-zA-Z]*)$/.exec(before))) {  // not after another backslash (\\ is a line break)
+      return { kind: 'command', prefix: m[2], start: before.length - m[2].length - 1 };
+    }
+    return null;
+  }
+
+  function uniqueMatches(texts, re) {
+    var seen = [];
+    texts.forEach(function (t) {
+      var m; re.lastIndex = 0;
+      while ((m = re.exec(t))) { if (seen.indexOf(m[1]) < 0) seen.push(m[1]); }
+    });
+    return seen;
+  }
+  function docLabels(texts) { return uniqueMatches(texts, /\\label\{([^{}]+)\}/g); }
+  function docCommands(text) {
+    return uniqueMatches([text], /\\(?:re)?newcommand\*?\s*\{?\s*\\([a-zA-Z]+)/g);
+  }
+
+  function commandOptions(prefix, own) {
+    var out = [];
+    LATEX_COMMANDS.forEach(function (c) {
+      if (c[0].indexOf(prefix) !== 0) return;
+      var args = new Array(c[1] + 1).join('{}');
+      out.push({ label: '\\' + c[0], apply: '\\' + c[0] + args, back: c[1] ? 2 * c[1] - 1 : 0 });
+    });
+    own.forEach(function (name) {
+      if (name.indexOf(prefix) !== 0 || out.some(function (o) { return o.label === '\\' + name; })) return;
+      out.push({ label: '\\' + name, apply: '\\' + name, back: 0, detail: 'this document' });
+    });
+    return out;
+  }
+
+  function envOptions(prefix) {
+    return LATEX_ENVS.filter(function (e) { return e.indexOf(prefix) === 0; }).map(function (e) { return { label: e }; });
+  }
+
+  // What replaces the typed environment name (`after` is the rest of the line). After \begin{ the matching \end
+  // is added and the cursor goes inside, also when the editor's own auto-closed } is all that follows (it is
+  // replaced: `consume`). When more follows, or after \end{, only the name is completed.
+  function envReplacement(name, isBegin, after) {
+    if (!isBegin || (after !== '' && after !== '}')) return { text: name, cursor: name.length, consume: 0 };
+    return { text: name + '}\n  \n\\end{' + name + '}', cursor: name.length + 4, consume: after.length };
+  }
+
+  function citeOptions(prefix, docKeys, rows) {
+    var p = prefix.toLowerCase(), out = [];
+    docKeys.forEach(function (k) {
+      if (k.toLowerCase().indexOf(p) >= 0) out.push({ label: k, detail: 'in this document', source: 'document' });
+    });
+    var rank = function (r) {  // key, then first author's surname, starting with the typed text
+      var who = (r.authors && r.authors[0] || '').toLowerCase();
+      return (r.key || '').toLowerCase().indexOf(p) === 0 ? 0 : who.indexOf(p) === 0 ? 1 : 2;
+    };
+    rows = rows.map(function (r, i) { return { r: r, i: i }; })
+      .sort(function (a, b) { return rank(a.r) - rank(b.r) || a.i - b.i; }).map(function (x) { return x.r; });
+    rows.forEach(function (r) {
+      if (r.key && docKeys.indexOf(r.key) >= 0) return;
+      var who = (r.authors && r.authors[0] || '').split(',')[0];
+      out.push({ label: r.key || (who.toLowerCase().replace(/[^a-z]/g, '') + (r.year || '')), source: 'library',
+        paper_id: r.paper_id, detail: who + (r.year ? ' ' + r.year : '') + ' · ' + (r.title || '') });
+    });
+    out.push({ label: 'Search the library and evidence…', source: 'search' });
+    return out;
+  }
+
+  // Apply a chosen \cite{ entry to the text between from and to (the typed part of the key).
+  function applyCiteCompletion(opt, from, to) {
+    if (opt.source === 'search') {
+      if (W.editor) W.editor.replace(from, to, '');
+      return $('write-cite-panel').hidden ? openWriteCite() : Promise.resolve();
+    }
+    if (opt.source === 'document') { W.editor.replace(from, to, opt.label); return Promise.resolve(); }
+    return post('/api/write/cite', { doc: W.doc.id, paper_id: opt.paper_id, evidence_id: null })
+      .then(function (res) { W.editor.replace(from, to, res.key); })
+      .catch(function (e) { toast(e.message); });
+  }
+
+  // CodeMirror completion source built on the functions above.
+  function latexCompletionSource(context) {
+    var line = context.state.doc.lineAt(context.pos);
+    var c = latexContext(line.text.slice(0, context.pos - line.from));
+    if (!c) return null;
+    var from = line.from + c.start, text = context.state.doc.toString();
+    var put = function (insert, cursor) {
+      return function (view, completion, f, t) {
+        view.dispatch({ changes: { from: f, to: t, insert: insert }, selection: { anchor: f + cursor } });
+      };
+    };
+    if (c.kind === 'command') {
+      return { from: from, validFor: /^\\[a-zA-Z*]*$/, options: commandOptions(c.prefix, docCommands(text)).map(function (o) {
+        return { label: o.label, detail: o.detail, type: 'keyword', apply: put(o.apply, o.apply.length - o.back) };
+      }) };
+    }
+    if (c.kind === 'ref') {
+      return { from: from, validFor: /^[^{}]*$/, options: docLabels([text].concat(W.otherTexts || [])).map(function (l) {
+        return { label: l, type: 'variable' };
+      }) };
+    }
+    if (c.kind === 'env') {
+      return { from: from, validFor: /^[a-zA-Z*]*$/, options: envOptions(c.prefix).map(function (o) {
+        return { label: o.label, type: 'type', apply: function (view, completion, f, t) {
+          var ins = envReplacement(o.label, c.begin, view.state.sliceDoc(t, view.state.doc.lineAt(t).to).trimEnd());
+          put(ins.text, ins.cursor)(view, completion, f, t + ins.consume);
+        } };
+      }) };
+    }
+    var doc = W.doc;
+    return api('/api/write/cite/search?doc=' + encodeURIComponent(doc.id) + '&tab=library&q=' + encodeURIComponent(c.prefix))
+      .catch(function () { return { results: [] }; })
+      .then(function (data) {
+        var keys = docCiteKeys(text, from, context.pos);
+        return { from: from, filter: false, options: citeOptions(c.prefix, keys, data.results || []).map(function (o) {
+          return { label: o.label, detail: o.detail, type: o.source === 'search' ? 'text' : 'constant',
+            apply: function (view, completion, f, t) { applyCiteCompletion(o, f, t); } };
+        }) };
+      });
+  }
+
+  // Keys cited in the document, leaving out the one being typed between from and to.
+  function docCiteKeys(text, from, to) { return citedKeysIn(text.slice(0, from) + text.slice(to)); }
+
+  function citedKeysIn(text) {
+    var keys = [];
+    text.replace(/\\[a-zA-Z]*cite[a-zA-Z]*\*?(?:\[[^\]]*\])*\{([^{}]*)\}/g, function (all, list) {
+      list.split(',').forEach(function (k) { k = k.trim(); if (k && keys.indexOf(k) < 0) keys.push(k); });
+      return all;
+    });
+    return keys;
   }
 
   var AI = { pending: null };
