@@ -327,7 +327,8 @@ def restore_snapshot(conn: sqlite3.Connection, doc: Document, snap_id: str) -> l
         # Read first: the safety snapshot below may rotate this (oldest) snapshot away.
         contents = {name: path.read_bytes() for name in meta.get("files", [])
                     if (path := resolve_inside(source, name)).is_file()}
-        create_snapshot(doc, f"before restoring {snap_id}")
+        when = str(meta.get("created_at") or snap_id).replace("T", " ")[:16]
+        create_snapshot(doc, f"before restoring the version of {when}")
         restored = []
         for name, data in contents.items():
             _atomic_write(resolve_inside(doc.folder, name), data)

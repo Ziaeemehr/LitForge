@@ -221,3 +221,13 @@ def test_version_diff_and_summaries(env) -> None:
     assert sum(len(h["lines"]) for h in diff["hunks"]) == 4000
     empty = wd.diff_versions(doc, "current", old, "missing.tex")
     assert empty["hunks"] == []
+
+
+def test_the_safety_version_names_the_restored_version_by_its_time(env) -> None:
+    conn, paths = env
+    doc = wd.create_document(conn, paths, "demo", "Notes", "article")
+    first = wd.create_snapshot(doc, "auto")
+    created = next(s for s in wd.list_snapshots(doc) if s["id"] == first)["created_at"]
+    wd.restore_snapshot(conn, doc, first)
+    note = wd.list_snapshots(doc)[0]["note"]
+    assert note == "before restoring the version of " + created.replace("T", " ")[:16]
