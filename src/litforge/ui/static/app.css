@@ -623,7 +623,7 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .ver-row.on { background: var(--accent-soft); }
 .ver-row.named .ver-label { font-weight: 600; }
 .ver-label { flex: 1; min-width: 0; }
-.ver-chip { margin-inline-start: 8px; color: var(--muted); font-weight: 400; font-family: ui-monospace, Menlo, monospace; }
+.ver-chip { white-space: nowrap; margin-inline-start: 8px; color: var(--muted); font-weight: 400; font-family: ui-monospace, Menlo, monospace; }
 .ver-diff { overflow: auto; max-height: 42vh; border: 1px solid var(--line); border-radius: 8px; padding: 6px 0;
   font-family: ui-monospace, Menlo, Consolas, "Vazirmatn", monospace; font-size: 12.5px; line-height: 1.6; }
 .ver-diff .diff-hunk { color: var(--muted); padding: 4px 10px 2px; font-size: 11px; border-top: 1px solid var(--line); }

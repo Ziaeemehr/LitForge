@@ -957,3 +957,34 @@ test('naming an existing version sends the new name and refreshes the list', asy
   assert.deepEqual({ ...calls.find(c => c[0] === '/api/write/snapshot/name')[1] }, { doc: 'd1', snapshot: 's9', name: 'Draft 2' });
   assert.ok(calls.some(c => c[0] === 'GET' && c[1].startsWith('/api/write/snapshots')));
 });
+
+test('by default a version is compared with the one before it, matching its change counts', async () => {
+  const { ctx, $, calls } = setup({ get: url => (url.startsWith('/api/write/diff') ? { file: 'main.tex', hunks: [] } : null) });
+  await ctx.openWriteDoc('d1');
+  ctx.VERS.list = [{ id: 's3' }, { id: 's2' }, { id: 's1' }];  // newest first
+  $('write-version-against').value = 'previous';
+  await ctx.selectVersion('s2');
+  assert.ok(calls.some(c => c[0] === 'GET' && c[1] === '/api/write/diff?doc=d1&a=s1&b=s2&file=main.tex'));
+  await ctx.selectVersion('s1');  // the oldest has nothing before it: compared with the current text
+  assert.ok(calls.some(c => c[0] === 'GET' && c[1] === '/api/write/diff?doc=d1&a=s1&b=current&file=main.tex'));
+  $('write-version-against').value = 'current';
+  await ctx.selectVersion('s3');
+  assert.ok(calls.some(c => c[0] === 'GET' && c[1] === '/api/write/diff?doc=d1&a=s3&b=current&file=main.tex'));
+});
+
+test('opening Versions selects the newest version that changed something', async () => {
+  const { ctx, $, calls } = setup({ get: url => {
+    if (url.startsWith('/api/write/snapshots')) return { snapshots: [
+      { id: 's3', created_at: '2026-10-19T12:00:00', added: 0, removed: 0 },
+      { id: 's2', created_at: '2026-10-19T11:00:00', added: 3, removed: 1 },
+      { id: 's1', created_at: '2026-10-19T10:00:00', added: 9, removed: 0 }] };
+    if (url.startsWith('/api/write/diff')) return { file: 'main.tex', hunks: [] };
+    return null;
+  } });
+  await ctx.openWriteDoc('d1');
+  $('write-versions').hidden = true;
+  $('write-version-against').value = 'previous';
+  await ctx.showWriteVersions();
+  assert.equal(ctx.VERS.selected, 's2');
+  assert.ok(calls.some(c => c[0] === 'GET' && c[1] === '/api/write/diff?doc=d1&a=s1&b=s2&file=main.tex'));
+});

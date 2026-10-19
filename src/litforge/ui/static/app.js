@@ -2551,7 +2551,8 @@
     if (!box.hidden) { box.hidden = true; return Promise.resolve(); }
     return saveWriteNow().then(loadVersions).then(function () {
       box.hidden = false;
-      if (VERS.list.length) return selectVersion(VERS.list[0].id);
+      var changed = VERS.list.filter(function (v) { return v.added || v.removed; })[0] || VERS.list[0];
+      if (changed) return selectVersion(changed.id);
     }).catch(function (e) { toast(e.message); });
   }
 
@@ -2583,24 +2584,28 @@
         var none = document.createElement('li'); none.textContent = 'No versions yet; they are kept as you save.';
         list.appendChild(none);
       }
-      var against = $('write-version-against'), keep = against.value || 'current';
-      var opts = [['current', 'Current text']].concat(VERS.list.map(function (s) { return [s.id, versionLabel(s)]; }));
+      var against = $('write-version-against'), keep = against.value || 'previous';
+      var opts = [['previous', 'The version before it'], ['current', 'Current text']].concat(VERS.list.map(function (s) { return [s.id, versionLabel(s)]; }));
       against.replaceChildren.apply(against, opts.map(function (o) {
         var opt = document.createElement('option'); opt.value = o[0]; opt.textContent = o[1]; return opt;
       }));
-      against.value = opts.some(function (o) { return o[0] === keep; }) ? keep : 'current';
+      against.value = opts.some(function (o) { return o[0] === keep; }) ? keep : 'previous';
     });
   }
 
   // The differences between version `id` and the "Compare with" choice (the current text by default).
   function selectVersion(id) {
     VERS.selected = id;
-    var against = $('write-version-against').value || 'current';
+    var against = $('write-version-against').value || 'current', a = id, b = against;
+    if (against === 'previous') {  // what changed in this version: the one before it → this one
+      var at = VERS.list.map(function (s) { return s.id; }).indexOf(id), before = VERS.list[at + 1];
+      if (at >= 0 && before) { a = before.id; b = id; } else { b = 'current'; }
+    }
     (document.querySelectorAll('#write-version-list .ver-row') || []).forEach(function (row, i) {
       row.classList.toggle('on', VERS.list[i] && VERS.list[i].id === id);
     });
-    return api('/api/write/diff?doc=' + encodeURIComponent(W.doc.id) + '&a=' + encodeURIComponent(id) + '&b=' +
-      encodeURIComponent(against) + '&file=' + encodeURIComponent(W.file)).then(function (d) {
+    return api('/api/write/diff?doc=' + encodeURIComponent(W.doc.id) + '&a=' + encodeURIComponent(a) + '&b=' +
+      encodeURIComponent(b) + '&file=' + encodeURIComponent(W.file)).then(function (d) {
       var target = $('write-version-diff'), box = renderDiff(d);
       target.replaceChildren.apply(target, box.children);
     }).catch(function (e) { toast(e.message); });
