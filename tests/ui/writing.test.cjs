@@ -988,3 +988,47 @@ test('opening Versions selects the newest version that changed something', async
   assert.equal(ctx.VERS.selected, 's2');
   assert.ok(calls.some(c => c[0] === 'GET' && c[1] === '/api/write/diff?doc=d1&a=s1&b=s2&file=main.tex'));
 });
+
+// Review (Codex) of the Versions panel: late replies, file switches, refreshed lists.
+test('a late difference reply for an earlier selection is not shown', async () => {
+  const pending = [];
+  const { ctx, $ } = setup({ get: url => (url.startsWith('/api/write/diff') ? new Promise(r => pending.push(r)) : null) });
+  await ctx.openWriteDoc('d1');
+  $('write-version-against').value = 'current';
+  const first = ctx.selectVersion('a'), second = ctx.selectVersion('b');
+  pending[1]({ file: 'main.tex', hunks: [{ a_start: 1, a_lines: 1, b_start: 1, b_lines: 1, lines: [{ op: '+', text: 'B' }] }] });
+  await second;
+  pending[0]({ file: 'main.tex', hunks: [] });
+  await first;
+  assert.equal($('write-version-diff').children[1].textContent, 'B');
+});
+
+test('switching files closes the Versions panel', async () => {
+  const { ctx, $ } = setup();
+  await ctx.openWriteDoc('d1');
+  $('write-versions').hidden = false;
+  await ctx.openWriteFile('main.tex', true);
+  assert.equal($('write-versions').hidden, true);
+});
+
+test('after saving a named version its differences are shown', async () => {
+  const { ctx, $, calls } = setup({
+    get: url => (url.startsWith('/api/write/snapshots') ? { snapshots: [{ id: 'new' }, { id: 'old' }] } :
+      url.startsWith('/api/write/diff') ? { file: 'main.tex', hunks: [] } : null),
+    post: url => (url === '/api/write/snapshot' ? { id: 'new' } : null) });
+  await ctx.openWriteDoc('d1');
+  $('write-version-against').value = 'previous';
+  $('write-version-name').value = 'Named';
+  await ctx.saveNamedVersion();
+  assert.ok(calls.some(c => c[0] === 'GET' && c[1] === '/api/write/diff?doc=d1&a=old&b=new&file=main.tex'));
+});
+
+test('when the compared version is gone after a refresh, the differences are fetched again', async () => {
+  const { ctx, $, calls } = setup({ get: url => (url.startsWith('/api/write/snapshots') ? { snapshots: [{ id: 's2' }, { id: 's1' }] } :
+    url.startsWith('/api/write/diff') ? { file: 'main.tex', hunks: [] } : null) });
+  await ctx.openWriteDoc('d1');
+  ctx.VERS.selected = 's2';
+  $('write-version-against').value = 'removed-version';
+  await ctx.loadVersions();
+  assert.ok(calls.some(c => c[0] === 'GET' && c[1] === '/api/write/diff?doc=d1&a=s1&b=s2&file=main.tex'));
+});

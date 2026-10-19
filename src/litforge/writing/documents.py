@@ -29,7 +29,7 @@ MAX_TEXT_BYTES = 5 * 1024 * 1024
 SNAPSHOT_EVERY_S = 120
 SNAPSHOT_KEEP = 30
 _SAFE_PART = re.compile(r"^[^\x00-\x1f/\\:*?\"<>|]+$")
-_locks: dict[str, threading.Lock] = {}
+_locks: dict[str, threading.RLock] = {}  # reentrant: a restore takes a safety snapshot while holding it
 _locks_guard = threading.Lock()
 
 
@@ -64,9 +64,9 @@ class Document:
                 "updated_at": self.updated_at}
 
 
-def _lock(doc_id: str) -> threading.Lock:
+def _lock(doc_id: str) -> threading.RLock:
     with _locks_guard:
-        return _locks.setdefault(doc_id, threading.Lock())
+        return _locks.setdefault(doc_id, threading.RLock())
 
 
 def text_hash(data: bytes) -> str:
@@ -277,18 +277,20 @@ def _text_files(doc: Document) -> list[str]:
 
 
 def create_snapshot(doc: Document, note: str = "", name: str = "") -> str:
-    snap_id = time.strftime("%Y%m%dT%H%M%S") + f"-{time.time_ns() % 1_000_000_000:09d}"
-    target = _snapshot_dir(doc) / snap_id
-    target.mkdir()
-    files = _text_files(doc)
-    for file_name in files:
-        dest = target / file_name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(resolve_inside(doc.folder, file_name), dest)
-    meta = {"created_at": now(), "note": note, "name": _clean_version_name(name), "files": files}
-    (target / ".meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
-    _rotate(doc)
-    return snap_id
+    # Under the document's lock: rotation must not remove a version that is being named, read or restored.
+    with _lock(doc.id):
+        snap_id = time.strftime("%Y%m%dT%H%M%S") + f"-{time.time_ns() % 1_000_000_000:09d}"
+        target = _snapshot_dir(doc) / snap_id
+        target.mkdir()
+        files = _text_files(doc)
+        for file_name in files:
+            dest = target / file_name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(resolve_inside(doc.folder, file_name), dest)
+        meta = {"created_at": now(), "note": note, "name": _clean_version_name(name), "files": files}
+        (target / ".meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        _rotate(doc)
+        return snap_id
 
 
 def _maybe_snapshot(doc: Document) -> None:
@@ -370,15 +372,61 @@ def version_text(doc: Document, version: str, name: str) -> str:
     return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
 
 
+def _line_opcodes(left: list[str], right: list[str]) -> list[tuple[str, int, int, int, int]]:
+    """difflib opcodes for two lists of lines, fast on long files: the common start and end are taken out first
+    (edits are usually local), so the quadratic matcher only sees the changed middle; a very large middle uses
+    difflib's junk heuristic, which stays fast at some cost in precision."""
+    start = 0
+    while start < len(left) and start < len(right) and left[start] == right[start]:
+        start += 1
+    end = 0
+    while end < len(left) - start and end < len(right) - start and left[-1 - end] == right[-1 - end]:
+        end += 1
+    mid_a, mid_b = left[start:len(left) - end], right[start:len(right) - end]
+    ops: list[tuple[str, int, int, int, int]] = [("equal", 0, start, 0, start)] if start else []
+    if mid_a or mid_b:
+        big = len(mid_a) * len(mid_b) > 4_000_000
+        for tag, i, j, k, m in difflib.SequenceMatcher(None, mid_a, mid_b, autojunk=big).get_opcodes():
+            ops.append((tag, i + start, j + start, k + start, m + start))
+    if end:
+        ops.append(("equal", len(left) - end, len(left), len(right) - end, len(right)))
+    return ops
+
+
+def _grouped(ops: list[tuple[str, int, int, int, int]], context: int) -> list[list[tuple[str, int, int, int, int]]]:
+    """difflib.SequenceMatcher.get_grouped_opcodes for a ready list of opcodes."""
+    if not ops or all(op[0] == "equal" for op in ops):
+        return []
+    codes = list(ops)
+    tag, i1, i2, j1, j2 = codes[0]
+    if tag == "equal":
+        codes[0] = (tag, max(i1, i2 - context), i2, max(j1, j2 - context), j2)
+    tag, i1, i2, j1, j2 = codes[-1]
+    if tag == "equal":
+        codes[-1] = (tag, i1, min(i2, i1 + context), j1, min(j2, j1 + context))
+    groups: list[list[tuple[str, int, int, int, int]]] = []
+    group: list[tuple[str, int, int, int, int]] = []
+    for tag, i1, i2, j1, j2 in codes:
+        if tag == "equal" and i2 - i1 > context * 2:
+            group.append((tag, i1, min(i2, i1 + context), j1, min(j2, j1 + context)))
+            groups.append(group)
+            group = []
+            i1, j1 = max(i1, i2 - context), max(j1, j2 - context)
+        group.append((tag, i1, i2, j1, j2))
+    if group and not (len(group) == 1 and group[0][0] == "equal"):
+        groups.append(group)
+    return groups
+
+
 def diff_versions(doc: Document, a: str, b: str, name: str = "main.tex", context: int = 3) -> dict[str, Any]:
     left = version_text(doc, a, name).splitlines()
     right = version_text(doc, b, name).splitlines()
-    matcher = difflib.SequenceMatcher(None, left, right, autojunk=False)
-    added, removed = _change_counts(matcher)
+    ops = _line_opcodes(left, right)
+    added, removed = _change_counts(ops)
     hunks: list[dict[str, Any]] = []
     total = 0
     truncated = False
-    for group in matcher.get_grouped_opcodes(max(0, context)):
+    for group in _grouped(ops, max(0, context)):
         first, last = group[0], group[-1]
         a_lines, b_lines = last[2] - first[1], last[4] - first[3]
         hunk: dict[str, Any] = {
@@ -406,9 +454,9 @@ def diff_versions(doc: Document, a: str, b: str, name: str = "main.tex", context
             "truncated": truncated, "hunks": hunks}
 
 
-def _change_counts(matcher: difflib.SequenceMatcher[str]) -> tuple[int, int]:
+def _change_counts(ops: list[tuple[str, int, int, int, int]]) -> tuple[int, int]:
     added = removed = 0
-    for tag, i, j, k, end in matcher.get_opcodes():
+    for tag, i, j, k, end in ops:
         if tag != "equal":
             added += end - k
             removed += j - i
@@ -416,6 +464,11 @@ def _change_counts(matcher: difflib.SequenceMatcher[str]) -> tuple[int, int]:
 
 
 def snapshot_summaries(doc: Document) -> list[dict[str, Any]]:
+    with _lock(doc.id):  # rotation cannot remove a version between listing and reading it
+        return _summaries(doc)
+
+
+def _summaries(doc: Document) -> list[dict[str, Any]]:
     snapshots = list_snapshots(doc)
     older: dict[str, str] = {}
     for snapshot in reversed(snapshots):
@@ -425,8 +478,7 @@ def snapshot_summaries(doc: Document) -> list[dict[str, Any]]:
         for name in texts.keys() | older.keys():
             before, after = older.get(name, ""), texts.get(name, "")
             if before != after:
-                counts = _change_counts(difflib.SequenceMatcher(None, before.splitlines(), after.splitlines(),
-                                                               autojunk=False))
+                counts = _change_counts(_line_opcodes(before.splitlines(), after.splitlines()))
                 added += counts[0]
                 removed += counts[1]
         snapshot.update(added=added, removed=removed)

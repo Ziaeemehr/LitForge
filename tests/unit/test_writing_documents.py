@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 from pathlib import Path
 
@@ -231,3 +232,51 @@ def test_the_safety_version_names_the_restored_version_by_its_time(env) -> None:
     wd.restore_snapshot(conn, doc, first)
     note = wd.list_snapshots(doc)[0]["note"]
     assert note == "before restoring the version of " + created.replace("T", " ")[:16]
+
+
+def test_diff_of_a_repetitive_file_is_fast_and_exact(env) -> None:
+    import time as _time
+    conn, paths = env
+    doc = wd.create_document(conn, paths, "demo", "Repeats", "article")
+    lines = ["x"] * 8000
+    (doc.folder / "main.tex").write_text("\n".join(lines))
+    old = wd.create_snapshot(doc, "auto")
+    lines[4000] = "changed"
+    (doc.folder / "main.tex").write_text("\n".join(lines))
+    started = _time.monotonic()
+    diff = wd.diff_versions(doc, old, "current")
+    summaries = wd.snapshot_summaries(doc)
+    assert _time.monotonic() - started < 1.0
+    assert (diff["added"], diff["removed"]) == (1, 1)
+    assert diff["hunks"][0]["a_start"] == 3998 and [ln["op"] for ln in diff["hunks"][0]["lines"]].count("+") == 1
+    assert summaries[0]["id"] == old
+
+
+def test_snapshots_and_names_do_not_race_with_rotation(env, monkeypatch) -> None:
+    import threading as _threading
+    conn, paths = env
+    doc = wd.create_document(conn, paths, "demo", "Race", "article")
+    monkeypatch.setattr(wd, "SNAPSHOT_KEEP", 2)
+    ids = [wd.create_snapshot(doc, "auto") for _ in range(2)]
+    errors: list[BaseException] = []
+
+    def churn() -> None:
+        try:
+            for _ in range(30):
+                wd.create_snapshot(doc, "auto")
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    worker = _threading.Thread(target=churn)
+    worker.start()
+    named = False
+    with contextlib.suppress(wd.DocumentError):  # rotated away before it was named: acceptable
+        wd.name_snapshot(doc, ids[1], "keep me")
+        named = True
+    for _ in range(10):
+        wd.snapshot_summaries(doc)  # never fails while versions are created and removed
+    worker.join()
+    assert not errors
+    # once named, a version is never rotated away
+    assert (doc.folder / ".snapshots" / ids[1]).exists() == named
+    assert [s["id"] for s in wd.list_snapshots(doc) if s["name"]] == ([ids[1]] if named else [])

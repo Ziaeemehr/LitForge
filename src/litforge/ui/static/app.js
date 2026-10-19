@@ -2118,6 +2118,7 @@
       return api('/api/write/file?doc=' + encodeURIComponent(W.doc.id) + '&name=' + encodeURIComponent(name))
         .then(function (file) {
           dropWriteSuggestion();
+          $('write-versions').hidden = true; VERS.selected = null;  // versions belong to the file that was open
           if (W.editor) W.editor.destroy();
           W.file = file.name; W.hash = file.hash; W.dirty = false; W.conflictHash = null;
           $('write-file').value = file.name;
@@ -2535,7 +2536,7 @@
   }
 
   /* Versions: the automatic versions kept while saving, named versions, and what changed. */
-  var VERS = { selected: null, list: [] };
+  var VERS = { selected: null, list: [], request: 0 };
 
   function versionLabel(s) {
     return String(s.created_at || s.id).replace('T', ' ').slice(0, 19) + ((s.name || s.note) ? ' · ' + (s.name || s.note) : '');
@@ -2589,7 +2590,10 @@
       against.replaceChildren.apply(against, opts.map(function (o) {
         var opt = document.createElement('option'); opt.value = o[0]; opt.textContent = o[1]; return opt;
       }));
-      against.value = opts.some(function (o) { return o[0] === keep; }) ? keep : 'previous';
+      var still = opts.some(function (o) { return o[0] === keep; });
+      against.value = still ? keep : 'previous';
+      // the version compared with was removed (rotation): show the differences for what is chosen now
+      if (!still && VERS.selected) return selectVersion(VERS.selected);
     });
   }
 
@@ -2604,8 +2608,10 @@
     (document.querySelectorAll('#write-version-list .ver-row') || []).forEach(function (row, i) {
       row.classList.toggle('on', VERS.list[i] && VERS.list[i].id === id);
     });
+    var request = ++VERS.request, doc = W.doc, file = W.file;
     return api('/api/write/diff?doc=' + encodeURIComponent(W.doc.id) + '&a=' + encodeURIComponent(a) + '&b=' +
       encodeURIComponent(b) + '&file=' + encodeURIComponent(W.file)).then(function (d) {
+      if (request !== VERS.request || W.doc !== doc || W.file !== file) return;  // a newer choice was made
       var target = $('write-version-diff'), box = renderDiff(d);
       target.replaceChildren.apply(target, box.children);
     }).catch(function (e) { toast(e.message); });
@@ -2635,7 +2641,7 @@
         input.value = '';
         toast(name ? 'Version saved: ' + name : 'Version saved');
         VERS.selected = r && r.id;
-        return loadVersions();
+        return loadVersions().then(function () { if (VERS.selected) return selectVersion(VERS.selected); });
       });
     }).catch(function (e) { toast(e.message); });
   }
