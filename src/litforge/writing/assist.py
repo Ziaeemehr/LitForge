@@ -356,10 +356,19 @@ def latex_flags(old: str, new: str, exempt: set[str] | None = None) -> list[str]
     lost_keys = set(cited_keys(old)) - set(cited_keys(new))
     if lost_keys:
         flags.append("citations dropped: " + ", ".join(sorted(lost_keys)[:8]))
+    if _brace_balance(old) != _brace_balance(new):  # a dropped } breaks the compile (seen in the real run)
+        flags.append("braces unbalanced: a { or } was added or dropped")
     lost_refs = {m.group(0) for m in _ARG_COMMANDS.finditer(old)} - {m.group(0) for m in _ARG_COMMANDS.finditer(new)}
     if lost_refs:
         flags.append("references or labels dropped: " + ", ".join(sorted(lost_refs)[:8]))
     return flags
+
+
+def _brace_balance(text: str) -> int:
+    """Opening minus closing braces, leaving out escaped ones (\\{ \\}) and comments."""
+    text = re.sub(r"(?<!\\)%.*", "", text)
+    text = re.sub(r"\\[{}]", "", text)
+    return text.count("{") - text.count("}")
 
 
 _CONTROL = {"\t": "t", "\r": "r", "\f": "f", "\b": "b", "\n": "n"}

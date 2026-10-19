@@ -111,5 +111,20 @@ def test_with_a_selection_the_reply_must_carry_a_replacement_field(env) -> None:
     with_selection = wchat.prepare(conn, doc, "Shorter please", selection="A long sentence here.")
     without = wchat.prepare(conn, doc, "What is TVB?")
     assert "replacement" in wchat.schema_for(with_selection)["required"]
+    # the model writes fields in schema order: replacement first made qwen3:8b fill it (real run)
+    assert list(wchat.schema_for(with_selection)["properties"])[0] == "replacement"
     assert "replacement" not in wchat.schema_for(without)["required"]
     assert "must put the whole new text in replacement" in with_selection.messages[0]["content"]
+
+
+def test_an_lr_selection_is_edited_inside_its_wrapper(env) -> None:
+    selection = "\\lr{The model that we use was fitted to the data of 40 patients.}"
+    result, seen, _ = run(env, "Shorter please", lambda m: {"answer": "Shortened.", "citations": [],
+                                                            "replacement": "The model fits 40 patients."},
+                          selection=selection)
+    assert "\\lr{" not in seen[0][-1]["content"]
+    suggestion = result["suggestion"]
+    accepted = [h["index"] for h in suggestion["hunks"]]
+    from litforge.writing import assist as wa
+    assert wa.applied_text(selection, suggestion["hunks"], accepted) == "\\lr{The model fits 40 patients.}"
+    assert suggestion["flags"] == []

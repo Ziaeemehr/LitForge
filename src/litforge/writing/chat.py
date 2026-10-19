@@ -36,6 +36,7 @@ class ChatError(ValueError):
 class ChatRequest:
     question: str
     selection: str
+    wrap: tuple[str, str] | None = None  # the selection's own \\lr{ ... }, kept out of the model's text
     task: str = "write_chat"
     messages: list[dict[str, str]] = field(default_factory=list)
     packet: EvidencePacket | None = None
@@ -62,8 +63,10 @@ def prepare(conn: sqlite3.Connection, doc: Document, question: str, selection: s
                                  max_per_paper=2)
     spans = record_spans(conn, hits) if hits else []
     papers = to_packet(spans, sensitive=True, max_chars_per_item=1500) if spans else None
-    req = ChatRequest(question=question, selection=selection, evidence={s.id: s for s in spans})
-    req.messages = write_chat_messages(question, selection, context, turns, papers, spans)
+    req = ChatRequest(question=question, selection=selection, evidence={s.id: s for s in spans},
+                      wrap=assist.lr_wrapper(selection) if selection else None)
+    shown = selection[len(req.wrap[0]):len(selection) - len(req.wrap[1])] if req.wrap else selection
+    req.messages = write_chat_messages(question, shown, context, turns, papers, spans)
     # The draft is unpublished: marked sensitive, so a cloud route always needs the author's approval.
     manuscript = EvidenceItem(id="selection", paper_id="manuscript", text=(selection or context or question), page=1)
     req.packet = EvidencePacket(items=[manuscript, *(papers.items if papers else [])], sensitive=True)
@@ -75,7 +78,11 @@ def schema_for(req: ChatRequest) -> dict[str, Any]:
     rewrites the text cannot leave it only in the answer."""
     if not req.selection:
         return _SCHEMA
-    return {**_SCHEMA, "required": [*_SCHEMA["required"], "replacement"]}
+    # Models write the fields in this order; with replacement first, qwen3:8b put the new text there instead of
+    # in the answer (real run, 2026-10-19).
+    props = _SCHEMA["properties"]
+    ordered = {"replacement": props["replacement"], "answer": props["answer"], "citations": props["citations"]}
+    return {**_SCHEMA, "properties": ordered, "required": ["replacement", *_SCHEMA["required"]]}
 
 
 def preview(gateway: ModelGateway, req: ChatRequest) -> CallPreview:
@@ -98,7 +105,10 @@ def run(conn: sqlite3.Connection, gateway: ModelGateway, doc: Document, req: Cha
     suggestion = None
     replacement = str(content.get("replacement") or "")
     if req.selection and replacement.strip() and replacement.strip() != req.selection.strip():
-        edit = assist.Request(action="chat", text=req.selection, task=req.task, evidence=req.evidence)
+        # An English \\lr{...} passage translated into Persian loses the wrapper, as in the Translate action.
+        persian = bool(assist._PERSIAN.search(replacement)) and not assist._PERSIAN.search(req.selection)
+        edit = assist.Request(action="translate-fa" if persian else "chat", text=req.selection, task=req.task,
+                              evidence=req.evidence, wrap=req.wrap)
         suggestion = assist.suggestion_from(conn, doc, edit, {"replacement": replacement, "note": ""},
                                             f"{reply.provider}:{reply.model}", file)
     return {"answer": str(content.get("answer") or "")[:6000], "citations": list(verified.values()),

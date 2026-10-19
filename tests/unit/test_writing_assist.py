@@ -318,3 +318,10 @@ def test_the_first_system_message_describes_the_reply_schema(env, action: str) -
                      error="Undefined control sequence.")
     first = req.messages[0]
     assert first["role"] == "system" and first["content"].endswith(json.dumps(req.schema, sort_keys=True))
+
+
+def test_unbalanced_braces_are_flagged() -> None:
+    # seen in the real run: a closing brace of \lr{...} silently dropped
+    assert any("braces" in f for f in wa.latex_flags("\\lr{a b}.", "\\lr{a b."))
+    assert not any("braces" in f for f in wa.latex_flags("\\lr{a b}.", "\\lr{a}."))
+    assert not any("braces" in f for f in wa.latex_flags("50\\% \\{x\\}", "50\\% \\{y\\}"))  # escaped braces
