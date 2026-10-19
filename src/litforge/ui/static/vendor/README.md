@@ -15,7 +15,7 @@ The math tokenizer in `../md.js` is adapted from MDviewer's `index.html`.
 
 | File | Library | License |
 |---|---|---|
-| `codemirror.bundle.js` | [CodeMirror 6](https://codemirror.net) (view 6.43.13, state 6.7.6, language 6.12.4, legacy-modes 6.5.4 `stex`, search 6.7.2, commands 6.11.1, autocomplete 6.20.3) with @lezer, style-mod, w3c-keyname, crelt | MIT (`codemirror.LICENSE`) |
+| `codemirror.bundle.js` | [CodeMirror 6](https://codemirror.net) (view 6.43.13, state 6.7.6, language 6.12.4, legacy-modes 6.5.4 `stex`, search 6.7.2, commands 6.11.1, autocomplete 6.20.3, @lezer/highlight 1.2.5 `classHighlighter`) with @lezer, style-mod, w3c-keyname, crelt | MIT (`codemirror.LICENSE`) |
 
 Built once with esbuild from pinned packages; see `scripts/build_editor_bundle.md`.
 

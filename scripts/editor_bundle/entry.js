@@ -8,9 +8,10 @@ import { StreamLanguage, syntaxHighlighting, defaultHighlightStyle, bracketMatch
   indentOnInput } from "@codemirror/language";
 import { stex } from "@codemirror/legacy-modes/mode/stex";
 import { autocompletion, closeBrackets } from "@codemirror/autocomplete";
+import { classHighlighter } from "@lezer/highlight";
 
 window.LitForgeCM = { EditorState, Compartment, StateEffect, StateField, EditorView, keymap, lineNumbers,
   highlightActiveLine, highlightActiveLineGutter, drawSelection, Decoration, placeholder, defaultKeymap, history,
   historyKeymap, indentWithTab, undo, redo, searchKeymap, highlightSelectionMatches, openSearchPanel,
   StreamLanguage, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter, indentOnInput, stex,
-  autocompletion, closeBrackets };
+  autocompletion, closeBrackets, classHighlighter };

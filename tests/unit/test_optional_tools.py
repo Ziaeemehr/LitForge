@@ -10,6 +10,21 @@ import pytest
 from typer.testing import CliRunner
 
 
+@pytest.fixture(autouse=True)
+def _pix2text_not_installed(monkeypatch: Any) -> None:
+    """These tests describe a machine without Pix2Text, whatever the developer's own environment holds."""
+    import importlib.metadata
+
+    real = importlib.metadata.version
+
+    def version(name: str) -> str:
+        if name == "pix2text":
+            raise importlib.metadata.PackageNotFoundError(name)
+        return real(name)
+
+    monkeypatch.setattr(importlib.metadata, "version", version)
+
+
 def test_pix2text_install_is_limited_to_editable_source_root_and_uv(tmp_path: Path, monkeypatch: Any) -> None:
     from litforge import tools
 

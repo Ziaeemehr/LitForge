@@ -12,7 +12,8 @@
 <body>
 <div class="app">
 <nav class="sidebar" id="sidebar">
-  <div class="brand">Lit<span>Forge</span></div>
+  <div class="brand-row"><div class="brand">Lit<span>Forge</span></div>
+    <button class="side-toggle" id="btn-side-hide" title="Hide the sidebar (Ctrl/Cmd+\\)" aria-label="Hide the sidebar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 10l-2 2 2 2"/></svg></button></div>
   <button class="nav-new" id="nav-new" data-view="new" title="Start a new search: from a paper, keywords, a reference list or your own PDFs">+ New</button>
   <button class="nav-item" data-view="recents" title="Every search you ran, newest first">Recents</button>
   <button class="nav-item" data-view="library" title="All papers LitForge knows, across projects">Library</button>
@@ -34,6 +35,7 @@
 
 <div class="main-col">
 <header>
+  <button class="side-toggle" id="btn-side-show" title="Show the sidebar (Ctrl/Cmd+\\)" aria-label="Show the sidebar" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M13 10l2 2-2 2"/></svg></button>
   <div class="current" id="current-project"></div>
   <button class="btn small ghost danger" id="btn-delete-project" title="Delete the current project (papers and PDFs stay in the library)" hidden>Delete project</button>
   <button class="btn small ghost" id="btn-open-folder" title="Show this project's export folder in Finder or the file manager" hidden>Open folder</button>
@@ -451,23 +453,30 @@
     </div>
     <div id="write-editor" class="write-editor" hidden>
       <div class="write-toolbar">
-        <button class="btn small" id="write-back" title="Back to the document list">← Documents</button>
+        <button class="btn small ghost" id="write-back" title="Back to the document list">← Documents</button>
         <b id="write-title"></b>
         <select id="write-file" aria-label="File"></select>
-        <span id="write-save-state" class="muted" role="status" aria-live="polite"></span>
+        <span id="write-save-state" class="write-save" role="status" aria-live="polite"></span>
         <span class="spacer"></span>
-        <button class="btn small" id="write-cite" title="Cite a paper from the project (\cite{)">Cite</button>
-        <select id="write-ai" aria-label="AI actions" title="Model actions on the selection; nothing changes until you accept">
-          <option value="">AI…</option><option value="fix">Fix this error</option>
-          <option value="clearer">Rewrite: clearer</option><option value="shorter">Rewrite: shorter</option>
-          <option value="translate-en">Translate to English</option><option value="translate-fa">Translate to Persian</option>
-          <option value="cite">Suggest citations</option>
-        </select>
-        <label class="btn small" title="Upload a figure into figures/">Figure…<input type="file" id="write-upload" accept=".png,.jpg,.jpeg,.pdf,.eps,.svg" hidden></label>
-        <button class="btn small" id="write-versions-btn" title="Earlier versions of this document">Versions</button>
-        <button class="btn small" id="write-rename">Rename</button>
-        <button class="btn small danger" id="write-delete" title="Move this document to the project's trash folder">Delete</button>
-        <button class="btn small primary" id="write-compile" title="Compile to PDF (Ctrl/Cmd+Enter)">Compile</button>
+        <div class="seg" role="group" aria-label="Layout">
+          <button type="button" data-layout="editor" aria-pressed="false" title="Editor only">Editor</button>
+          <button type="button" data-layout="split" aria-pressed="true" title="Editor and PDF side by side">Split</button>
+          <button type="button" data-layout="pdf" aria-pressed="false" title="PDF only">PDF</button>
+        </div>
+        <div class="pill" role="group" aria-label="Document actions">
+          <button type="button" id="write-cite" title="Cite a paper from the project (\cite{)">Cite</button>
+          <select id="write-ai" aria-label="AI actions" title="Model actions on the selection; nothing changes until you accept">
+            <option value="">AI…</option><option value="fix">Fix this error</option>
+            <option value="clearer">Rewrite: clearer</option><option value="shorter">Rewrite: shorter</option>
+            <option value="translate-en">Translate to English</option><option value="translate-fa">Translate to Persian</option>
+            <option value="cite">Suggest citations</option>
+          </select>
+          <label title="Upload a figure into figures/">Figure<input type="file" id="write-upload" accept=".png,.jpg,.jpeg,.pdf,.eps,.svg" hidden></label>
+          <button type="button" id="write-versions-btn" title="Earlier versions of this document">Versions</button>
+          <button type="button" id="write-rename">Rename</button>
+          <button type="button" class="danger" id="write-delete" title="Move this document to the project's trash folder">Delete</button>
+          <button type="button" class="go" id="write-compile" title="Compile to PDF (Ctrl/Cmd+Enter)">Compile</button>
+        </div>
       </div>
       <div id="write-conflict" class="write-banner" role="alert" hidden>
         <span>This file changed on disk or in another tab since you opened it.</span>
@@ -480,17 +489,20 @@
         <input id="write-cite-q" placeholder="Search title, author, year, DOI or quote" aria-label="Search papers to cite">
         <ul id="write-cite-results"></ul>
       </div>
-      <div id="write-suggestion" class="card write-suggestion" hidden>
-        <h3 id="write-suggestion-title">Suggestion</h3>
-        <p id="write-suggestion-meta" class="muted"></p>
-        <div id="write-suggestion-hunks"></div>
-        <div class="row"><button class="btn small" id="write-suggestion-close">Close</button></div>
-      </div>
-      <div class="write-split">
+      <div class="write-split" id="write-split" data-layout="split">
         <div class="write-left">
           <div id="write-cm" class="write-cm"></div>
+          <div id="write-suggestion" class="write-suggestion" role="dialog" aria-labelledby="write-suggestion-title" hidden>
+            <div class="sg-head"><b id="write-suggestion-title">Suggestion</b>
+              <span id="write-suggestion-meta" class="sg-meta"></span>
+              <button type="button" class="sg-x" id="write-suggestion-close" title="Close (rejects the suggestion)" aria-label="Close">×</button></div>
+            <div id="write-suggestion-hunks"></div>
+          </div>
           <ul id="write-errors" class="write-errors" aria-label="Compile messages"></ul>
         </div>
+        <div class="write-gutter" id="write-gutter" role="separator" aria-orientation="vertical" tabindex="0"
+          aria-label="Resize the editor and the PDF" aria-valuemin="20" aria-valuemax="80" aria-valuenow="50"
+          title="Drag to resize; double-click to reset"></div>
         <div class="write-right">
           <p id="write-compile-state" class="muted" role="status" aria-live="polite"></p>
           <iframe id="write-pdf" title="PDF preview" hidden></iframe>

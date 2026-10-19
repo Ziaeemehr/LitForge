@@ -21,3 +21,6 @@ build/
 # Local agent state (oh-my-claudecode); .omc/skills/ holds shareable project skills
 .omc/*
 !.omc/skills/
+
+# editor bundle build dependencies (see scripts/build_editor_bundle.md)
+scripts/editor_bundle/node_modules/

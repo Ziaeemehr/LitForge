@@ -1846,16 +1846,34 @@
           text: area.value.slice(area.selectionStart, area.selectionEnd) }; },
         replace: function (from, to, t) { area.setRangeText(t, from, to, 'end'); handlers.change(); },
         lineRange: function (n) { return lineRange(area.value, n); },
+        mark: function () {}, coords: function () { return null; },
         destroy: function () { parent.replaceChildren(); }
       };
     }
+    var setMark = CM.StateEffect.define();
+    var markField = CM.StateField.define({
+      create: function () { return CM.Decoration.none; },
+      update: function (marks, tr) {
+        marks = marks.map(tr.changes);
+        tr.effects.forEach(function (e) {
+          if (!e.is(setMark)) return;
+          marks = e.value && e.value.to > e.value.from ?
+            CM.Decoration.set([CM.Decoration.mark({ class: 'cm-ai-range' }).range(e.value.from, e.value.to)]) :
+            CM.Decoration.none;
+        });
+        return marks;
+      },
+      provide: function (f) { return CM.EditorView.decorations.from(f); }
+    });
     var view = new CM.EditorView({
       parent: parent,
-      state: CM.EditorState.create({ doc: text, extensions: [
+      state: CM.EditorState.create({ doc: text, extensions: [markField,
         CM.lineNumbers(), CM.highlightActiveLineGutter(), CM.history(), CM.foldGutter(), CM.drawSelection(),
         CM.indentOnInput(), CM.bracketMatching(), CM.closeBrackets(), CM.highlightActiveLine(),
         CM.highlightSelectionMatches(), CM.StreamLanguage.define(CM.stex),
-        CM.syntaxHighlighting(CM.defaultHighlightStyle, { fallback: true }),
+        // Stable tok-* classes instead of the built-in palette, so app.css colours them for light and dark.
+        CM.classHighlighter ? CM.syntaxHighlighting(CM.classHighlighter) :
+          CM.syntaxHighlighting(CM.defaultHighlightStyle, { fallback: true }),
         CM.EditorView.lineWrapping, CM.EditorView.perLineTextDirection.of(true), autoDirection(CM),
         CM.keymap.of([{ key: 'Mod-s', run: function () { handlers.blur(); return true; } },
           { key: 'Mod-Enter', run: function () { handlers.compile(); return true; } }]
@@ -1884,6 +1902,11 @@
         view.focus();
       },
       lineRange: function (n) { return lineRange(view.state.doc.toString(), n); },
+      mark: function (range) {  // highlight the text a suggestion would change; null clears it
+        var len = view.state.doc.length;
+        view.dispatch({ effects: setMark.of(range ? { from: Math.min(range.from, len), to: Math.min(range.to, len) } : null) });
+      },
+      coords: function (pos) { return view.coordsAtPos(Math.min(pos, view.state.doc.length)); },
       destroy: function () { view.destroy(); }
     };
   }
@@ -1913,6 +1936,53 @@
   }
 
   function writeSaveState(text) { $('write-save-state').textContent = text; }
+
+  // Layout: editor only, split or PDF only; the split position is a percentage of the width. Both are remembered.
+  var WRITE_LAYOUTS = ['editor', 'split', 'pdf'];
+  function setWriteLayout(layout) {
+    if (WRITE_LAYOUTS.indexOf(layout) < 0) layout = 'split';
+    $('write-split').dataset.layout = layout;
+    document.querySelectorAll('.seg [data-layout]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.layout === layout));
+    });
+    store.set('write-layout', layout);
+    return layout;
+  }
+
+  function setWriteSplit(pct) {
+    pct = Math.round(Math.max(20, Math.min(80, Number(pct) || 50)));
+    $('write-split').style.setProperty('--write-left', pct + '%');
+    $('write-gutter').setAttribute('aria-valuenow', String(pct));
+    store.set('write-split', pct);
+    return pct;
+  }
+
+  function wireWriteGutter() {
+    var gutter = $('write-gutter'), split = $('write-split');
+    gutter.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      gutter.setPointerCapture(e.pointerId);
+      gutter.classList.add('dragging'); split.classList.add('resizing');
+      var box = split.getBoundingClientRect();
+      var move = function (ev) { setWriteSplit((ev.clientX - box.left) / box.width * 100); };
+      var up = function () {
+        gutter.classList.remove('dragging'); split.classList.remove('resizing');
+        gutter.removeEventListener('pointermove', move); gutter.removeEventListener('pointerup', up);
+        gutter.removeEventListener('pointercancel', up);
+      };
+      gutter.addEventListener('pointermove', move); gutter.addEventListener('pointerup', up);
+      gutter.addEventListener('pointercancel', up);
+    });
+    gutter.addEventListener('dblclick', function () { setWriteSplit(50); });
+    gutter.addEventListener('keydown', function (e) {
+      var now = Number(gutter.getAttribute('aria-valuenow')) || 50;
+      var step = { ArrowLeft: -2, ArrowRight: 2, PageUp: -10, PageDown: 10 }[e.key];
+      if (step) { e.preventDefault(); setWriteSplit(now + step); }
+      else if (e.key === 'Home') { e.preventDefault(); setWriteSplit(20); }
+      else if (e.key === 'End') { e.preventDefault(); setWriteSplit(80); }
+    });
+  }
 
   function loadWrite() {
     var project = projectName();
@@ -2395,8 +2465,8 @@
     s.hunks.forEach(function (h) { AI.pending.accepted[h.index] = !h.flags.length; });
     var box = $('write-suggestion');
     $('write-suggestion-title').textContent = { write_fix: 'Fix', write_rewrite: 'Rewrite', write_cite: 'Citations' }[s.task] || 'Suggestion';
-    $('write-suggestion-meta').textContent = s.provider + ':' + s.model + (s.note ? ' · ' + s.note : '') +
-      ' · nothing changes until you apply';
+    $('write-suggestion-meta').textContent = s.provider + ':' + s.model + (s.note ? ' · ' + s.note : '');
+    $('write-suggestion-meta').title = 'Nothing changes until you apply';
     var parts = [];
     s.flags.forEach(function (f) {
       var p = document.createElement('p'); p.className = 'flag'; p.textContent = '⚠ ' + f; parts.push(p);
@@ -2409,20 +2479,39 @@
       parts.push(q);
     });
     var row = document.createElement('div');
-    row.className = 'row';
-    var apply = document.createElement('button');
-    apply.className = 'btn small'; apply.textContent = 'Apply accepted';
-    apply.onclick = applyWriteSuggestion;
+    row.className = 'sg-actions';
     var reject = document.createElement('button');
-    reject.className = 'btn small'; reject.textContent = 'Reject all';
+    reject.type = 'button'; reject.textContent = 'Reject all';
     reject.onclick = function () {
       Object.keys(AI.pending.accepted).forEach(function (k) { AI.pending.accepted[k] = false; });
       return applyWriteSuggestion();
     };
-    row.appendChild(apply); row.appendChild(reject);
+    var apply = document.createElement('button');
+    apply.type = 'button'; apply.className = 'sg-apply'; apply.textContent = 'Apply accepted';
+    apply.onclick = applyWriteSuggestion;
+    row.appendChild(reject); row.appendChild(apply);
     parts.push(row);
     $('write-suggestion-hunks').replaceChildren.apply($('write-suggestion-hunks'), parts);
     box.hidden = false;
+    if (W.editor) W.editor.mark(range);
+    placeWriteSuggestion(range);
+  }
+
+  // Float the bar just under the changed text; above it when there is no room below. Without
+  // coordinates (plain text area) the stylesheet keeps it at the bottom right of the editor.
+  function placeWriteSuggestion(range) {
+    var box = $('write-suggestion'), at = W.editor && W.editor.coords(range.to);
+    box.style.top = ''; box.style.bottom = '';
+    if (!at || !box.parentNode || !box.parentNode.getBoundingClientRect) return;
+    var pane = box.parentNode.getBoundingClientRect(), height = box.offsetHeight || 120;
+    var below = at.bottom - pane.top + 6, above = at.top - pane.top - height - 6;
+    var top = below + height <= pane.height ? below : Math.max(6, above);
+    box.style.top = Math.round(top) + 'px'; box.style.bottom = 'auto';
+  }
+
+  function hideWriteSuggestion() {
+    $('write-suggestion').hidden = true;
+    if (W.editor) W.editor.mark(null);
   }
 
   function suggestionHunk(h) {
@@ -2436,8 +2525,14 @@
       var p = document.createElement('p'); p.className = 'flag'; p.textContent = '⚠ ' + f; div.appendChild(p);
     });
     var toggle = document.createElement('button');
-    toggle.className = 'btn small';
-    var label = function () { toggle.textContent = AI.pending.accepted[h.index] ? 'Accepted ✓ (click to reject)' : 'Rejected (click to accept)'; };
+    toggle.type = 'button';
+    var label = function () {
+      var on = AI.pending.accepted[h.index];
+      toggle.textContent = on ? 'Accepted ✓' : 'Rejected';
+      toggle.className = 'hunk-toggle' + (on ? ' on' : '');
+      toggle.title = on ? 'Click to reject this change' : 'Click to accept this change';
+      toggle.setAttribute && toggle.setAttribute('aria-pressed', String(!!on));
+    };
     label();
     toggle.onclick = function () { AI.pending.accepted[h.index] = !AI.pending.accepted[h.index]; label(); };
     div.appendChild(toggle);
@@ -2466,7 +2561,7 @@
     var text = appliedSuggestion(s.original, s.hunks, pending.accepted);
     if (accepted.length) W.editor.replace(range.from, range.to, text);
     AI.pending = null; AI.range = null;
-    $('write-suggestion').hidden = true;
+    hideWriteSuggestion();
     var used = s.citations.filter(function (c) { return text.indexOf(c.key) >= 0; });
     return saveWriteNow().then(function () {
       return used.reduce(function (chain, c) {
@@ -2494,7 +2589,7 @@
     $('write-cite').onclick = openWriteCite;
     $('write-ai').onchange = function () { var action = $('write-ai').value; $('write-ai').value = ''; runWriteAi(action, false); };
     $('write-suggestion-close').onclick = function () {  // closing rejects, so the record is complete
-      if (!AI.pending) { $('write-suggestion').hidden = true; return; }
+      if (!AI.pending) { hideWriteSuggestion(); return; }
       Object.keys(AI.pending.accepted).forEach(function (k) { AI.pending.accepted[k] = false; });
       applyWriteSuggestion();
     };
@@ -2504,6 +2599,12 @@
       clearTimeout(CITE.timer); CITE.timer = setTimeout(searchWriteCite, 250);
     });
     $('write-upload').onchange = function () { uploadWriteFigure($('write-upload').files[0]); $('write-upload').value = ''; };
+    document.querySelectorAll('.seg [data-layout]').forEach(function (b) {
+      b.onclick = function () { setWriteLayout(b.dataset.layout); };
+    });
+    setWriteLayout(store.get('write-layout', 'split'));
+    setWriteSplit(store.get('write-split', 50));
+    wireWriteGutter();
     window.addEventListener('beforeunload', function (e) {
       if (W.doc && W.dirty && !W.conflictHash) {  // keepalive lets the save finish while the page closes
         fetch('/api/write/save', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
@@ -4086,6 +4187,21 @@
       store.set('theme', t);
     }
     applyTheme(store.get('theme', 'auto'));
+    // The sidebar can be hidden for more room; the choice is remembered. Ctrl/Cmd+\ toggles it.
+    function applySidebar(hidden) {
+      document.querySelector('.app').classList.toggle('side-hidden', hidden);
+      $('btn-side-show').hidden = !hidden;
+      store.set('sidebar-hidden', hidden);
+      (hidden ? $('btn-side-show') : $('btn-side-hide')).setAttribute('aria-expanded', String(!hidden));
+    }
+    applySidebar(!!store.get('sidebar-hidden', false));
+    $('btn-side-hide').onclick = function () { applySidebar(true); $('btn-side-show').focus(); };
+    $('btn-side-show').onclick = function () { applySidebar(false); $('btn-side-hide').focus(); };
+    document.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === '\\') {
+        e.preventDefault(); applySidebar(!document.querySelector('.app').classList.contains('side-hidden'));
+      }
+    });
     $('btn-theme').onclick = function () {
       var cur = store.get('theme', 'auto');
       applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);

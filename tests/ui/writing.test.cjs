@@ -11,7 +11,10 @@ class Element {
     this.tagName = tag; this.children = []; this.textContent = ''; this.hidden = false; this.value = '';
     this.listeners = {}; this.className = ''; this.selectionStart = 0; this.selectionEnd = 0;
     this.classList = { toggle() {}, add() {}, remove() {} };
+    this.attrs = {}; this.dataset = {}; this.style = { props: {}, setProperty(k, v) { this.props[k] = v; } };
   }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
   appendChild(node) { this.children.push(node); return node; }
   replaceChildren(...nodes) { this.children = nodes; }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
@@ -26,9 +29,11 @@ function setup(routes = {}) {
   const files = { 'main.tex': { text: '\\documentclass{article}\n', hash: 'h0' } };
   const $ = id => elements[id] ||= new Element('div');
   const fail = (status, body) => { const e = new Error(body.error || 'HTTP ' + status); e.status = status; return Promise.reject(e); };
+  const saved = {}, segButtons = ['editor', 'split', 'pdf'].map(l => { const b = new Element('button'); b.dataset.layout = l; return b; });
   const ctx = vm.createContext({
-    $, calls, files, timers, Promise, String, Object, Math, Date,
-    document: { createElement: tag => new Element(tag) },
+    $, calls, files, timers, saved, segButtons, Promise, String, Object, Math, Date, Number,
+    store: { get: (k, d) => (k in saved ? saved[k] : d), set: (k, v) => { saved[k] = v; } },
+    document: { createElement: tag => new Element(tag), querySelectorAll: sel => (sel === '.seg [data-layout]' ? segButtons : []) },
     window: { confirm: () => true, prompt: () => 'Renamed', addEventListener() {} },
     projectName: () => 'demo', state: { projects: [{ name: 'demo' }] }, toast: msg => calls.push(['toast', msg]),
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: () => {},
@@ -62,7 +67,7 @@ function setup(routes = {}) {
     }
   });
   vm.runInContext(block + '\nthis.W = W;', ctx);
-  return { ctx, $, calls, timers, files };
+  return { ctx, $, calls, timers, files, saved, segButtons };
 }
 
 test('Write view is in the sidebar, has the editor, PDF frame and loads the bundle offline', () => {
@@ -347,4 +352,40 @@ test('applying hunks counts code points like Python (emoji before the change)', 
   const hunks = [{ index: 0, start: 8, end: 11, old: 'خوب', new: 'عالی' }];
   assert.equal(ctx.appliedSuggestion(original, hunks, { 0: true }), 'نتیجه 😀 عالی است');
   assert.equal(ctx.appliedSuggestion(original, hunks, {}), original);
+});
+
+test('layout switch shows one pane or both, marks the pressed button and is remembered', () => {
+  const { ctx, $, saved, segButtons } = setup();
+  assert.equal(ctx.setWriteLayout('pdf'), 'pdf');
+  assert.equal($('write-split').dataset.layout, 'pdf');
+  assert.deepEqual(segButtons.map(b => b.attrs['aria-pressed']), ['false', 'false', 'true']);
+  assert.equal(saved['write-layout'], 'pdf');
+  assert.equal(ctx.setWriteLayout('bogus'), 'split');  // an unknown stored value falls back to split
+  assert.match(html, /data-layout="editor"/); assert.match(html, /data-layout="pdf"/);
+});
+
+test('split position is clamped, exposed to assistive tech and remembered', () => {
+  const { ctx, $, saved } = setup();
+  assert.equal(ctx.setWriteSplit(63.4), 63);
+  assert.equal($('write-split').style.props['--write-left'], '63%');
+  assert.equal($('write-gutter').attrs['aria-valuenow'], '63');
+  assert.equal(ctx.setWriteSplit(5), 20);
+  assert.equal(ctx.setWriteSplit(99), 80);
+  assert.equal(ctx.setWriteSplit('x'), 50);
+  assert.equal(saved['write-split'], 50);
+  assert.match(html, /id="write-gutter"[^>]*role="separator"/);
+});
+
+test('closing a suggestion clears the highlight in the editor', async () => {
+  const { ctx, $ } = aiSetup(REPORT);
+  await ctx.openWriteDoc('d1');
+  const marks = [];
+  ctx.W.editor.mark = r => marks.push(r);
+  const area = $('write-cm').children[0];
+  area.value = 'Intro: one two three.'; area.setSelectionRange(7, 20);
+  await ctx.runWriteAi('shorter', false);
+  assert.equal(marks[0].from, 7); assert.equal(marks[0].to, 20);
+  await ctx.applyWriteSuggestion();
+  assert.equal(marks[marks.length - 1], null);
+  assert.equal($('write-suggestion').hidden, true);
 });
