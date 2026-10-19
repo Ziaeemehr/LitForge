@@ -91,3 +91,48 @@ def test_forward_drops_boxes_inside_other_boxes(tmp_path: Path) -> None:
     path.write_bytes(gzip.compress(data.encode()))
     hit = synctex.forward(synctex.load(path, Path("/doc")), "main.tex", 2)
     assert hit is not None and len(hit["boxes"]) == 1 and hit["boxes"][0]["w"] == 300
+
+
+def _write(tmp_path: Path, body: str, head: str = "") -> Path:
+    import gzip
+    data = ("SyncTeX Version:1\nInput:1:/doc/main.tex\nOutput:pdf\n" + (head or "Magnification:1000\nUnit:1\n"
+            "X Offset:0\nY Offset:0\n") + "Content:\n{1\n" + body + "}1\n")
+    path = tmp_path / "s.synctex.gz"
+    path.write_bytes(gzip.compress(data.encode()))
+    return path
+
+
+def test_size_limit_is_checked_while_decompressing(tmp_path: Path) -> None:
+    import gzip
+    path = tmp_path / "bomb.synctex.gz"
+    path.write_bytes(gzip.compress(b"x" * 5000))  # small file, large content
+    with pytest.raises(synctex.SyncTexError, match="too large"):
+        synctex.load(path, Path("/doc"), max_bytes=1000)
+
+
+def test_truncated_or_broken_files_raise_a_clear_error(tmp_path: Path) -> None:
+    import gzip
+    path = tmp_path / "half.synctex.gz"
+    path.write_bytes(gzip.compress(b"SyncTeX Version:1\n" * 200)[:40])  # being written
+    with pytest.raises(synctex.SyncTexError):
+        synctex.load(path, Path("/doc"))
+
+
+def test_relative_inputs_are_read_against_the_folder(tmp_path: Path) -> None:
+    import gzip
+    data = ("SyncTeX Version:1\nInput:1:./main.tex\nInput:2:sub/part.tex\nInput:3:../out.tex\nOutput:pdf\n"
+            "Magnification:1000\nUnit:1\nX Offset:0\nY Offset:0\nContent:\n{1\n}1\n")
+    path = tmp_path / "s.synctex.gz"
+    path.write_bytes(gzip.compress(data.encode()))
+    assert synctex.load(path, Path("/doc")).files == {1: "main.tex", 2: "sub/part.tex"}
+
+
+def test_magnification_and_offsets_are_applied(tmp_path: Path) -> None:
+    sp = 65781.76
+    body = (f"(1,1:{round(100 * sp)},{round(200 * sp)}:{round(50 * sp)},{round(8 * sp)},0\n"
+            f"g1,1:{round(110 * sp)},{round(200 * sp)}\n)\n")
+    plain = synctex.load(_write(tmp_path, body), Path("/doc"))
+    scaled = synctex.load(_write(tmp_path, body, f"Magnification:2000\nUnit:1\nX Offset:{round(10 * sp)}\n"
+                                                 f"Y Offset:{round(5 * sp)}\n"), Path("/doc"))
+    assert plain.records[0].x == pytest.approx(100) and plain.records[0].y == pytest.approx(200)
+    assert scaled.records[0].x == pytest.approx(210) and scaled.records[0].y == pytest.approx(405)

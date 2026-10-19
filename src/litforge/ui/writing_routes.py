@@ -39,7 +39,10 @@ def synctex_lookup(doc: wd.Document, query: dict[str, str]) -> dict[str, Any] | 
     stamp = (stat.st_mtime_ns, stat.st_size)
     cached = _SYNC_CACHE.get(doc.id)
     if cached is None or cached[0] != stamp:
-        cached = (stamp, wsync.load(path, doc.folder.resolve()))
+        try:
+            cached = (stamp, wsync.load(path, doc.folder.resolve()))
+        except wsync.SyncTexError as exc:  # e.g. read while a compile is still writing it
+            raise LookupError(f"{exc}; compile again") from None
         _SYNC_CACHE[doc.id] = cached
     sync = cached[1]
     try:

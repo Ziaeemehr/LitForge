@@ -2176,15 +2176,17 @@
   }
 
   /* PDF viewer (PDF.js) and SyncTeX jumps. PDF positions are points from the page's top-left corner. */
-  var PDFV = { doc: null, pages: [], scale: 0, fit: true, request: 0 };
+  // loadId counts loaded files (a newer compile wins); request counts renders (zoom re-renders the same file).
+  var PDFV = { doc: null, pages: [], scale: 0, fit: true, request: 0, loadId: 0 };
 
   function loadPdf(url) {
-    var request = ++PDFV.request, box = $('write-pdf-pages');
+    var load = ++PDFV.loadId, box = $('write-pdf-pages');
     var keep = box.scrollHeight ? box.scrollTop / box.scrollHeight : 0;  // stay at the same place after a recompile
     return window.pdfjsLib.getDocument({ url: url, isEvalSupported: false }).promise.then(function (pdf) {
-      if (request !== PDFV.request) return null;
+      if (load !== PDFV.loadId) { pdf.destroy(); return null; }  // a newer compile's PDF is on its way
       if (PDFV.doc) PDFV.doc.destroy();
       PDFV.doc = pdf;
+      PDFV.request++;
       return renderPdfPages().then(function () { box.scrollTop = keep * box.scrollHeight; });
     }).catch(function (e) { toast('The PDF could not be shown: ' + e.message); });
   }
@@ -2276,9 +2278,10 @@
   // PDF → editor: the source line of a place in the PDF.
   function syncFromPdf(page, x, y) {
     if (!W.doc) return Promise.resolve();
-    return api('/api/write/synctex?doc=' + encodeURIComponent(W.doc.id) + '&page=' + page + '&x=' + x + '&y=' + y)
+    var doc = W.doc;
+    return api('/api/write/synctex?doc=' + encodeURIComponent(doc.id) + '&page=' + page + '&x=' + x + '&y=' + y)
       .then(function (hit) {
-        if (!hit) return;
+        if (!hit || W.doc !== doc) return;  // the user moved to another document meanwhile
         var open = hit.file !== W.file ? openWriteFile(hit.file) : Promise.resolve(true);
         return open.then(function (ok) { if (ok && W.editor) W.editor.gotoLine(hit.line); });
       }).catch(function (e) { toast(e.message); });

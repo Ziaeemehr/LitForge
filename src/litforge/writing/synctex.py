@@ -20,6 +20,10 @@ _RECORD = re.compile(r"([\[(hvkgx$r])(\d+),(\d+)(?:,-?\d+)?:(-?\d+),(-?\d+)(?::(
 _LEAF = set("hvkgx$r")
 
 
+class SyncTexError(ValueError):
+    """The SyncTeX file is missing, too large, or unreadable (for example still being written)."""
+
+
 @dataclass(frozen=True)
 class Record:
     kind: str
@@ -39,14 +43,26 @@ class SyncTex:
     records: list[Record] = field(default_factory=list)
 
 
-def load(path: Path, folder: Path) -> SyncTex:
+def _read(path: Path, max_bytes: int) -> bytes:
+    """The file's text, decompressed in a bounded read so a small archive cannot expand without limit."""
+    try:
+        with path.open("rb") as raw:
+            gzipped = raw.read(2) == b"\x1f\x8b"
+        opener: Any = gzip.open if gzipped else open
+        with opener(path, "rb") as stream:
+            data = stream.read(max_bytes + 1)
+    except (OSError, EOFError) as exc:  # truncated (still being written) or not gzip after all
+        raise SyncTexError(f"the position data cannot be read: {exc}") from None
+    if len(data) > max_bytes:
+        raise SyncTexError("the SyncTeX file is too large")
+    return bytes(data)
+
+
+def load(path: Path, folder: Path, max_bytes: int = MAX_BYTES) -> SyncTex:
     """Parse a (gzipped) SyncTeX file. Only inputs inside `folder` are kept; package files are ignored."""
-    raw = path.read_bytes()
-    text = gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw
-    if len(text) > MAX_BYTES:
-        raise ValueError("the SyncTeX file is too large")
+    text = _read(path, max_bytes)
     sync = SyncTex()
-    unit, page = 1.0, 0
+    unit, magnification, x_offset, y_offset, page = 1.0, 1000.0, 0.0, 0.0, 0
     root = PurePosixPath(str(folder))
     for line in text.decode("utf-8", "replace").splitlines():
         if line.startswith("Input:"):
@@ -55,24 +71,41 @@ def load(path: Path, folder: Path) -> SyncTex:
             if tag.isdigit() and relative:
                 sync.files[int(tag)] = relative
         elif line.startswith("Unit:"):
-            unit = float(line[5:] or 1)
+            unit = _number(line[5:], 1.0)
+        elif line.startswith("Magnification:"):
+            magnification = _number(line[14:], 1000.0) or 1000.0
+        elif line.startswith("X Offset:"):
+            x_offset = _number(line[9:], 0.0)
+        elif line.startswith("Y Offset:"):
+            y_offset = _number(line[9:], 0.0)
         elif line.startswith("{") and line[1:].isdigit():
             page = int(line[1:])
         elif page and (match := _RECORD.match(line)):
             kind, input_tag, number = match.group(1), int(match.group(2)), int(match.group(3))
             if input_tag not in sync.files:
                 continue
-            nums = [int(v) * unit / SP_PER_BP if v is not None else 0.0 for v in match.groups()[3:]]
-            sync.records.append(Record(kind, input_tag, number, page, *nums))
+            scale = unit * magnification / 1000 / SP_PER_BP  # as synctex_parser.c converts to PDF points
+            x, y, *size = [int(v) * scale if v is not None else 0.0 for v in match.groups()[3:]]
+            sync.records.append(Record(kind, input_tag, number, page, x + x_offset * unit / SP_PER_BP,
+                                       y + y_offset * unit / SP_PER_BP, *size))
     return sync
+
+
+def _number(text: str, default: float) -> float:
+    try:
+        return float(text.strip())
+    except ValueError:
+        return default
 
 
 def _inside(root: PurePosixPath, name: str) -> str | None:
     if not name:
         return None
     path = PurePosixPath(name)
-    if ".." in path.parts or not path.is_absolute():
+    if ".." in path.parts:
         return None
+    if not path.is_absolute():  # ./main.tex or sub/part.tex: relative to the folder the engine ran in
+        path = root / path
     try:
         relative = path.relative_to(root)
     except ValueError:

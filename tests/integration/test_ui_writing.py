@@ -249,3 +249,15 @@ def test_synctex_lookups_both_ways(server) -> None:
     assert status == 200 and back == {"file": "main.tex", "line": 4}
     assert call(base, f"/api/write/synctex?doc={doc['id']}&page=1&x=abc&y=1")[0] == 400
     assert call(base, f"/api/write/synctex?doc={doc['id']}&file=../../x&line=1")[0] in (400, 404)
+
+
+def test_synctex_being_written_gives_a_clear_404(server) -> None:
+    import gzip
+
+    base, app = server
+    doc = create(base)
+    build = Path(app.paths.root) / "projects" / "demo" / "writing" / "draft" / ".build"
+    build.mkdir(exist_ok=True)
+    (build / "main.synctex.gz").write_bytes(gzip.compress(b"SyncTeX Version:1\n" * 500)[:50])
+    status, body = call(base, f"/api/write/synctex?doc={doc['id']}&file=main.tex&line=1")
+    assert status == 404 and "compile" in body["error"]

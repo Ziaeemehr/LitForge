@@ -775,3 +775,50 @@ test('in fit mode the PDF is re-fitted when its pane changes width, not for smal
   assert.equal(ctx.needsRefit(400, 640, false), false);  // the user chose a zoom: keep it
   assert.equal(ctx.needsRefit(0, 640, true), false);     // hidden pane (Editor only) has no width
 });
+
+// Review (Codex) of the PDF viewer: zoom must not cancel a load, stale documents are released, late lookups.
+function pendingPdfLib() {
+  const loads = [];
+  return { loads, lib: { getDocument: () => { let resolve; const promise = new Promise(r => { resolve = r; }); loads.push(resolve); return { promise }; } } };
+}
+function fakePdf(name, destroyed) {
+  return { name, numPages: 1, destroy: () => destroyed.push(name), getPage: () => new Promise(() => {}) };
+}
+
+test('zooming while a new PDF loads does not cancel that load', () => {
+  const { ctx } = setup();
+  const before = ctx.PDFV.loadId;
+  assert.equal(typeof before, 'number');
+  ctx.PDFV.doc = fakePdf('old', []);
+  ctx.zoomPdf(1.2);
+  assert.equal(ctx.PDFV.loadId, before);
+});
+
+test('a PDF that loses the race to a newer one is released', async () => {
+  const { ctx, $ } = setup();
+  const { loads, lib } = pendingPdfLib();
+  ctx.window.pdfjsLib = lib;
+  $('write-pdf-pages').scrollHeight = 0;
+  const destroyed = [];
+  ctx.loadPdf('/a'); ctx.loadPdf('/b');
+  loads[1](fakePdf('new', destroyed));
+  await new Promise(r => setImmediate(r));
+  loads[0](fakePdf('stale', destroyed));
+  await new Promise(r => setImmediate(r));
+  assert.deepEqual(destroyed, ['stale']);
+  assert.equal(ctx.PDFV.doc.name, 'new');
+});
+
+test('a late PDF → editor lookup is ignored after switching documents', async () => {
+  let release;
+  const { ctx, $, calls } = setup({ get: url => (url.startsWith('/api/write/synctex?') ? new Promise(r => { release = r; }) : null) });
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'a\nb\nc'; area.setSelectionRange(0, 0);
+  const done = ctx.syncFromPdf(1, 10, 10);
+  ctx.W.doc = { id: 'd2', files: [] };
+  release({ file: 'main.tex', line: 3 });
+  await done;
+  assert.equal(area.selectionStart, 0);
+  assert.ok(!calls.some(c => c[0] === 'GET' && /doc=d2/.test(c[1])));
+});
