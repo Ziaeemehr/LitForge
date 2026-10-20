@@ -2879,9 +2879,11 @@
     return fig ? { kind: 'figure', from: fig.from, to: fig.to, name: fig.name } : null;
   }
 
-  // What to insert for a palette symbol: $...$ around it outside math; the cursor goes into its first {}.
-  function symbolInsert(command, inMath) {
+  // What to insert for a palette symbol: $...$ around it outside math; the cursor goes into its first {}. A command
+  // ending in a letter gets a space before a following letter (\alpha N, not the unknown \alphaN).
+  function symbolInsert(command, inMath, next) {
     var text = inMath ? command : '$' + command + '$', brace = command.indexOf('{}');
+    if (inMath && brace < 0 && /[a-zA-Z]$/.test(command) && /^[a-zA-Z]/.test(next || '')) text += ' ';
     return { text: text, cursor: brace >= 0 ? (inMath ? 0 : 1) + brace + 1 : text.length };
   }
 
@@ -2910,8 +2912,8 @@
   }
 
   function insertWriteSymbol(command) {
-    var sel = W.editor.selection(), span = mathSpanAt(W.editor.getText(), sel.from);
-    var ins = symbolInsert(command, !!span && span.from < sel.from && sel.from < span.to);
+    var text = W.editor.getText(), sel = W.editor.selection(), span = mathSpanAt(text, sel.from);
+    var ins = symbolInsert(command, !!span && span.from < sel.from && sel.from < span.to, text.charAt(sel.to));
     W.editor.replace(sel.from, sel.to, ins.text);
     if (W.editor.select) W.editor.select(sel.from + ins.cursor, sel.from + ins.cursor);
     closeWriteSymbols();
@@ -2967,7 +2969,7 @@
     return request.then(function (r) {
       if (!r.ok) return r.json().then(function (b) { throw new Error(b.error || 'no preview'); });
       var type = r.headers.get('Content-Type') || '';
-      if (/pdf/.test(type)) return r.arrayBuffer().then(function (data) { return pdfPreviewImage(data); });
+      if (/pdf/.test(type)) return r.arrayBuffer().then(function (data) { return pdfPreviewImage(data, hit.kind === 'math'); });
       return r.blob().then(function (blob) {
         var img = document.createElement('img'); img.src = URL.createObjectURL(blob); img.alt = hit.name || '';
         return img;
@@ -2975,13 +2977,15 @@
     }).then(keep).catch(fail);
   }
 
-  function pdfPreviewImage(data) {
+  // A formula is shown about one and a half times text size; a figure fits 340 pixels. Drawn at twice that for
+  // sharp text on high-density screens.
+  function pdfPreviewImage(data, formula) {
     if (!window.pdfjsLib) throw new Error('The PDF viewer is not loaded.');
     return window.pdfjsLib.getDocument({ data: new Uint8Array(data), isEvalSupported: false }).promise.then(function (pdf) {
       return pdf.getPage(1);
     }).then(function (page) {
-      var base = page.getViewport({ scale: 1 }), scale = Math.min(2.5, 680 / base.width);
-      var viewport = page.getViewport({ scale: scale }), canvas = document.createElement('canvas');
+      var base = page.getViewport({ scale: 1 }), shown = Math.min(340, base.width * (formula ? 1.6 : 340 / base.width));
+      var viewport = page.getViewport({ scale: 2 * shown / base.width }), canvas = document.createElement('canvas');
       canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
       return page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise.then(function () {
         var img = document.createElement('img');

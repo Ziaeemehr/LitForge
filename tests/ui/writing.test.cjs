@@ -1712,3 +1712,11 @@ test('a math preview is drawn by KaTeX when it can, without asking the server', 
   assert.equal(dom.children[0].textContent, 'K');
   assert.ok(!calls.some(c => c[0] === '/api/write/preview'));
 });
+
+test('a symbol command before a letter gets a space, so \\alpha N does not become \\alphaN', () => {
+  const { ctx } = setup();
+  assert.deepEqual({ ...ctx.symbolInsert('\\alpha', true, 'N') }, { text: '\\alpha ', cursor: 7 });
+  assert.deepEqual({ ...ctx.symbolInsert('\\alpha', true, '^') }, { text: '\\alpha', cursor: 6 });
+  assert.deepEqual({ ...ctx.symbolInsert('\\frac{}{}', true, 'x') }, { text: '\\frac{}{}', cursor: 6 });
+  assert.deepEqual({ ...ctx.symbolInsert('\\alpha', false, 'N') }, { text: '$\\alpha$', cursor: 8 });
+});
