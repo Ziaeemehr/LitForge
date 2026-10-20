@@ -3660,7 +3660,7 @@
 
   /* Autocomplete: a small list under the cursor after \, inside \ref{, \begin{ and \cite{. Offline, no model. */
   var LATEX_COMMANDS = [
-    ['section', 1], ['subsection', 1], ['subsubsection', 1], ['paragraph', 1], ['section*', 1], ['subsection*', 1],
+    ['section', 1], ['subsection', 1], ['subsubsection', 1], ['paragraph', 1],  // starred forms come from LATEX_FORMS
     ['cite', 1], ['citep', 1], ['citet', 1], ['ref', 1], ['eqref', 1], ['autoref', 1], ['label', 1],
     ['textbf', 1], ['textit', 1], ['emph', 1], ['texttt', 1], ['underline', 1], ['footnote', 1], ['url', 1],
     ['href', 2], ['includegraphics', 1], ['caption', 1], ['centering', 0], ['item', 0], ['frac', 2], ['sqrt', 1],
@@ -4580,7 +4580,7 @@
         label.appendChild(name); label.appendChild(meta);
         row.appendChild(label);
         var result = document.createElement('span');
-        result.className = 'models-test';
+        result.className = 'models-test'; result.textContent = testResults[p.name] || '';
         row.appendChild(result);
         row.appendChild(modelButton('Test', function () { testSettingsModel(p, result); }));
         row.appendChild(modelButton('Assign tasks…', function () { assignSettingsTasks(p.name); }));
@@ -4643,6 +4643,8 @@
       (r.latency_ms != null ? ' · ' + (r.latency_ms / 1000).toFixed(1) + ' s' : '');
   }
 
+  var testResults = {};  // the last test of each model, kept while the list reloads
+
   function testSettingsModel(profile, out) {
     out = out || $('models-status');
     var approved = false;
@@ -4656,7 +4658,8 @@
       (function tick() {
         api('/api/jobs/' + job.id).then(function (j) {
           if (j.status === 'running') { setTimeout(tick, 1000); return; }
-          out.textContent = testResult(j);
+          testResults[profile.name] = out.textContent = testResult(j);
+          loadModels();  // the test may have loaded the model: refresh the server line
         }).catch(function (e) { out.textContent = '✗ ' + e.message; });
       })();
     }).catch(function (e) { out.textContent = '✗ ' + e.message; });
