@@ -2530,9 +2530,15 @@
     var input = $('write-chat-input'), question = input.value.trim();
     if (!question || !W.doc || !W.editor || CHAT.busy) return Promise.resolve();
     var doc = W.doc, file = W.file, sel = W.editor.selection(), text = W.editor.getText();
-    var range = sel.text ? { from: sel.from, to: sel.to, text: sel.text, doc: doc.id, file: file } : null;
+    // With nothing selected, text the assistant offers to add goes in at the cursor, on its own lines; the text
+    // around it is checked again before applying.
+    var at = sel.from, range = sel.text ? { from: sel.from, to: sel.to, text: sel.text, doc: doc.id, file: file } :
+      { from: at, to: at, text: '', doc: doc.id, file: file, before: text.slice(Math.max(0, at - 40), at),
+        after: text.slice(at, at + 40) };
+    var lineStart = at === 0 || text.charAt(at - 1) === '\n', lineEnd = at === text.length || text.charAt(at) === '\n';
     var body = { doc: doc.id, question: question, selection: sel.text || '', context: sel.text ? '' : chatContext(text, sel.from),
-      history: CHAT.turns.slice(-8), file: file, approved: false };
+      history: CHAT.turns.slice(-8), file: file, approved: false, pad_before: !sel.text && !lineStart,
+      pad_after: !sel.text && !lineEnd };
     CHAT.busy = true;
     $('write-chat-status').textContent = 'Preparing…';
     return postChat(body, { question: question, doc: doc, file: file, range: range })

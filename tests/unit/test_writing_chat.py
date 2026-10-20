@@ -144,3 +144,28 @@ def test_a_proposed_edit_keeps_its_verified_citation_as_a_key(env) -> None:
     accepted = [h["index"] for h in suggestion["hunks"]]
     from litforge.writing import assist as wa
     assert wa.applied_text(selection, suggestion["hunks"], accepted) == "The gain was 3.25 \\cite{" + key + "}."
+
+
+TABLE = "\\begin{tabular}{lllll}\n\\hline\n a & b & c & d & e \\\\\n\\hline\n\\end{tabular}"
+
+
+def test_without_a_selection_an_insertion_becomes_a_suggestion_at_the_cursor(env) -> None:
+    conn, paths, doc, _ = env
+    seen: list[list[dict[str, str]]] = []
+    fake = FakeLlm(lambda m: seen.append(m) or {"answer": "Here is a table.", "citations": [], "insertion": TABLE})
+    gateway = ModelGateway(conn, Config(), providers={"local": fake})
+    req = wchat.prepare(conn, doc, "Make a table with 3 rows and 5 columns", context="Intro text.\n",
+                        pad_before=False, pad_after=True)
+    result = wchat.run(conn, gateway, doc, req, "main.tex")
+    s = result["suggestion"]
+    assert s is not None and s["original"] == ""
+    assert [h["new"] for h in s["hunks"]] == [TABLE + "\n"]  # a newline before the text after the cursor
+    assert not any("commands added" in f for f in s["flags"])  # adding LaTeX is the point of an insertion
+    assert "insertion" in seen[0][0]["content"]  # the model is told where to put added text
+    assert "insertion" in wchat.schema_for(req)["properties"]
+
+
+def test_a_plain_question_without_a_selection_inserts_nothing(env) -> None:
+    reply = {"answer": "A scale factor.", "citations": [], "insertion": ""}
+    result, _, _ = run(env, "What is a coupling gain?", reply)
+    assert result["suggestion"] is None

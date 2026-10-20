@@ -340,7 +340,7 @@ def suggestion_from(conn: sqlite3.Connection, doc: Document, req: Request, conte
     sent_new = new_text
     if req.new_env:
         new_text = "\\begin{abstract}\n" + new_text.strip() + "\n\\end{abstract}"
-    if req.action in IMAGE or req.new_env:
+    if req.action in IMAGE or req.new_env or req.action == "insert":
         new_text = ("\n" if req.pad[0] else "") + new_text + ("\n" if req.pad[1] else "")
     if req.wrap:  # put the \\lr{...} back, except around a Persian translation, which must not be in it
         lead, trail = req.wrap[0][:-4], req.wrap[1][1:]
@@ -350,7 +350,7 @@ def suggestion_from(conn: sqlite3.Connection, doc: Document, req: Request, conte
         allowed |= _numbers(new_text)  # the numbers come from the image, which only the user can compare
     known = set(cited_keys(req.text)) | {c["key"] for c in citations}
     exempt: set[str] | None = None
-    if req.action in {"fix", *IMAGE}:
+    if req.action in {"fix", "insert", *IMAGE}:  # new LaTeX is the point of an insertion
         exempt = set()
     if req.action == "fix" and req.error_line:  # the broken command on the error line is meant to change
         lines = req.text.split("\n")

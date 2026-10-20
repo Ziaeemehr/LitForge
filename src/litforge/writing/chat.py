@@ -22,7 +22,7 @@ MAX_CONTEXT = 6000
 MAX_HISTORY = 8  # earlier messages sent along (user and assistant turns)
 MAX_TURN = 2000
 _SCHEMA = {"type": "object", "properties": {
-    "answer": {"type": "string"}, "replacement": {"type": "string"},
+    "answer": {"type": "string"}, "replacement": {"type": "string"}, "insertion": {"type": "string"},
     "citations": {"type": "array", "items": {"type": "object", "properties": {
         "evidence_id": {"type": "string"}, "quote": {"type": "string"}}, "required": ["evidence_id", "quote"]}}},
     "required": ["answer", "citations"]}
@@ -42,10 +42,12 @@ class ChatRequest:
     messages: list[dict[str, str]] = field(default_factory=list)
     packet: EvidencePacket | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
+    pad: tuple[bool, bool] = (False, False)  # a newline before / after text inserted at the cursor
 
 
 def prepare(conn: sqlite3.Connection, doc: Document, question: str, selection: str = "", context: str = "",
-            history: list[dict[str, str]] | None = None) -> ChatRequest:
+            history: list[dict[str, str]] | None = None, pad_before: bool = False,
+            pad_after: bool = False) -> ChatRequest:
     """Build what would be sent: the question, the selection (or the lines around the cursor), the last few
     messages and the project's evidence for the question."""
     question = question.strip()
@@ -65,7 +67,8 @@ def prepare(conn: sqlite3.Connection, doc: Document, question: str, selection: s
     spans = record_spans(conn, hits) if hits else []
     papers = to_packet(spans, sensitive=True, max_chars_per_item=1500) if spans else None
     req = ChatRequest(question=question, selection=selection, evidence={s.id: s for s in spans},
-                      wrap=assist.lr_wrapper(selection) if selection else None)
+                      wrap=assist.lr_wrapper(selection) if selection else None,
+                      pad=(False, False) if selection else (pad_before, pad_after))
     shown = selection[len(req.wrap[0]):len(selection) - len(req.wrap[1])] if req.wrap else selection
     req.messages = write_chat_messages(question, shown, context, turns, papers, spans)
     req.citation_request = assist.Request(action="chat", text=selection, task=req.task, evidence=req.evidence)
@@ -106,6 +109,17 @@ def run(conn: sqlite3.Connection, gateway: ModelGateway, doc: Document, req: Cha
     flags = [f"{rejected} quote(s) removed: not found in the evidence"] if rejected else []
     suggestion = None
     replacement = str(content.get("replacement") or "")
+    insertion = str(content.get("insertion") or "")
+    if not req.selection and insertion.strip():
+        # Nothing selected: text the author asked to add (a table, an equation) goes in at the cursor.
+        edit = assist.Request(action="insert", text="", task=req.task, evidence=req.evidence, pad=req.pad)
+        assert req.citation_request is not None
+        insertion, cited, dropped = assist._resolve_citations(conn, req.citation_request, insertion,
+                                                              content.get("citations") or [])
+        if dropped:
+            flags.append(f"{dropped} citation(s) left out: their quote was not found in the evidence")
+        suggestion = assist.suggestion_from(conn, doc, edit, {"replacement": insertion, "note": ""},
+                                            f"{reply.provider}:{reply.model}", file, citations_in=cited)
     if req.selection and replacement.strip() and replacement.strip() != req.selection.strip():
         # An English \\lr{...} passage translated into Persian loses the wrapper, as in the Translate action.
         persian = bool(assist._PERSIAN.search(replacement)) and not assist._PERSIAN.search(req.selection)
