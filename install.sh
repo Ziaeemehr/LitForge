@@ -44,7 +44,7 @@ fi
 
 cd "$dir"
 say "Installing dependencies (the first time takes a few minutes)"
-uv sync --extra embed --inexact  # --inexact: keep extras installed later, such as formulas
+uv sync --extra embed --extra documents --inexact  # --inexact: keep extras installed later, such as formulas
 say "Adding the LitForge icon"
 uv run litforge shortcut
 

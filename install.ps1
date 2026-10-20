@@ -83,7 +83,7 @@ Push-Location -LiteralPath $dir
 try {
     Say 'Installing dependencies (the first time takes a few minutes)'
     # Keep extras installed later, such as formulas.
-    Native { uv sync --extra embed --inexact }
+    Native { uv sync --extra embed --extra documents --inexact }
     if ($LASTEXITCODE -ne 0) {
         Fail 'could not install dependencies'
     }

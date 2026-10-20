@@ -15,6 +15,7 @@ from litforge.observability import NULL_LOG, EventLog
 from litforge.parsing.base import ParsedDocument, Parser
 from litforge.parsing.canonical import outputs_exist, write_outputs
 from litforge.parsing.docling_parser import DoclingParser, docling_available
+from litforge.parsing.markitdown_parser import MarkItDownParser
 from litforge.parsing.mineru_parser import MinerUParser, find_command
 from litforge.parsing.pymupdf_parser import PyMuPDFParser
 from litforge.parsing.quality import compute_quality
@@ -148,6 +149,8 @@ def _run_parser(
     elapsed = round((time.perf_counter() - start) * 1000, 1)
     quality = compute_quality(doc, config.parsing.router)
     decision = decide(quality, config.parsing.router)
+    if parser.name == "markitdown":  # the text comes from the document itself: no page checks apply
+        decision.route = "pymupdf"
     if parser.name != "pymupdf" and decision.route == "needs_docling":
         decision.route = "pymupdf"  # Structural output is already the fallback; don't loop
     decision.reasons.extend(getattr(parser, "reasons", []))
@@ -177,7 +180,11 @@ def parse_artifact(
     if parser not in ('auto', 'pymupdf', 'mineru', 'docling'):
         raise ValueError('Unknown parser: ' + parser)
     selected: Parser
-    if parser == 'mineru':
+    document = not str(artifact["pdf_path"]).lower().endswith(".pdf")
+    if document:  # Word, HTML, Markdown…: MarkItDown, and no PDF fallbacks
+        selected = MarkItDownParser()
+        use_docling, parser = False, "auto"
+    elif parser == 'mineru':
         selected = MinerUParser(paths, config)
     elif parser == 'docling':
         selected = DoclingParser()

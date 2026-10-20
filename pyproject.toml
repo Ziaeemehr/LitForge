@@ -20,6 +20,9 @@ embed = ["fastembed>=0.4"]
 formulas = ["pix2text>=1.1.4", "rapidocr==3.9.0", "torch>=2.4", "torchvision>=0.19"]
 # The same on an NVIDIA GPU (about 7x faster): CUDA 12.8 builds, which RTX 50-series cards need.
 formulas-gpu = ["pix2text>=1.1.4", "rapidocr==3.9.0", "torch>=2.7", "torchvision>=0.22", "onnxruntime-gpu[cuda,cudnn]>=1.22"]
+documents = [
+    "markitdown[docx,pptx,xlsx]>=0.1.8",
+]
 
 [project.scripts]
 litforge = "litforge.cli:app"

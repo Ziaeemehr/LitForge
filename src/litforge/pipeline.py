@@ -14,8 +14,9 @@ from pathlib import Path
 from litforge.config import Config, Paths
 from litforge.discovery.run import DiscoveryReport, _Run
 from litforge.indexing.fts import current_runs, index_run
-from litforge.ingest import IngestResult, ingest_file, iter_pdfs
+from litforge.ingest import IngestResult, ingest_document, ingest_file, iter_pdfs
 from litforge.observability import NULL_LOG, EventLog
+from litforge.parsing.markitdown_parser import is_document
 from litforge.parsing.run import ParseResult, parse_artifact
 
 UPLOAD_PREFIX = re.compile(r"^[0-9a-f]{12}-")  # added by the web UI's upload handler
@@ -32,14 +33,15 @@ def add_pdfs(
     progress: Callable[[str], None] = lambda _: None,
 ) -> tuple[DiscoveryReport, list[IngestResult], list[ParseResult]]:
     """Safe to re-run: identical files are recognized and nothing is parsed or indexed twice."""
-    pdfs = iter_pdfs(sources)
+    pdfs = iter_pdfs(sources, documents=True)
     run = _Run(conn, project_id, "pdfs", {"title": label, "files": len(pdfs)})
     before = {r[0] for r in conn.execute("SELECT paper_id FROM project_papers WHERE project_id=?", (project_id,))}
     results: list[IngestResult] = []
     for i, pdf in enumerate(pdfs, 1):
         progress(f"[{i}/{len(pdfs)}] importing {pdf.name}")
         try:
-            res = ingest_file(conn, paths, pdf, project_id, log=log)
+            res = (ingest_document(conn, paths, pdf, project_id, log=log) if is_document(pdf)
+                   else ingest_file(conn, paths, pdf, project_id, log=log))
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the batch
             log.emit("ingest.error", path=str(pdf), error=repr(exc))
             res = IngestResult(path=str(pdf), status="error", message=repr(exc))

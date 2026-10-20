@@ -185,7 +185,7 @@ def test_add_my_pdfs_from_folder_and_uploads(server: str, corpus: Path, tmp_path
                                        "export_dir": str(chosen)})
     job = wait_job(server, job["id"])
     assert job["status"] == "done", job
-    assert job["messages"][-1].startswith("done: 3 PDFs, 2 new")
+    assert job["messages"][-1].startswith("done: 3 files, 2 new")
     assert not Path(up["path"]).exists()  # upload removed once it is in the library
     report = job["report"]  # what happened to each file, and where they are kept
     by_file = {i["file"]: i for i in report["items"]}
@@ -209,7 +209,7 @@ def test_add_my_pdfs_from_folder_and_uploads(server: str, corpus: Path, tmp_path
     assert "pdf: ../../pdfs/" in note and "- [PDF](../../pdfs/" in note
 
     _, job = call(server, "/api/add", {"project": "own", "folder": str(folder)})  # re-run: nothing new
-    assert wait_job(server, job["id"])["messages"][-1].startswith("done: 2 PDFs, 0 new, 1 already in the library")
+    assert wait_job(server, job["id"])["messages"][-1].startswith("done: 2 files, 0 new, 1 already in the library")
     assert call(server, "/api/add", {"project": "own", "folder": str(tmp_path / "missing")})[0] == 400
     assert call(server, "/api/add", {"project": "own", "files": [str(folder / "a.pdf")]})[0] == 400
     assert call(server, "/api/add", {"project": "own"})[0] == 400

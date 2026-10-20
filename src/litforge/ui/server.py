@@ -68,6 +68,7 @@ from litforge.llm.local_models import fit_check, ollama_change, ollama_pull
 from litforge.llm.secrets import KeyStore
 from litforge.observability import EventLog
 from litforge.parsing.formulas import FormulaEngine, Pix2TextEngine, formulas_available
+from litforge.parsing.markitdown_parser import is_document
 from litforge.parsing.mineru_parser import find_command, install_mineru, mineru_status
 from litforge.parsing.run import ParseResult, parse_artifact
 from litforge.parsing.vision import GatewayVision, OllamaVision, Vision, enhance_project, plan_project
@@ -229,6 +230,8 @@ class App:
             ).fetchone()
             if artifact is None or not (self.paths.root / artifact['pdf_path']).is_file():
                 raise LookupError('Paper has no PDF')
+            if not str(artifact['pdf_path']).lower().endswith('.pdf'):
+                raise ValueError('MinerU reads PDFs; this paper is a document, already read as text')
         finally:
             conn.close()
         def work(job: Job) -> None:
@@ -797,7 +800,7 @@ class App:
             new = sum(r.status == "new" for r in results)
             known = sum(r.status == "duplicate" and r.paper_id is not None for r in results)
             full = sum(p.status != "failed" for p in parsed)
-            summary = f"{len(results)} PDFs, {new} new, {known} already in the library; {full} with full text"
+            summary = f"{len(results)} files, {new} new, {known} already in the library; {full} with full text"
             if export is None:
                 job.messages.append(f"done: {summary}")
                 return report.run_id
@@ -1696,8 +1699,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             if not 0 < length <= MAX_UPLOAD_BYTES:
                 return self._error(HTTPStatus.BAD_REQUEST, "empty or too large upload")
             data = self.rfile.read(length)
-            if not data.startswith(b"%PDF-"):
-                return self._error(HTTPStatus.BAD_REQUEST, "not a PDF")
+            if not data.startswith(b"%PDF-") and not is_document(Path(name)):
+                return self._error(HTTPStatus.BAD_REQUEST, "not a PDF or a supported document")
             uploads = app.paths.root / "uploads"
             uploads.mkdir(parents=True, exist_ok=True)
             safe = re.sub(r"[^\w.\-]+", "_", Path(name).name)[:100] or "paper.pdf"

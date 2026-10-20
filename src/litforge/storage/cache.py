@@ -25,6 +25,18 @@ def config_hash(config: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:12]
 
 
+def store_document(paths: Paths, source: Path, sha256: str) -> Path:
+    """Copy a non-PDF document into the library as <sha256><its own extension> (atomic, never overwrites)."""
+    dest = paths.pdfs / f"{sha256}{source.suffix.lower()}"
+    if dest.exists():
+        return dest
+    paths.pdfs.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(f".tmp-{os.getpid()}")
+    shutil.copy2(source, tmp)
+    os.replace(tmp, dest)
+    return dest
+
+
 def store_pdf(paths: Paths, source: Path, sha256: str) -> Path:
     """Copy `source` into the library as <sha256>.pdf (atomic). Never overwrites or deletes."""
     dest = paths.pdfs / f"{sha256}.pdf"

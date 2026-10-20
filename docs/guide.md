@@ -331,6 +331,16 @@ parses and indexes it like `add`, so exports contain the full text. `--only not-
 `--only all` widens the selection. Paywalled papers are reported and skipped; add their PDFs with
 `add`.
 
+In the web page, **+ New → My PDFs** also takes:
+
+- **Links to articles**, one per line: the article's own page (its DOI is read from the tags publishers add for
+  indexers, never from the page's reference list), a `doi.org`, arXiv or OpenAlex link, or a direct PDF link. Each
+  paper joins the project and its open-access PDF is downloaded and read; a paywalled paper keeps its abstract.
+- **Documents other than PDF**: Word (`.docx`), PowerPoint, Excel, HTML, EPUB, Markdown and text files, read with
+  Microsoft's MarkItDown (the `documents` extra, part of the standard install) into the same structure as a PDF, so
+  search, export and the AI features work on them. A document has no pages: its quotes point to the file. Export
+  copies it beside the notes under its own extension.
+
 ### Papers similar to a paper you have
 
 ```bash
@@ -451,6 +461,8 @@ in another editor. Start from the **English article** or **Persian article** tem
 - **Assistant** opens beside the editor: ask about your text or the project's papers. Answers quote the papers
   (each quote is checked against the paper) and **Insert \\cite** adds a source at the cursor. With text selected you
   can ask for a change; it comes back as a suggestion to accept or reject, with the same checks as the AI actions.
+  With nothing selected you can ask it to add something at the cursor ("a table with 3 rows and 5 columns", "an
+  equation for …"); the LaTeX comes as a suggestion on its own lines, table cells as placeholders, never data.
   What is sent: your question, the selection (or a few lines around the cursor), the last messages and matching
   passages from the project's papers. The local model is used unless you assign a cloud model to `write_chat`.
 - **AI** works on the selection only: **Fix this error** (click a compile error first), **Rewrite: clearer /

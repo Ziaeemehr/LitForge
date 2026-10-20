@@ -634,6 +634,9 @@ def backfill_unknown_versions(conn: sqlite3.Connection, paths: Any) -> tuple[int
     changed = skipped = 0
     for row in rows:
         path = paths.root / str(row["pdf_path"])
+        if path.suffix.lower() != ".pdf":  # a document (Word, HTML…) has no printed version marks
+            skipped += 1
+            continue
         try:
             with pymupdf.open(path) as pdf:
                 first_page = pdf[0].get_text() if pdf.page_count else ""

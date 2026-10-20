@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
@@ -16,8 +17,9 @@ from litforge.discovery.records import WorkRecord
 from litforge.discovery.versions import infer_version
 from litforge.metadata.extract import ExtractedMetadata, extract_metadata, normalize_title
 from litforge.observability import NULL_LOG, EventLog
+from litforge.parsing.markitdown_parser import document_title, is_document
 from litforge.projects import add_paper
-from litforge.storage.cache import relative_to_root, sha256_file, store_pdf
+from litforge.storage.cache import relative_to_root, sha256_file, store_document, store_pdf
 from litforge.storage.db import dumps, new_id, now, transaction
 
 IngestStatus = Literal["new", "duplicate", "quarantined", "error"]
@@ -33,11 +35,14 @@ class IngestResult(BaseModel):
     possible_duplicates: list[str] = []
 
 
-def iter_pdfs(sources: Iterable[Path]) -> list[Path]:
+def iter_pdfs(sources: Iterable[Path], documents: bool = False) -> list[Path]:
+    """PDFs in the given files and folders; with `documents`, also Word, PowerPoint, Excel, HTML, EPUB,
+    Markdown and text files found in the folders."""
     found: list[Path] = []
     for src in sources:
         if src.is_dir():
-            found += [p for p in src.rglob("*") if p.is_file() and p.suffix.lower() == ".pdf"]
+            found += [p for p in src.rglob("*") if p.is_file() and not p.name.startswith(".")
+                      and (p.suffix.lower() == ".pdf" or (documents and is_document(p)))]
         elif src.is_file():
             found.append(src)
     return sorted({p.resolve() for p in found})
@@ -208,6 +213,36 @@ def ingest_file(
         possible_duplicates=[d[0] for d in dupes],
         message=f"possible duplicate of {len(dupes)} paper(s); review" if dupes else None,
     )
+
+
+def ingest_document(conn: sqlite3.Connection, paths: Paths, path: Path, project_id: str | None,
+                    log: EventLog = NULL_LOG) -> IngestResult:
+    """Add one document that is not a PDF: stored with its own extension, a new paper titled by its first
+    heading (or its file name). Its text is read later by the MarkItDown parser."""
+    sha = sha256_file(path)
+    existing = conn.execute("SELECT id, paper_id FROM artifacts WHERE sha256=?", (sha,)).fetchone()
+    if existing is not None:
+        with transaction(conn):
+            _add_alias(conn, existing["id"], path)
+            if project_id and existing["paper_id"]:
+                add_paper(conn, project_id, existing["paper_id"])
+        return IngestResult(path=str(path), status="duplicate", sha256=sha, paper_id=existing["paper_id"],
+                            artifact_id=existing["id"], message="identical file already in library")
+    stored = store_document(paths, path, sha)
+    title = document_title(path) or re.sub(r"^[0-9a-f]{12}-", "", path.stem).replace("_", " ")
+    paper_id, artifact_id, ts = new_id(), new_id(), now()
+    with transaction(conn):
+        conn.execute("INSERT INTO papers(id, title, norm_title, created_at, updated_at) VALUES (?,?,?,?,?)",
+                     (paper_id, title, normalize_title(title), ts, ts))
+        conn.execute(
+            "INSERT INTO artifacts(id, paper_id, sha256, pdf_path, size_bytes, page_count, status, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (artifact_id, paper_id, sha, relative_to_root(paths, stored), path.stat().st_size, 1, "ok", ts))
+        _add_alias(conn, artifact_id, path)
+        if project_id:
+            add_paper(conn, project_id, paper_id)
+    log.emit("ingest.document", path=str(path), sha256=sha, paper_id=paper_id)
+    return IngestResult(path=str(path), status="new", sha256=sha, paper_id=paper_id, artifact_id=artifact_id)
 
 
 def ingest_paths(

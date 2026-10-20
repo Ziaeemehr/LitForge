@@ -197,14 +197,15 @@ def test_installer_skips_prompts_without_tty_and_prints_hint(tmp_path: Path) -> 
     assert "Install MinerU" not in result.stdout
     assert "Optional tools" in result.stdout
     # Tectonic installs without a prompt
-    assert log == ["sync --extra embed --inexact", "run litforge shortcut",
+    assert log == ["sync --extra embed --extra documents --inexact", "run litforge shortcut",
                    "run litforge tools install tectonic --yes"]
 
 
 def test_installer_extras_and_failed_optional_install_are_nonfatal(tmp_path: Path) -> None:
     result, log = _run_installer(tmp_path, {"LITFORGE_EXTRAS": "mineru,pix2text", "FAIL_OPTIONAL": "pix2text"})
     assert result.returncode == 0, result.stderr
-    assert log == ["sync --extra embed --inexact", "run litforge shortcut", "run litforge tools install tectonic --yes",
+    assert log == ["sync --extra embed --extra documents --inexact", "run litforge shortcut",
+                   "run litforge tools install tectonic --yes",
                   "run litforge tools install mineru --yes", "run litforge tools install pix2text --yes"]
     assert "warning" in result.stderr.lower()
     assert "litforge tools install pix2text" in result.stderr

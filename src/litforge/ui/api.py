@@ -381,7 +381,8 @@ def _pdf_path(conn: sqlite3.Connection, paths: Paths, paper_id: str) -> Path | N
     row = conn.execute("SELECT pdf_path FROM artifacts WHERE paper_id=? AND status='ok' ORDER BY created_at LIMIT 1",
                        (paper_id,)).fetchone()
     path = paths.root / row["pdf_path"] if row else None
-    return path if path is not None and path.is_file() else None
+    # A Word, HTML or Markdown document is read like a PDF but is never served or shown as one.
+    return path if path is not None and path.suffix.lower() == ".pdf" and path.is_file() else None
 
 
 def paper_pdf(conn: sqlite3.Connection, paths: Paths, paper_id: str) -> tuple[Path, str]:

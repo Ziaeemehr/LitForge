@@ -355,6 +355,8 @@ def enhance_project(
         row = conn.execute("SELECT p.title, a.pdf_path FROM papers p JOIN artifacts a ON a.paper_id = p.id"
                            " WHERE a.id=?", (run["artifact_id"],)).fetchone()
         title = row["title"] or run["paper_id"]
+        if not str(row["pdf_path"]).lower().endswith(".pdf"):  # a document's text needs no page rewriting
+            continue
         label = f"[{i}/{len(runs)}] {title[:70]}"
         progress(label)
 

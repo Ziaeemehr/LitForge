@@ -1670,7 +1670,8 @@
     zone.appendChild(span);
   }
 
-  function isPdf(f) { return /\.pdf$/i.test(f.name); }
+  // PDFs and the documents MarkItDown reads (Word, PowerPoint, Excel, HTML, EPUB, Markdown, text).
+  function isPdf(f) { return /\.(pdf|docx|pptx|xlsx|html?|epub|md|markdown|txt)$/i.test(f.name); }
 
   // A dropped folder arrives as a directory entry: walk it (readEntries returns batches).
   function readEntry(entry) {
@@ -1695,7 +1696,7 @@
     var zone = $('drop-pdfs');
     function add(list) {
       var picked = list.filter(function (f) { return f && isPdf(f); });
-      if (!picked.length) { toast('No PDF files found'); return; }
+      if (!picked.length) { toast('No PDF or document files found'); return; }
       setPdfs(state.pdfs.concat(picked));
     }
     $('pick-pdfs').onclick = function (e) { e.preventDefault(); $('files-pdfs').click(); };

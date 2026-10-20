@@ -260,10 +260,10 @@
       <form id="form-pdfs" hidden>
         <label class="f">Folder on this computer <small>(subfolders included)</small></label>
         <input type="text" id="pdf-folder" placeholder="~/papers/my-review">
-        <label class="f">or PDF files</label>
-        <div class="drop" id="drop-pdfs">Drop PDFs or a folder here, or <a href="#" id="pick-pdfs">choose files</a>
+        <label class="f">or files <small>(PDF, Word, PowerPoint, Excel, HTML, EPUB, Markdown or text)</small></label>
+        <div class="drop" id="drop-pdfs">Drop files or a folder here, or <a href="#" id="pick-pdfs">choose files</a>
           · <a href="#" id="pick-dir">choose a folder</a></div>
-        <input type="file" id="files-pdfs" accept="application/pdf" multiple hidden>
+        <input type="file" id="files-pdfs" accept=".pdf,.docx,.pptx,.xlsx,.html,.htm,.epub,.md,.markdown,.txt" multiple hidden>
         <input type="file" id="dir-pdfs" webkitdirectory multiple hidden>
         <label class="f" for="pdf-links">or links to articles <small>(one per line: the article's page, a doi.org or arXiv link, or a PDF link)</small></label>
         <textarea id="pdf-links" rows="3" placeholder="https://www.nature.com/articles/…&#10;https://arxiv.org/abs/2007.09114"></textarea>

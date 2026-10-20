@@ -17,6 +17,7 @@ from litforge.jobs import check_cancelled
 from litforge.parsing.canonical import read_canonical, to_markdown
 from litforge.parsing.display import parse_status_label, parser_install_hint
 from litforge.parsing.formulas import FORMULAS
+from litforge.parsing.markitdown_parser import DOCUMENT_SUFFIXES
 from litforge.parsing.vision import VISION, read_page_markdown
 from litforge.projects import MARK_SCOPES
 
@@ -131,12 +132,14 @@ def export_markdown(
             front["screening_reason"] = json.loads(row["s_result"]).get("reason", "")
         pdf = None
         if row["pdf_path"] and (paths.root / row["pdf_path"]).is_file():
-            pdf = pdf_dir / f"{slug}.pdf"
+            suffix = Path(row["pdf_path"]).suffix.lower()  # a Word or HTML document keeps its own extension
+            pdf = pdf_dir / f"{slug}{suffix}"
             pdf.parent.mkdir(exist_ok=True)
             if not pdf.exists() or pdf.stat().st_size != (paths.root / row["pdf_path"]).stat().st_size:
                 shutil.copy2(paths.root / row["pdf_path"], pdf)
-            front["pdf"] = f"../../pdfs/{slug}.pdf"
-        links = ([f"- [PDF](../../pdfs/{slug}.pdf)"] if pdf else []) + (
+            front["pdf" if suffix == ".pdf" else "source_file"] = f"../../pdfs/{pdf.name}"
+        file_label = "PDF" if pdf is None or pdf.suffix == ".pdf" else "Original file"
+        links = ([f"- [{file_label}](../../pdfs/{pdf.name})"] if pdf else []) + (
             [f"- DOI ({row['doi_status']}): https://doi.org/{row['doi']}"] if row["doi"] else [])
         body = "_Not parsed yet._\n" if row["sha256"] else f"# {title}\n\n_No PDF in the library yet._\n"
         if not row["sha256"] and row["abstract"]:
@@ -148,22 +151,24 @@ def export_markdown(
                 dest = root / "assets" / slug / "assets"
                 shutil.copytree(out_dir / "assets", dest, dirs_exist_ok=True)
             body = to_markdown(doc, title, asset_prefix=f"../assets/{slug}/", page_md=read_page_markdown(out_dir))
-        body = f"> Source version: **{version_label}**\n\n" + body
+        if version_label:  # an unknown version is left out rather than written as "None"
+            body = f"> Source version: **{version_label}**\n\n" + body
         if links:
             body += "\n## Links\n\n" + "\n".join(links) + "\n"
         header = "---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n\n"
         (kb / f"{slug}.md").write_text(header + body, encoding="utf-8")
         index_lines.append(
             f"| [{title.replace('|', '/')}](knowledge_base/{slug}.md) | {row['year'] or ''} "
-            f"| {version_label} | {parse_status_label(front['parse_status'])}"
+            f"| {version_label or ''} | {parse_status_label(front['parse_status'])}"
             + (f"; {parse_hint}" if row["status"] == "needs_docling" and parse_hint else "")
-            + f" | {f'[PDF](../pdfs/{slug}.pdf)' if pdf else ''} |"
+            + f" | {f'[{file_label}](../pdfs/{pdf.name})' if pdf else ''} |"
             + (f" {row['s_decision'] or ''} |" if screened else "")
         )
     for slug in previous - set(written.values()):
         (kb / f"{slug}.md").unlink(missing_ok=True)
         shutil.rmtree(root / "assets" / slug, ignore_errors=True)
-        (pdf_dir / f"{slug}.pdf").unlink(missing_ok=True)
+        for suffix in (".pdf", *DOCUMENT_SUFFIXES):  # the copied PDF or document of a paper no longer exported
+            (pdf_dir / f"{slug}{suffix}").unlink(missing_ok=True)
     _remove_pdfs(root / "pdfs", previous | set(written.values()))  # older exports kept PDFs in markdown/pdfs
     (root / "README.md").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
     (root / "manifest.json").write_text(
