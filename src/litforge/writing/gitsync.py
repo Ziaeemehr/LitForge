@@ -40,7 +40,7 @@ def validate_url(url: str) -> str:
 
 def mask(text: str) -> str:
     """A token in a remote URL (https://user:token@host/...) is never shown."""
-    return re.sub(r'(://[^/@\s:]+:)[^@/\s]+@', r'\1***@', text)
+    return re.sub(r'(://)[^/@\s]+@', r'\1***@', text)
 
 
 def _env() -> dict[str, str]:
@@ -59,8 +59,10 @@ def _git(doc: Document | Path, *args: str, network: bool = False,
     try:
         result = subprocess.run([git, *_CONFIG, *args], cwd=folder, env=_env(), capture_output=True,
                                 text=True, errors='replace', timeout=120 if network else 30)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise DocumentError(f'git failed: {exc}') from exc
+    except subprocess.TimeoutExpired:  # its text holds the command line, URL (and token) included
+        raise DocumentError(f'git timed out after {120 if network else 30} s') from None
+    except OSError as exc:
+        raise DocumentError(mask(f'git failed: {exc}')) from None
     if check and result.returncode:
         raise DocumentError(_error(result))
     return result
@@ -78,6 +80,23 @@ def _error(result: subprocess.CompletedProcess[str]) -> str:
 
 def _out(doc: Document, *args: str) -> str:
     return _git(doc, *args, check=False).stdout.strip()
+
+
+# Repository settings that make git run a program. LitForge's own -c options and environment cover hooks, fsmonitor
+# and SSH; a repository the user connects may carry others (a cloned one never does: git writes its config).
+_RUNS = re.compile(r'^(filter\.|merge\..+\.driver$|diff\..+\.(textconv|command)$|include\.|includeif\.|'
+                   r'core\.(sshcommand|askpass|editor|pager|gitproxy|hookspath|fsmonitor)$|sequence\.editor$|'
+                   r'credential\.|remote\..+\.(uploadpack|receivepack|proxy)$|gpg\.|pager\.|alias\.|'
+                   r'http\..*proxy|protocol\.)', re.I)
+
+
+def _check_config(doc: Document) -> None:
+    keys = _out(doc, 'config', '--local', '--name-only', '--list').splitlines()
+    risky = sorted({k for k in keys if _RUNS.match(k.strip())})
+    if risky:
+        raise DocumentError('this repository has settings that runs programs (' + ', '.join(risky[:4]) +
+                            '); LitForge does not sync it. Remove them with git config --local --unset, or sync it '
+                            'yourself')
 
 
 def _repo(doc: Document) -> bool:
@@ -192,6 +211,19 @@ def _commit_all(doc: Document, message: str) -> None:
         _commit(doc, message)
 
 
+def _check_resolved(doc: Document, conflicts: list[str]) -> None:
+    """Every file git could not merge must be settled before the merge is committed: no markers left in a text file
+    (whatever its type: .sty and .cls too), and a binary file, which has no markers, cannot be judged at all."""
+    for name in conflicts:
+        path = wd.resolve_inside(doc.folder, name, allow_hidden=True)
+        data = path.read_bytes() if path.is_file() else b''
+        if b'\0' in data[:8000]:
+            raise DocumentError(f'{name} changed on both sides and is not text, so there is nothing to compare: '
+                                f'Abort merge, agree on one version of it, and sync again')
+        if re.search(rb'^(<<<<<<< |=======\r?$|>>>>>>> )', data, re.M):
+            raise DocumentError(f'resolve the conflict markers in {name} before syncing')
+
+
 def sync(doc: Document) -> dict[str, Any]:
     """Commit, fetch, merge, push. The document's lock is held only for the local steps: saves must not wait while
     git talks to the remote (up to two minutes)."""
@@ -205,16 +237,11 @@ def sync(doc: Document) -> dict[str, Any]:
         branch = before['branch']
         if not branch:
             raise DocumentError('check out a branch before syncing')
+        _check_config(doc)
         _exclude(doc)
         finishing = before['merging']
         if finishing:
-            tracked = _git(doc, 'ls-files', '-z').stdout.split('\0')
-            for name in tracked:
-                if name.lower().endswith(('.tex', '.bib')):
-                    path = wd.resolve_inside(doc.folder, name)
-                    if path.exists() and re.search(r'^(<<<<<<< |=======|>>>>>>> )',
-                                                  path.read_text(errors='replace'), re.M):
-                        raise DocumentError('resolve the conflict markers before syncing')
+            _check_resolved(doc, before['conflicts'])
             _git(doc, 'add', '-A', '--', '.')
             _commit(doc, 'LitForge: resolve merge')
         else:

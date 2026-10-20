@@ -1913,3 +1913,29 @@ test('a document without a remote offers to connect one; cloning opens the new d
   assert.deepEqual({ ...clone }, { project: 'demo', name: 'abc123', url: 'https://git.overleaf.com/abc123' });
   assert.ok(calls.some(c => c[0] === 'GET' && c[1].startsWith('/api/write/doc?doc=d1')));
 });
+
+test('the reload after a sync keeps text typed while it was loading', async () => {
+  let release;
+  const env = gitSetup(CONNECTED);
+  await env.ctx.openWriteDoc('d1');
+  const area = env.$('write-cm').children[0];
+  const realApi = env.ctx.api;
+  env.ctx.api = url => url.startsWith('/api/write/file') ? new Promise(r => { release = () => r({ name: 'main.tex', text: 'from disk', hash: 'h9' }); }) : realApi(url);
+  const syncing = env.ctx.syncWriteGit();
+  for (let i = 0; i < 20 && !release; i++) await new Promise(r => setImmediate(r));
+  area.value = 'typed meanwhile';
+  release();
+  await syncing;
+  assert.equal(env.$('write-cm').children[0].value, 'typed meanwhile');
+});
+
+test('a failed sync still refreshes the status and the files (a merge may have happened before the push failed)', async () => {
+  const env = gitSetup(CONNECTED);
+  env.ctx.api = (orig => url => url.startsWith('/api/jobs/git1') ? Promise.resolve({ status: 'failed', error: 'push rejected' }) : orig(url))(env.ctx.api);
+  await env.ctx.openWriteDoc('d1');
+  const before = env.calls.filter(c => c[0] === 'GET' && c[1].startsWith('/api/write/file')).length;
+  await env.ctx.syncWriteGit();
+  assert.match(env.$('write-git-msg').textContent, /push rejected/);
+  assert.ok(env.calls.some(c => c[0] === 'GET' && c[1].startsWith('/api/write/git?')));
+  assert.ok(env.calls.filter(c => c[0] === 'GET' && c[1].startsWith('/api/write/file')).length > before);
+});

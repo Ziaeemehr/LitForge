@@ -2161,7 +2161,9 @@
   // Unsaved text is never dropped: the switch waits for the save and is refused while a conflict or a failed
   // save leaves text that is only in the editor. `discard` is for "Reload theirs" and restore, which mean it.
   // Resolves to true when the file was opened.
-  function openWriteFile(name, discard) {
+  // `unchanged` (a reload): the editor text it may replace; if the user typed meanwhile, the editor is kept.
+  function openWriteFile(name, discard, unchanged) {
+    var doc = W.doc;
     var load = function () {
       if (!discard && (W.dirty || W.conflictHash)) {
         $('write-file').value = W.file;
@@ -2174,6 +2176,9 @@
         .catch(function () { return { notes: [] }; });
       return Promise.all([fileReq, notesReq])
         .then(function (both) {
+          if (unchanged != null && (W.doc !== doc || W.file !== name || !W.editor || W.editor.getText() !== unchanged)) {
+            return false;  // typed (or moved on) while it loaded: a later save shows the usual reload/keep choice
+          }
           var file = both[0];
           dropWriteSuggestion();
           $('write-versions').hidden = true; VERS.selected = null;  // versions belong to the file that was open
@@ -2938,21 +2943,22 @@
   // The files may have changed on disk (pulled): the file list and the open file are read again.
   function reloadWriteFiles() {
     var doc = W.doc;
+    var text = W.editor ? W.editor.getText() : null, file = W.file;
     return api('/api/write/doc?doc=' + encodeURIComponent(doc.id)).then(function (info) {
       if (W.doc !== doc) return;
       doc.files = info.files; fillWriteFileList(doc);
-      return W.dirty ? null : openWriteFile(W.file, true);
+      return W.dirty || W.file !== file ? null : openWriteFile(file, true, text);
     }).then(showWriteConflicts);
   }
 
   function syncWriteGit() {
-    var doc = W.doc;
+    var doc = W.doc, started = false;
     $('write-git-msg').textContent = 'Saving…';
     return saveWriteNow().then(function () {
       if (W.dirty || W.conflictHash) throw new Error('Save the file first (see the banner above).');
       $('write-git-msg').textContent = 'Syncing with the remote…';
       return post('/api/write/git/sync', { doc: doc.id });
-    }).then(function (job) { return waitJob(job.id); }).then(function (j) {
+    }).then(function (job) { started = true; return waitJob(job.id); }).then(function (j) {
       if (W.doc !== doc) return;
       if (j.status === 'failed') throw new Error(j.error || 'git sync failed');
       var r = j.report;
@@ -2961,7 +2967,15 @@
         'Conflicts in ' + r.conflicts.join(', ') + ': choose a version for each marked block, then Sync again (or Abort merge).' :
         'Synced: ' + plural(r.pulled, 'commit') + ' pulled, ' + r.pushed + ' pushed.';
       return reloadWriteFiles();
-    }).catch(function (e) { $('write-git-msg').textContent = e.message; });
+    }).catch(function (e) {
+      $('write-git-msg').textContent = e.message;
+      // A failed push may follow a merge that already changed the files: show what is on disk now.
+      if (started && W.doc === doc) {
+        return api('/api/write/git?doc=' + encodeURIComponent(doc.id)).then(function (st) {
+          if (W.doc === doc) renderWriteGit(st);
+        }).catch(function () {}).then(reloadWriteFiles);
+      }
+    });
   }
 
   function abortWriteGit() {

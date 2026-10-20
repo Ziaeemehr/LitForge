@@ -429,6 +429,12 @@ in another editor. Start from the **English article** or **Persian article** tem
   or a LitForge export. The main file is found by its `\documentclass`, and cited papers go into the `.bib` file the
   main file names (`\bibliography{refs}` → `refs.bib`). ZIPs of at most 100 MB, 2000 files and 200 MB unpacked are
   accepted; links and paths outside the document are refused.
+- **Git sync** (in **More**) keeps a document in a git remote, both ways: Overleaf's git link, GitHub, GitLab or a
+  bare repository on a shared drive. **Connect** a remote, then **Sync now** saves, commits, pulls the other side's
+  changes and pushes yours; a version is kept before every sync. To work on an existing Overleaf or GitHub project,
+  use **Clone from git** on the document list. When both sides changed the same lines, the editor lists the
+  conflicting blocks: keep yours, theirs or both for each, then **Sync** again (or **Abort merge**). LitForge uses
+  your own git sign-in (a credential helper or an SSH key) and never asks for passwords; tokens in URLs are hidden.
 - **Compile** (Ctrl/Cmd+Enter) builds the PDF shown on the right. Errors and warnings appear under the editor with
   their line; click one to jump to it. Install the engine once in Settings → Optional tools (Tectonic); the first
   compile downloads the LaTeX packages it needs (about two minutes), later compiles take about a second and work

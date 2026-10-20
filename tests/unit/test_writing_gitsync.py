@@ -276,7 +276,7 @@ def test_saving_is_not_blocked_while_git_talks_to_the_remote(env, monkeypatch):
 def test_credentials_in_urls_are_masked(env):
     _, _, doc, remote = env
     gs.connect(doc, 'https://ann:secret-token@example.com/repo.git')
-    assert gs.status(doc)['remote'] == 'https://ann:***@example.com/repo.git'
+    assert gs.status(doc)['remote'] == 'https://***@example.com/repo.git'
     assert 'secret-token' not in gs.mask('fatal: unable to access https://ann:secret-token@example.com/repo.git/')
 
 
@@ -303,3 +303,60 @@ def test_connecting_to_a_remote_with_another_project_says_to_clone_it(env, tmp_p
         gs.sync(doc)
     assert 'refs/heads/main' not in git(remote, 'for-each-ref')
     assert gs.status(doc)['merging'] is False
+
+
+# ---- round 3 (Codex review): repository config that runs programs, conflicts in any file, secrets ---------
+
+
+@pytest.mark.parametrize('key,value', [('filter.pwn.clean', 'touch pwned; cat'), ('merge.x.driver', 'touch pwned'),
+                                       ('diff.x.textconv', 'touch pwned'), ('core.sshCommand', 'touch pwned'),
+                                       ('include.path', '/tmp/other.config'),
+                                       ('remote.origin.uploadpack', 'touch pwned'),
+                                       ('core.pager', 'touch pwned'), ('credential.helper', '!touch pwned')])
+def test_repository_config_that_runs_programs_is_refused(env, key, value):
+    _, _, doc, remote = env
+    gs.connect(doc, str(remote))
+    git(doc.folder, 'config', '--local', key, value)
+    (doc.folder / '.gitattributes').write_text('*.tex filter=pwn merge=x diff=x\n')
+    with pytest.raises(wd.DocumentError, match='runs programs'):
+        gs.sync(doc)
+    assert not (doc.folder / 'pwned').exists()
+
+
+def conflict_in(env, name, mine, theirs):
+    doc, other = pair(env)
+    (doc.folder / name).write_bytes(b'base\n')
+    gs.sync(doc)
+    gs.sync(other)
+    (other.folder / name).write_bytes(theirs)
+    gs.sync(other)
+    (doc.folder / name).write_bytes(mine)
+    return doc, gs.sync(doc)
+
+
+def test_unresolved_markers_in_any_text_file_block_the_sync(env):
+    doc, result = conflict_in(env, 'package.sty', b'mine\n', b'theirs\n')
+    assert result['conflicts'] == ['package.sty']
+    with pytest.raises(wd.DocumentError, match='package.sty'):
+        gs.sync(doc)
+
+
+def test_a_binary_conflict_needs_a_choice(env):
+    doc, result = conflict_in(env, 'figures/plot.png', b'\x89PNG\0mine', b'\x89PNG\0theirs')
+    assert result['conflicts'] == ['figures/plot.png']
+    with pytest.raises(wd.DocumentError, match='plot.png'):
+        gs.sync(doc)
+
+
+def test_secrets_never_appear(env, monkeypatch):
+    assert gs.mask('https://secret-token@example.com/r.git') == 'https://***@example.com/r.git'
+    assert gs.mask('https://ann:pw@example.com/r.git') == 'https://***@example.com/r.git'
+
+    def stall(*a, **k):
+        raise subprocess.TimeoutExpired(['git', 'clone', 'https://ann:secret@example.com/r.git'], 120)
+
+    monkeypatch.setattr(gs.subprocess, 'run', stall)
+    with pytest.raises(wd.DocumentError) as info:
+        gs._git(env[2], 'fetch', network=True)
+    assert 'secret' not in str(info.value) and 'timed out' in str(info.value)
+    assert info.value.__cause__ is None and info.value.__suppress_context__
