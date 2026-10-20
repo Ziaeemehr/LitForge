@@ -689,6 +689,11 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .write-suggestion .sg-actions button:hover { background: var(--chip); color: var(--ink); }
 .write-suggestion .sg-actions .sg-apply { background: var(--accent); color: #fff; font-weight: 600; }
 .write-suggestion .sg-actions .sg-apply:hover { background: var(--accent); filter: brightness(1.08); color: #fff; }
+.write-image { top: 14px; bottom: auto; }
+.write-image .img-drop { border: 1px dashed var(--line); border-radius: 9px; padding: 14px 10px; text-align: center;
+  color: var(--muted); font-size: 12px; outline: none; }
+.write-image .img-drop:focus { border-color: var(--accent); color: var(--ink); }
+.write-image .img-pick { color: var(--accent); cursor: pointer; text-decoration: underline; }
 @media (max-width: 900px) {
   .write-split, .write-split[data-layout] { grid-template-columns: 1fr; }
   .write-split[data-layout="split"] .write-gutter { display: none; }

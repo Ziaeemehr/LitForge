@@ -221,10 +221,14 @@ def assist(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str,
     page sends approved=true. Otherwise the call runs as a job whose report is the suggestion."""
     args = (str(body.get("action") or ""), str(body.get("text") or ""), str(body.get("error") or ""),
             int(body.get("first_line") or 1), int(body.get("error_line") or 0))
-    req = wassist.prepare(conn, doc, *args)
+    extra: dict[str, Any] = {"context": str(body.get("context") or ""),
+                             "image": wassist.decode_image(str(body.get("image") or "")),
+                             "pad_before": body.get("pad_before") is True, "pad_after": body.get("pad_after") is True}
+    req = wassist.prepare(conn, doc, *args, **extra)
     gateway = app.make_gateway(conn)
     preview = wassist.preview(gateway, req).model_dump()
-    sent = {"characters": len(req.text), "evidence": max(0, len(req.packet.items) - 1) if req.packet else 0}
+    sent = {"characters": len(req.text) + len(req.context), "images": len(req.images),
+            "evidence": len(req.evidence)}
     if preview["blocked_reason"]:
         raise ValueError(f"the model route is blocked: {preview['blocked_reason']}")
     approved = body.get("approved") is True
@@ -237,7 +241,7 @@ def assist(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str,
         conn = app.db()
         try:
             gateway = app.make_gateway(conn)
-            job.report = wassist.run(conn, gateway, doc, wassist.prepare(conn, doc, *args), file,
+            job.report = wassist.run(conn, gateway, doc, wassist.prepare(conn, doc, *args, **extra), file,
                                      approved=approved)
         finally:
             conn.close()

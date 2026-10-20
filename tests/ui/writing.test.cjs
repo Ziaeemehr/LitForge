@@ -1168,3 +1168,130 @@ test('a source inserted after switching documents goes nowhere', async () => {
   assert.equal($('write-cm').children[0].value, 'Other.');
   assert.ok(calls.some(c => c[0] === 'toast' && /lee2021/.test(c[1])));
 });
+
+/* ---- title, abstract and LaTeX from an image ---- */
+
+const PAPER = '\\documentclass{article}\n% \\title{Old commented}\n\\title{A {draft} title}\n\\begin{document}\n\\maketitle\n' +
+  '\\begin{abstract}\nShort.\n\\end{abstract}\nWe fit 40 subjects. % a note\n\\end{document}\n';
+
+test('the AI menu offers title, abstract and the two image actions', () => {
+  for (const v of ['title', 'abstract', 'equation-image', 'table-image']) assert.match(html, new RegExp('<option value="' + v + '"'));
+  assert.match(html, /id="write-image"/);
+  assert.match(html, /id="write-image-file"[^>]*accept="[^"]*image\/png/);
+});
+
+test('titleRange and abstractRange find the content, skip comments and nested braces', () => {
+  const { ctx } = setup();
+  const t = ctx.titleRange(PAPER);
+  assert.equal(PAPER.slice(t.from, t.to), 'A {draft} title');
+  const a = ctx.abstractRange(PAPER);
+  assert.equal(PAPER.slice(a.from, a.to), '\nShort.\n');
+  assert.equal(ctx.titleRange('\\begin{document}x\\end{document}'), null);
+  assert.equal(ctx.abstractRange('% \\begin{abstract}x\\end{abstract}'), null);
+  assert.equal(ctx.titleRange('\\title{never closed'), null);
+  const opt = '\\title[Short]{Long one}';
+  const o = ctx.titleRange(opt);
+  assert.equal(opt.slice(o.from, o.to), 'Long one');
+});
+
+test('documentBody is the text between begin and end document without comments', () => {
+  const { ctx } = setup();
+  const body = ctx.documentBody(PAPER);
+  assert.match(body, /We fit 40 subjects\./);
+  assert.doesNotMatch(body, /a note|documentclass|Old commented/);
+  assert.equal(ctx.documentBody('plain 50\\% text % gone'), 'plain 50\\% text ');
+});
+
+test('"Suggest title" sends the current title and the document, and applies to the title only', async () => {
+  const report = { id: 's2', task: 'write_summary', action: 'title', provider: 'ollama', model: 'qwen', note: '', flags: [],
+    original: 'A {draft} title', citations: [], hunks: [{ index: 0, start: 0, end: 15, old: 'A {draft} title', new: 'Better', flags: [] }] };
+  const { ctx, $, calls } = aiSetup(report);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = PAPER;
+  await ctx.runWriteAi('title', false);
+  const sent = calls.find(c => c[0] === '/api/write/assist')[1];
+  assert.equal(sent.text, 'A {draft} title');
+  assert.match(sent.context, /We fit 40 subjects/);
+  assert.equal($('write-suggestion-title').textContent, 'Title');
+  await ctx.applyWriteSuggestion();
+  assert.match(area.value, /\\title\{Better\}\n\\begin\{document\}/);
+});
+
+test('title and abstract need the command or environment first', async () => {
+  const { ctx, $, calls } = aiSetup(REPORT);
+  await ctx.openWriteDoc('d1');
+  $('write-cm').children[0].value = '\\begin{document}\nText.\n\\end{document}';
+  await ctx.runWriteAi('title', false);
+  await ctx.runWriteAi('abstract', false);
+  const toasts = calls.filter(c => c[0] === 'toast').map(c => c[1]).join(' | ');
+  assert.match(toasts, /\\title\{\}/); assert.match(toasts, /\\begin\{abstract\}/);
+  assert.ok(!calls.some(c => c[0] === '/api/write/assist'));
+});
+
+test('imagePads puts an inserted block on its own lines', () => {
+  const { ctx } = setup();
+  assert.deepEqual({ ...ctx.imagePads('ab\ncd', 3) }, { pad_before: false, pad_after: true });
+  assert.deepEqual({ ...ctx.imagePads('ab\ncd', 4) }, { pad_before: true, pad_after: true });
+  assert.deepEqual({ ...ctx.imagePads('ab\n', 3) }, { pad_before: false, pad_after: false });
+  assert.deepEqual({ ...ctx.imagePads('', 0) }, { pad_before: false, pad_after: false });
+});
+
+test('pastedImage takes an image from the clipboard and ignores text', () => {
+  const { ctx } = setup();
+  const file = { type: 'image/png', size: 10 };
+  const ev = items => ({ clipboardData: { items } });
+  assert.equal(ctx.pastedImage(ev([{ kind: 'string', type: 'text/plain' }, { kind: 'file', type: 'image/png', getAsFile: () => file }])), file);
+  assert.equal(ctx.pastedImage(ev([{ kind: 'string', type: 'text/plain' }])), null);
+  assert.equal(ctx.pastedImage({}), null);
+});
+
+test('equation from an image: the panel opens, the image is sent and the result goes in at the cursor', async () => {
+  const report = { id: 's3', task: 'write_image', action: 'equation-image', provider: 'ollama', model: 'qwen2.5vl:7b',
+    note: '', flags: ['transcribed from an image: check every symbol and number against it'], original: '', citations: [],
+    hunks: [{ index: 0, start: 0, end: 0, old: '', new: '\n\\[ x \\]\n', flags: [] }] };
+  const { ctx, $, calls } = aiSetup(report);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Before it. After it.'; area.setSelectionRange(10, 10);
+  await ctx.runWriteAi('equation-image', false);
+  assert.equal($('write-image').hidden, false);
+  assert.ok(!calls.some(c => c[0] === '/api/write/assist'));  // nothing is sent before an image is given
+  await ctx.sendWriteImage('data:image/png;base64,iVBORw0KGgo=');
+  assert.equal($('write-image').hidden, true);
+  const sent = calls.find(c => c[0] === '/api/write/assist')[1];
+  assert.equal(sent.action, 'equation-image'); assert.equal(sent.text, '');
+  assert.equal(sent.image, 'data:image/png;base64,iVBORw0KGgo=');
+  assert.equal(sent.pad_before, true); assert.equal(sent.pad_after, true);
+  assert.equal($('write-suggestion-title').textContent, 'From image');
+  await ctx.applyWriteSuggestion();
+  assert.equal(area.value, 'Before it.\n\\[ x \\]\n After it.');
+});
+
+test('an image result is refused when the text before the cursor changed', async () => {
+  const report = { id: 's4', task: 'write_image', provider: 'ollama', model: 'v', note: '', flags: [], original: '', citations: [],
+    hunks: [{ index: 0, start: 0, end: 0, old: '', new: 'X', flags: [] }] };
+  const { ctx, $, calls } = aiSetup(report);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'abc def'; area.setSelectionRange(3, 3);
+  await ctx.runWriteAi('table-image', false);
+  await ctx.sendWriteImage('data:image/png;base64,AA==');
+  area.value = 'abZc def';
+  await ctx.applyWriteSuggestion();
+  assert.equal(area.value, 'abZc def');
+  assert.ok(calls.some(c => c[0] === 'toast' && /changed since/.test(c[1])));
+});
+
+test('closing the image panel sends nothing; a too large file is refused', async () => {
+  const { ctx, $, calls } = aiSetup(REPORT);
+  await ctx.openWriteDoc('d1');
+  await ctx.runWriteAi('equation-image', false);
+  ctx.closeWriteImage();
+  assert.equal($('write-image').hidden, true);
+  await ctx.writeImageFile({ type: 'image/png', size: 9 * 1024 * 1024 });
+  assert.ok(calls.some(c => c[0] === 'toast' && /at most 8 MB/.test(c[1])));
+  await ctx.writeImageFile({ type: 'application/pdf', size: 10 });
+  assert.ok(calls.some(c => c[0] === 'toast' && /PNG, JPEG/.test(c[1])));
+  assert.ok(!calls.some(c => c[0] === '/api/write/assist'));
+});

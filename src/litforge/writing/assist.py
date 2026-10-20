@@ -1,8 +1,11 @@
-"""Three model actions on a selection: fix a compile error, rewrite, suggest citations. Nothing is applied here:
-each result is a list of hunks the user accepts or rejects, with guard flags computed before it is shown."""
+"""Model actions in the editor: fix a compile error, rewrite or translate a selection, suggest citations, propose
+a title or an abstract from the document, and LaTeX for an equation or table from an image. Nothing is applied
+here: each result is a list of hunks the user accepts or rejects, with guard flags computed before it is shown."""
 
 from __future__ import annotations
 
+import base64
+import binascii
 import difflib
 import html
 import json
@@ -18,7 +21,9 @@ from litforge.analysis.prompts import (
     WRITE_PROMPT_VERSION,
     write_cite_messages,
     write_fix_messages,
+    write_image_messages,
     write_rewrite_messages,
+    write_summary_messages,
 )
 from litforge.analysis.retrieve import retrieve_for_question
 from litforge.analysis.validation import QuoteLocator, numbers
@@ -29,8 +34,15 @@ from litforge.writing.cite import cited_keys
 from litforge.writing.documents import Document, create_snapshot
 
 ACTIONS = {"fix": "write_fix", "clearer": "write_rewrite", "shorter": "write_rewrite",
-           "translate-en": "write_rewrite", "translate-fa": "write_rewrite", "cite": "write_cite"}
+           "translate-en": "write_rewrite", "translate-fa": "write_rewrite", "cite": "write_cite",
+           "title": "write_summary", "abstract": "write_summary",
+           "equation-image": "write_image", "table-image": "write_image"}
+SUMMARY = {"title", "abstract"}  # the text is the current title or abstract; the document comes as context
+IMAGE = {"equation-image", "table-image"}  # no text: the result is inserted at the cursor
 MAX_SELECTION = 12_000
+MAX_CONTEXT = 24_000  # characters of the document read for a title or an abstract (about 6000 tokens)
+MAX_IMAGE = 8 * 1024 * 1024
+_IMAGE_TYPES = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
 _REPLACEMENT = {"type": "object", "properties": {"replacement": {"type": "string"}, "note": {"type": "string"}},
                 "required": ["replacement"]}
 _CITED = {"type": "object", "properties": {
@@ -63,24 +75,31 @@ class Request:
     packet: EvidencePacket | None = None
     schema: dict[str, Any] = field(default_factory=dict)
     evidence: dict[str, Any] = field(default_factory=dict)  # evidence id -> EvidenceSpan for citations
+    context: str = ""  # the document, for a title or an abstract (numbers in it are allowed)
+    images: list[bytes] = field(default_factory=list)
+    pad: tuple[bool, bool] = (False, False)  # a newline before / after an inserted image result
 
 
 def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, error: str = "",
-            first_line: int = 1, error_line: int = 0) -> Request:
-    """Build what would be sent; only the selection (and, for citations, the retrieved evidence) is included."""
+            first_line: int = 1, error_line: int = 0, *, context: str = "", image: bytes | None = None,
+            pad_before: bool = False, pad_after: bool = False) -> Request:
+    """Build what would be sent; only the selection (and, for citations, the retrieved evidence; for a title or
+    an abstract, the document; for an image action, the image) is included."""
     if action not in ACTIONS:
         raise AssistError(f"unknown action; use one of {', '.join(ACTIONS)}")
-    if not text.strip():
+    if action in IMAGE:
+        return _prepare_image(action, image or b"", pad_before, pad_after)
+    if not text.strip() and action not in SUMMARY:
         raise AssistError("select some text first")
     if len(text) > MAX_SELECTION:
         raise AssistError(f"select at most {MAX_SELECTION} characters")
     req = Request(action=action, text=text, error=error, first_line=first_line, task=ACTIONS[action],
                   error_line=max(0, error_line - first_line + 1) if error_line else 0)
-    if action != "fix":
+    if action not in {"fix", *SUMMARY}:
         req.wrap = lr_wrapper(text)
     sent = model_text(req)
     # The user's draft is unpublished work: mark it sensitive so a cloud route always needs approval.
-    selection = EvidenceItem(id="selection", paper_id="manuscript", text=text, page=1)
+    selection = EvidenceItem(id="selection", paper_id="manuscript", text=text or "(empty)", page=1)
     if action == "fix":
         if not error.strip():
             raise AssistError("choose a compile error to fix")
@@ -88,6 +107,14 @@ def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, err
         line = lines[req.error_line - 1] if 0 < req.error_line <= len(lines) else ""
         req.messages, req.schema = write_fix_messages(error[:2000], text, line), _REPLACEMENT
         req.packet = EvidencePacket(items=[selection], sensitive=True)
+    elif action in SUMMARY:
+        body = context[:MAX_CONTEXT]
+        if not re.sub(r"\\[a-zA-Z]+\*?|[{}\[\]\s]", "", body):
+            raise AssistError("the document has no text yet to write a " + action + " from")
+        req.context = body
+        req.messages, req.schema = write_summary_messages(action, text, body), _REPLACEMENT
+        req.packet = EvidencePacket(items=[selection, EvidenceItem(id="document", paper_id="manuscript", text=body,
+                                                                   page=1)], sensitive=True)
     elif action == "cite":
         hits = retrieve_for_question(conn, _plain(sent), doc.project_id, k=8, max_per_paper=2)
         if not hits:
@@ -103,11 +130,41 @@ def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, err
         masked, req.markers = protect(sent)
         req.messages, req.schema = write_rewrite_messages(masked, action), _REPLACEMENT
         req.packet = EvidencePacket(items=[selection], sensitive=True)
+    return _with_schema(req)
+
+
+def _with_schema(req: Request) -> Request:
     # The schema in words, in the first system message: without it gemma4 looped on fixes until the token
     # limit; with it the reply was valid every time (real run, 2026-10-19). Ollama's format option alone was not enough.
     req.messages[0] = {**req.messages[0], "content": req.messages[0]["content"] +
                        " Return only valid JSON for this schema: " + json.dumps(req.schema, sort_keys=True)}
     return req
+
+
+def decode_image(data: str) -> bytes:
+    """An image sent by the page: a data URL (pasted or chosen file) or plain base64."""
+    if not data:
+        return b""
+    payload = data.split(",", 1)[1] if data.startswith("data:") else data
+    try:
+        return base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise AssistError("the image could not be read") from exc
+
+
+def _prepare_image(action: str, image: bytes, pad_before: bool, pad_after: bool) -> Request:
+    if not image:
+        raise AssistError("paste or choose an image first")
+    if len(image) > MAX_IMAGE:
+        raise AssistError(f"the image is too large: at most {MAX_IMAGE // (1024 * 1024)} MB")
+    if not image.startswith(_IMAGE_TYPES) and not (image[:4] == b"RIFF" and image[8:12] == b"WEBP"):
+        raise AssistError("use a PNG, JPEG, GIF or WebP image")
+    # Sensitive: a screenshot may come from unpublished work, so a cloud route always needs approval.
+    item = EvidenceItem(id="image", paper_id="manuscript", text="(image)", page=1)
+    req = Request(action=action, text="", task=ACTIONS[action], images=[image], pad=(pad_before, pad_after),
+                  messages=write_image_messages(action), schema=_REPLACEMENT,
+                  packet=EvidencePacket(items=[item], sensitive=True))
+    return _with_schema(req)
 
 
 _PERSIAN = re.compile(r"[\u0600-\u06FF]")
@@ -165,7 +222,10 @@ def restore(text: str, markers: list[str]) -> str:
 def output_cap(req: Request) -> int:
     """The reply repeats the whole selection, so its token budget grows with it (about a token per character
     for Persian). The flat 1024 default cut gemma4's fixes off mid-string in the real run."""
-    return min(8192, 1024 + len(req.text) + (1024 if req.action == "cite" else 0))
+    if req.action in IMAGE:
+        return 2048  # a table of a few dozen cells; a typed table is rarely longer
+    return min(8192, 1024 + len(req.text) + (1024 if req.action == "cite" else 0) +
+               (512 if req.action == "abstract" else 0))
 
 
 def model_text(req: Request) -> str:
@@ -178,14 +238,22 @@ def _plain(text: str) -> str:
 
 def preview(gateway: ModelGateway, req: Request, profile: str | None = None) -> CallPreview:
     assert req.packet is not None
+    if req.images:
+        return gateway.preview_vision(req.task, req.packet, req.messages, profile, output_cap(req),
+                                      image_count=len(req.images), schema=req.schema)
     return gateway.preview(req.task, req.packet, req.messages, profile, output_cap(req), schema=req.schema)
 
 
 def run(conn: sqlite3.Connection, gateway: ModelGateway, doc: Document, req: Request, file: str,
         approved: bool = False, profile: str | None = None) -> dict[str, Any]:
     assert req.packet is not None
-    reply = gateway.call(req.task, req.packet, req.messages, req.schema, profile=profile, approved=approved,
-                         max_output_tokens=output_cap(req), prompt_version=WRITE_PROMPT_VERSION)
+    if req.images:
+        reply = gateway.call_vision(req.task, req.packet, req.messages, req.schema, req.images, profile=profile,
+                                    approved=approved, max_output_tokens=output_cap(req),
+                                    prompt_version=WRITE_PROMPT_VERSION)
+    else:
+        reply = gateway.call(req.task, req.packet, req.messages, req.schema, profile=profile, approved=approved,
+                             max_output_tokens=output_cap(req), prompt_version=WRITE_PROMPT_VERSION)
     return suggestion_from(conn, doc, req, reply.content, f"{reply.provider}:{reply.model}", file)
 
 
@@ -206,17 +274,25 @@ def suggestion_from(conn: sqlite3.Connection, doc: Document, req: Request, conte
         citations = list(citations_in or [])
         if _MARKER.search(new_text):
             flags.append("the model invented markers that stand for nothing")
-    new_text = _keep_edges(sent, repair_escapes(new_text, sent))
+    if req.action in IMAGE:  # nothing to compare with: read escapes against common LaTeX math commands
+        new_text = repair_escapes(new_text, _MATH_COMMANDS).strip()
+        flags.append("transcribed from an image: check every symbol and number against it")
+    else:
+        new_text = _keep_edges(sent, repair_escapes(new_text, sent + " " + req.context))
     if not new_text.strip():
         raise AssistError("the model returned no text")
     sent_new = new_text
+    if req.action in IMAGE:
+        new_text = ("\n" if req.pad[0] else "") + new_text + ("\n" if req.pad[1] else "")
     if req.wrap:  # put the \\lr{...} back, except around a Persian translation, which must not be in it
         lead, trail = req.wrap[0][:-4], req.wrap[1][1:]
         new_text = lead + new_text + trail if req.action == "translate-fa" else req.wrap[0] + new_text + req.wrap[1]
-    allowed = _numbers(req.text).union(*(numbers(span.text) for span in req.evidence.values()))
+    allowed = _numbers(req.text + " " + req.context).union(*(numbers(span.text) for span in req.evidence.values()))
+    if req.action in IMAGE:
+        allowed |= _numbers(new_text)  # the numbers come from the image, which only the user can compare
     known = set(cited_keys(req.text)) | {c["key"] for c in citations}
     exempt: set[str] | None = None
-    if req.action == "fix":
+    if req.action in {"fix", *IMAGE}:
         exempt = set()
     if req.action == "fix" and req.error_line:  # the broken command on the error line is meant to change
         lines = req.text.split("\n")
@@ -392,6 +468,13 @@ def _brace_state(text: str) -> tuple[int, bool]:
     return depth, broken
 
 
+# Commands whose first letter is a JSON escape (\f \n \t \r \b), for text with no original to compare with.
+_MATH_COMMANDS = " ".join("\\" + c for c in (
+    "frac", "forall", "flat", "footnotesize", "nabla", "neq", "ne", "nu", "neg", "ni", "not", "notin", "nonumber",
+    "newline", "nleq", "ngeq", "nmid", "nsubseteq", "times", "tau", "theta", "tilde", "text", "textbf", "textit",
+    "textrm", "top", "to", "triangle", "tan", "tanh", "tfrac", "rho", "right", "rightarrow", "Rightarrow", "rangle",
+    "rceil", "rfloor", "rm", "beta", "bar", "begin", "big", "bigl", "bigr", "Big", "binom", "bm", "boldsymbol",
+    "bullet", "bf", "bot", "bmod", "hline", "theta", "Theta"))
 _CONTROL = {"\t": "t", "\r": "r", "\f": "f", "\b": "b", "\n": "n"}
 
 

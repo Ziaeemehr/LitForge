@@ -470,6 +470,8 @@
             <option value="clearer">Rewrite: clearer</option><option value="shorter">Rewrite: shorter</option>
             <option value="translate-en">Translate to English</option><option value="translate-fa">Translate to Persian</option>
             <option value="cite">Suggest citations</option>
+            <option value="title">Suggest title</option><option value="abstract">Suggest abstract</option>
+            <option value="equation-image">Equation from image…</option><option value="table-image">Table from image…</option>
           </select>
           <label title="Upload a figure into figures/">Figure<input type="file" id="write-upload" accept=".png,.jpg,.jpeg,.pdf,.eps,.svg" hidden></label>
           <button type="button" id="write-versions-btn" title="Earlier versions of this document">Versions</button>
@@ -516,6 +518,13 @@
         <div class="write-left">
           <div id="write-cm" class="write-cm"></div>
           <div id="write-spell-menu" class="spell-menu" role="menu" aria-label="Spelling" hidden></div>
+          <div id="write-image" class="write-suggestion write-image" role="dialog" aria-labelledby="write-image-title" hidden>
+            <div class="sg-head"><b id="write-image-title">Equation from image</b>
+              <span class="sg-meta">goes in at the cursor</span>
+              <button type="button" class="sg-x" id="write-image-close" title="Close" aria-label="Close">×</button></div>
+            <div class="img-drop" id="write-image-drop" tabindex="0">Paste an image here (Ctrl+V), or
+              <label class="img-pick">choose a file<input type="file" id="write-image-file" accept="image/png,image/jpeg,image/gif,image/webp" hidden></label></div>
+          </div>
           <div id="write-suggestion" class="write-suggestion" role="dialog" aria-labelledby="write-suggestion-title" hidden>
             <div class="sg-head"><b id="write-suggestion-title">Suggestion</b>
               <span id="write-suggestion-meta" class="sg-meta"></span>

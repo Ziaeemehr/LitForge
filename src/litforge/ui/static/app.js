@@ -3162,6 +3162,105 @@
 
   var AI = { pending: null };
   var FIX_CONTEXT = 5;
+  var IMAGE_ACTIONS = { 'equation-image': 'Equation from image', 'table-image': 'Table from image' };
+  var IMAGE_MAX = 8 * 1024 * 1024;  // as on the server
+  var IMG = { action: null, range: null };
+
+  function commentedAt(text, pos) {
+    var prefix = text.slice(text.lastIndexOf('\n', pos - 1) + 1, pos);
+    return /(^|[^\\])%/.test(prefix);
+  }
+
+  // The index of the } closing the { at `open`, or -1; escaped braces do not count.
+  function closingBrace(text, open) {
+    for (var i = open, depth = 0; i < text.length; i++) {
+      var ch = text[i];
+      if (ch === '\\') { i++; continue; }
+      if (ch === '{') depth++;
+      else if (ch === '}' && --depth === 0) return i;
+    }
+    return -1;
+  }
+
+  // The text inside \title{...} (after an optional [short title]), or null.
+  function titleRange(text) {
+    var re = /\\title\s*(?:\[[^\]]*\])?\s*\{/g, m;
+    while ((m = re.exec(text))) {
+      if (commentedAt(text, m.index)) continue;
+      var open = m.index + m[0].length - 1, close = closingBrace(text, open);
+      return close < 0 ? null : { from: open + 1, to: close };
+    }
+    return null;
+  }
+
+  function abstractRange(text) {
+    var re = /\\begin\{abstract\}/g, m;
+    while ((m = re.exec(text))) {
+      if (commentedAt(text, m.index)) continue;
+      var from = m.index + m[0].length, to = text.indexOf('\\end{abstract}', from);
+      return to < 0 ? null : { from: from, to: to };
+    }
+    return null;
+  }
+
+  function stripComments(text) {
+    return text.split('\n').map(function (line) { return line.replace(/(^|[^\\])%.*$/, '$1'); }).join('\n');
+  }
+
+  // What a title or an abstract is written from: the document's body, without comments.
+  function documentBody(text) {
+    var begin = text.indexOf('\\begin{document}'), end = text.lastIndexOf('\\end{document}');
+    var body = text.slice(begin < 0 ? 0 : begin + '\\begin{document}'.length, end < 0 ? text.length : end);
+    return stripComments(body);
+  }
+
+  // A block inserted at `pos` starts and ends on its own line.
+  function imagePads(text, pos) {
+    return { pad_before: pos > 0 && text[pos - 1] !== '\n', pad_after: pos < text.length && text[pos] !== '\n' };
+  }
+
+  function pastedImage(e) {
+    var items = (e && e.clipboardData && e.clipboardData.items) || [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file' && /^image\//.test(items[i].type)) return items[i].getAsFile();
+    }
+    return null;
+  }
+
+  function openWriteImage(action) {
+    var text = W.editor.getText(), pos = W.editor.selection().to, pads = imagePads(text, pos);
+    var at = Math.max(0, pos - 40);
+    IMG = { action: action, range: { from: pos, to: pos, text: '', pad_before: pads.pad_before, pad_after: pads.pad_after,
+      anchor: text.slice(at, pos + 40), anchorAt: at } };
+    $('write-image-title').textContent = IMAGE_ACTIONS[action];
+    $('write-image').hidden = false;
+    if ($('write-image-drop').focus) $('write-image-drop').focus();
+  }
+
+  function closeWriteImage() {
+    IMG = { action: null, range: null };
+    $('write-image').hidden = true;
+  }
+
+  function writeImageFile(file) {
+    if (!file) return Promise.resolve();
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type || '')) { toast('Use a PNG, JPEG, GIF or WebP image.'); return Promise.resolve(); }
+    if (file.size > IMAGE_MAX) { toast('The image is too large: at most 8 MB.'); return Promise.resolve(); }
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(reader.result); };
+      reader.onerror = function () { reject(new Error('The image could not be read.')); };
+      reader.readAsDataURL(file);
+    }).then(sendWriteImage).catch(function (e) { toast(e.message); });
+  }
+
+  function sendWriteImage(dataUrl) {
+    if (!IMG.action) return Promise.resolve();
+    var action = IMG.action, range = IMG.range;
+    range.image = dataUrl;
+    closeWriteImage();
+    return runWriteAi(action, false, range);
+  }
 
   function writeAiRange(action) {
     if (action === 'fix') {
@@ -3175,31 +3274,45 @@
       return { from: from, to: to, text: W.editor.getText().slice(from, to), error: err.message, first_line: first,
         error_line: err.line };
     }
+    if (action === 'title' || action === 'abstract') {
+      var full = W.editor.getText(), found = action === 'title' ? titleRange(full) : abstractRange(full);
+      if (!found) {
+        return { problem: action === 'title' ? 'Add \\title{} to the document first.' :
+          'Add \\begin{abstract} … \\end{abstract} to the document first.' };
+      }
+      // Sections in other files (\input) count too; they are read for completion already.
+      var context = [documentBody(full)].concat((W.otherTexts || []).map(stripComments)).join('\n');
+      return { from: found.from, to: found.to, text: full.slice(found.from, found.to), context: context };
+    }
     var sel = W.editor.selection();
     if (!sel.text.trim()) return { problem: 'Select the text first.' };
     return { from: sel.from, to: sel.to, text: sel.text };
   }
 
-  function runWriteAi(action, approved) {
+  // `given` is a prepared range (an image action, after the image was given).
+  function runWriteAi(action, approved, given) {
     if (!W.doc || !W.editor || !action) return Promise.resolve();
-    var range = AI.range && approved ? AI.range : writeAiRange(action);
+    if (IMAGE_ACTIONS[action] && !given && !approved) { openWriteImage(action); return Promise.resolve(); }
+    var range = given || (AI.range && approved ? AI.range : writeAiRange(action));
     if (range.problem) { toast(range.problem); return Promise.resolve(); }
     range.doc = W.doc.id; range.file = W.file;
     AI.range = range;
     var body = { doc: W.doc.id, action: action, text: range.text, error: range.error || '', first_line: range.first_line || 1, error_line: range.error_line || 0,
+      context: range.context || '', image: range.image || '', pad_before: !!range.pad_before, pad_after: !!range.pad_after,
       file: W.file, approved: !!approved };
     $('write-compile-state').textContent = 'Preparing the request…';
     return post('/api/write/assist', body).then(function (res) {
       if (res.needs_approval) {
         var p = res.preview;
-        var ok = window.confirm('Send ' + res.sent.characters + ' characters of your text' +
+        var ok = window.confirm('Send ' + (res.sent.images ? 'your image' + (res.sent.characters ? ' and ' : '') : '') +
+          (res.sent.characters || !res.sent.images ? res.sent.characters + ' characters of your text' : '') +
           (res.sent.evidence ? ' and ' + res.sent.evidence + ' evidence quotes' : '') + ' to ' + p.model + ' (' +
           p.provider + ', cloud' + (p.max_cost_usd != null ? ', at most $' + p.max_cost_usd.toFixed(4) : '') + ')?');
         if (!ok) { $('write-compile-state').textContent = 'Not sent.'; return; }
         return runWriteAi(action, true);
       }
       $('write-compile-state').textContent = 'Asking ' + (res.preview.model || res.preview.profile) +
-        (res.preview.remote ? ' (cloud)' : ' (local)') + ' · sending ' + res.sent.characters + ' characters' +
+        (res.preview.remote ? ' (cloud)' : ' (local)') + ' · sending ' + (res.sent.images ? 'an image' : res.sent.characters + ' characters') +
         (res.sent.evidence ? ' and ' + res.sent.evidence + ' evidence quotes' : '') + '…';
       return pollWriteAi(res, range);
     }).catch(function (e) { $('write-compile-state').textContent = e.message; });
@@ -3224,7 +3337,8 @@
     AI.pending = { suggestion: s, range: range, accepted: {} };
     s.hunks.forEach(function (h) { AI.pending.accepted[h.index] = !h.flags.length; });
     var box = $('write-suggestion');
-    $('write-suggestion-title').textContent = { write_fix: 'Fix', write_rewrite: 'Rewrite', write_cite: 'Citations' }[s.task] || 'Suggestion';
+    $('write-suggestion-title').textContent = { write_fix: 'Fix', write_rewrite: 'Rewrite', write_cite: 'Citations',
+      write_summary: s.action === 'abstract' ? 'Abstract' : 'Title', write_image: 'From image' }[s.task] || 'Suggestion';
     $('write-suggestion-meta').textContent = s.provider + ':' + s.model + (s.note ? ' · ' + s.note : '');
     $('write-suggestion-meta').title = 'Nothing changes until you apply';
     var parts = [];
@@ -3279,6 +3393,7 @@
   // other text.
   function dropWriteSuggestion() {
     var pending = AI.pending;
+    closeWriteImage();
     AI.pending = null; AI.range = null;
     hideWriteSuggestion();
     if (pending) {
@@ -3333,7 +3448,9 @@
     var s = pending.suggestion, range = pending.range;
     if (range.doc && (!W.doc || W.doc.id !== range.doc || W.file !== range.file)) { dropWriteSuggestion(); return Promise.resolve(); }
     var accepted = s.hunks.filter(function (h) { return pending.accepted[h.index]; }).map(function (h) { return h.index; });
-    if (accepted.length && W.editor.getText().slice(range.from, range.to) !== s.original) {
+    var now = W.editor.getText(), moved = range.anchor != null &&  // an insertion point has no text of its own
+      now.slice(range.anchorAt, range.anchorAt + range.anchor.length) !== range.anchor;
+    if (accepted.length && (moved || now.slice(range.from, range.to) !== s.original)) {
       toast('The text changed since the request; ask again.');
       return Promise.resolve();
     }
@@ -3367,6 +3484,13 @@
     $('write-keep').onclick = keepMine;
     $('write-cite').onclick = openWriteCite;
     $('write-ai').onchange = function () { var action = $('write-ai').value; $('write-ai').value = ''; runWriteAi(action, false); };
+    $('write-image-close').onclick = closeWriteImage;
+    $('write-image-file').onchange = function () { var f = $('write-image-file').files[0]; $('write-image-file').value = ''; writeImageFile(f); };
+    document.addEventListener('paste', function (e) {  // only while the image panel is open
+      var file = !$('write-image').hidden && pastedImage(e);
+      if (file) { e.preventDefault(); writeImageFile(file); }
+    });
+    $('write-image-drop').addEventListener('keydown', function (e) { if (e.key === 'Escape') closeWriteImage(); });
     $('write-suggestion-close').onclick = function () {  // closing rejects, so the record is complete
       if (!AI.pending) { hideWriteSuggestion(); return; }
       Object.keys(AI.pending.accepted).forEach(function (k) { AI.pending.accepted[k] = false; });

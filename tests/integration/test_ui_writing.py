@@ -198,6 +198,41 @@ def test_assist_local_job_and_decide(tmp_path: Path) -> None:
         httpd.server_close()
 
 
+def test_assist_image_and_abstract_routes(tmp_path: Path) -> None:
+    import base64
+
+    class Vision:
+        def __init__(self) -> None:
+            self.images: list[list[bytes]] = []
+
+        def check(self) -> None:
+            pass
+
+        def vision_json(self, messages, schema, images, **_):
+            self.images.append(images)
+            return {"replacement": "\\[ x^2 \\]", "note": "one equation"}
+
+    httpd, base, fakes = _assist_server(tmp_path)
+    fakes["local_vision"] = Vision()  # type: ignore[assignment]
+    try:
+        doc = create(base)
+        png = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
+        body = {"doc": doc["id"], "action": "equation-image", "file": "main.tex", "pad_before": True,
+                "image": "data:image/png;base64," + base64.b64encode(png).decode()}
+        status, job = call(base, "/api/write/assist", body)
+        assert status == 200 and job["sent"]["images"] == 1 and job["preview"]["model"] == "qwen2.5vl:7b"
+        report = wait_job(base, job["id"])["report"]
+        assert report["hunks"][0]["new"] == "\n\\[ x^2 \\]" and fakes["local_vision"].images == [[png]]
+        assert call(base, "/api/write/assist", {**body, "image": "data:image/png;base64,???"})[0] == 400
+        status, job = call(base, "/api/write/assist", {"doc": doc["id"], "action": "abstract", "text": "",
+                                                       "context": "We studied a model.", "file": "main.tex"})
+        assert status == 200 and job["sent"]["characters"] == len("We studied a model.")
+        assert wait_job(base, job["id"])["report"]["task"] == "write_summary"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def test_assist_cloud_route_needs_approval(tmp_path: Path) -> None:
     from litforge.config import ModelProfileConfig, TaskModelConfig
     from litforge.llm.budget import Pricing
