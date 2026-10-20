@@ -91,12 +91,14 @@
       <p class="hint">Checks contact GitHub using git fetch. No library data is sent. Updates are never installed automatically.</p>
       <p id="update-auto-note" class="hint"></p>
     </div>
-    <div data-stab="models" class="card settings-card" id="models-settings-card">
+    <div data-stab="models" class="card settings-card models-card" id="models-settings-card">
       <h2>Models</h2>
-      <p id="models-hardware" class="hint"></p>
+      <p id="models-server" class="models-server"></p>
+      <h3>Your models</h3>
+      <div id="models-profiles"></div>
+      <details><summary>Which model does which task</summary><div id="models-tasks" class="models-tasks"></div></details>
+      <h3>Setup</h3>
       <p id="models-current"></p>
-      <p id="models-recommendation"></p>
-      <p id="models-vision" class="hint"></p>
       <div class="row2">
         <select id="models-tier" aria-label="Setup tier">
           <option value="">Recommended tier</option><option value="large">Large</option>
@@ -105,7 +107,9 @@
         <button class="btn accent" id="models-apply">Apply setup…</button>
         <button class="btn" id="models-refresh">Refresh status</button>
       </div>
-      <div id="cloud-pickers">
+      <p id="models-recommendation" class="hint"></p>
+      <p id="models-vision" class="hint"></p>
+      <div id="cloud-pickers" hidden>
         <h3>Cloud-light model choices</h3>
         <form id="catalogue-search" class="row2">
           <input id="catalogue-query" type="search" placeholder="Search live catalogue" aria-label="Search cloud models">
@@ -118,29 +122,34 @@
         <select id="cloud-strong"><option value="">Use the cheap model for analysis too</option></select>
         <p class="hint">Prices per million tokens; estimates appear in the setup preview. Cloud stays off until you enable it.</p>
       </div>
-      <p id="models-server"></p>
-      <p class="hint">The managed server starts when needed and stops when LitForge quits. Models load on first use.
-        Setup shows every file change before saving; it never installs tools.</p>
-      <div id="models-profiles"></div>
-      <details><summary>Task assignments</summary><pre id="models-tasks"></pre></details>
-      <h3>Find stronger local models</h3>
-      <form id="local-search" class="row2">
+      <details class="models-more"><summary>This computer and the model server</summary>
+        <p id="models-hardware" class="hint"></p>
+        <p class="hint">The managed server starts when needed and stops when LitForge quits. Models load on first use.
+          Setup shows every file change before saving; it never installs tools.</p>
+      </details>
+      <details id="local-add" class="models-add"><summary>Add a local model (Hugging Face or Ollama)</summary>
+        <form id="local-search" class="row2">
         <div class="tabs" role="group" aria-label="Local model source"><button id="local-hf" class="on" type="button" aria-pressed="true">Hugging Face GGUF</button><button id="local-ollama" type="button" aria-pressed="false">Ollama</button></div>
         <input id="local-query" type="search" placeholder="Search GGUF models, or enter an Ollama model name" required aria-label="Local model search">
         <button class="btn" type="submit">Find / pull…</button>
       </form>
-      <label class="hint"><input id="local-show-all" type="checkbox"> Show all, including non-chat models</label>
-      <div id="local-results"></div>
-      <div id="local-files"></div>
-      <label class="f" for="local-name">Downloaded profile name (optional)</label><input id="local-name" type="text">
-      <label class="f" for="local-context">Context tokens</label><input id="local-context" type="number" min="1" max="2000000" value="16384">
-      <label class="f" for="local-mmproj">Image projector (optional, choose the matching mmproj from the model card)</label>
-      <select id="local-mmproj"><option value="">Text only</option></select>
-      <p class="hint">Fit is approximate: file + projector + 0.25 MB KV cache per 1000 context tokens + 1 GB overhead.
-        Apple: 75% unified RAM; CPU: 60% RAM; NVIDIA: VRAM, then 60% RAM for slower partial offload. Disk is checked before download.</p>
-      <div id="local-tasks" class="task-checks" role="group" aria-label="Assign downloaded model to tasks"></div>
-      <pre id="local-progress" role="status" aria-live="polite"></pre>
-      <div class="row2"><button class="btn" id="download-pause">Pause</button><button class="btn" id="download-resume">Resume</button><button class="btn" id="download-cancel">Cancel download</button></div>
+        <label class="hint"><input id="local-show-all" type="checkbox"> Show all, including non-chat models</label>
+        <div id="local-results"></div>
+        <div id="local-options" hidden>
+          <label class="f" for="local-name">Profile name (optional)</label><input id="local-name" type="text">
+          <label class="f" for="local-context">Context tokens</label><input id="local-context" type="number" min="1" max="2000000" value="16384">
+          <label class="f" for="local-mmproj">Image projector (optional, the matching mmproj from the model card)</label>
+          <select id="local-mmproj"><option value="">Text only</option></select>
+          <p class="f">Use it for (optional)</p>
+          <div id="local-tasks" class="task-checks" role="group" aria-label="Assign downloaded model to tasks"></div>
+          <details><summary>How the fit is estimated</summary><p class="hint">File + projector + 0.25 MB KV cache per 1000
+            context tokens + 1 GB overhead. Apple: 75% unified RAM; CPU: 60% RAM; NVIDIA: VRAM, then 60% RAM for slower
+            partial offload. Disk is checked before download.</p></details>
+        </div>
+        <div id="local-files"></div>
+        <pre id="local-progress" role="status" aria-live="polite"></pre>
+        <div class="row2" id="download-controls" hidden><button class="btn" id="download-pause">Pause</button><button class="btn" id="download-resume">Resume</button><button class="btn" id="download-cancel">Cancel download</button></div>
+      </details>
     </div>
     <div data-stab="tools" class="card settings-card">
       <h2>Optional tools</h2>

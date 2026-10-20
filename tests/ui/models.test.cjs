@@ -31,7 +31,8 @@ test('Models settings render untrusted profiles with textContent and explain dis
   const { ctx, $ } = setup();
   assert.equal(typeof ctx.loadModels, 'function');
   ctx.loadModels(); await flush();
-  assert.match($('models-profiles').children[0].children[0].textContent, /<script>bad<\/script>/);
+  const label = $('models-profiles').children[0].children[0];  // name, then model and kind
+  assert.match(label.children.map(c => c.textContent).join(' '), /<script>bad<\/script>/);
   assert.match($('models-vision').textContent, /off/i);
 });
 
@@ -63,8 +64,7 @@ test('Models hardware, status, provider labels and task checkboxes are readable'
   await ctx.loadModels();
   assert.match($('models-hardware').textContent, /llama.cpp build 11429/);
   assert.doesNotMatch($('models-hardware').textContent, /clang|abcdef/);
-  assert.equal($('models-server').textContent,
-    'llama-server running (managed by LitForge) · gemma4: loaded · qwen3-4b: unloaded');
+  assert.equal($('models-server').textContent, 'Model server running · gemma4 loaded · qwen3-4b not loaded');
   assert.equal($('models-provider').children[0].textContent,
     'OpenRouter — one key for GPT, Claude, Gemini, DeepSeek, Qwen, Kimi');
   assert.equal($('models-provider').children[1].textContent, 'OpenAI (GPT)');
@@ -109,4 +109,15 @@ test('Hardware uses the explicit build in semantic version output', async () => 
     profiles: [], proposal: {}, providers: [], tasks: {}, server: {} });
   await ctx.loadModels();
   assert.match($('models-hardware').textContent, /llama.cpp build 11429/);
+});
+
+test('Models tab: cloud choices only for Cloud-light, readable task names', async () => {
+  const { ctx, $ } = setup();
+  await ctx.loadModels(); await flush();
+  $('models-tier').value = 'large'; ctx.showCloudPickers();
+  assert.equal($('cloud-pickers').hidden, true);
+  $('models-tier').value = 'cloud'; ctx.showCloudPickers();
+  assert.equal($('cloud-pickers').hidden, false);
+  assert.equal(ctx.taskLabel('write_cite'), 'Write: suggest citations');
+  assert.equal(ctx.taskLabel('some_new_task'), 'some new task');
 });

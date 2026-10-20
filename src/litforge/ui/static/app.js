@@ -4513,8 +4513,17 @@
     claim_extract: 'Extract claims', claim_relation: 'Compare claim relationships',
     screen: 'Title and abstract screening', screen_fulltext: 'Full-text screening',
     asset_analyze: 'Analyze figures and tables', equation_compare: 'Compare equations',
-    gap_design: 'Design research gaps', console_plan: 'Plan console workflows', page_rewrite: 'Rewrite pages'
+    gap_design: 'Design research gaps', console_plan: 'Plan console workflows', page_rewrite: 'Rewrite pages',
+    write_fix: 'Write: fix errors', write_rewrite: 'Write: rewrite and translate', write_cite: 'Write: suggest citations',
+    write_chat: 'Write: assistant', write_summary: 'Write: title and abstract', write_image: 'Write: LaTeX from an image'
   };
+  function taskLabel(task) { return modelTaskLabels[task] || task.replace(/_/g, ' '); }
+
+  // The cloud model choices matter only for the Cloud-light tier (chosen, or recommended and nothing chosen).
+  function showCloudPickers() {
+    var tier = $('models-tier').value || (modelsInfo && modelsInfo.proposal && modelsInfo.proposal.recommended_tier);
+    $('cloud-pickers').hidden = tier !== 'cloud';
+  }
 
   function updateProviderModelsLink() {
     var provider = modelProviders[$('models-provider').value] || modelProviders.openrouter;
@@ -4545,18 +4554,30 @@
       $('models-vision').textContent = info.vision_enabled ? 'Image features enabled.' :
         'Image features are off for this setup. Choose a vision profile or apply the medium/large tier to enable them.';
       $('models-apply').disabled = false;
-      $('models-server').textContent = info.server.foreign ? 'Port is used by another server.' :
-        info.server.running ? 'llama-server running' + (info.server.owned ? ' (managed by LitForge)' : ' (external)') +
+      $('models-server').textContent = info.server.foreign ? 'Model server: the port is used by another program.' :
+        info.server.running ? 'Model server running' + (info.server.owned ? '' : ' (started outside LitForge)') +
           ' · ' + (info.server.preset_models || []).map(function (name) {
             var m = info.server.models.find(function (entry) { return entry.id === name; }) || { id: name };
-            return m.id + ': ' + (typeof m.status === 'object' ? m.status.value : m.status || 'unknown');
-          }).join(' · ') : 'llama-server stopped';
-      $('models-tasks').textContent = JSON.stringify(info.tasks, null, 2);
+            var st = typeof m.status === 'object' ? m.status.value : m.status || 'unknown';
+            return m.id + ' ' + (st === 'loaded' ? 'loaded' : st === 'unloaded' ? 'not loaded' : st);
+          }).join(' · ') : 'Model server stopped · it starts when a model is needed';
+      $('models-tasks').replaceChildren();
+      Object.keys(info.tasks || {}).forEach(function (task) {
+        var row = document.createElement('div'), what = document.createElement('span'), who = document.createElement('b');
+        what.textContent = taskLabel(task);
+        var t = info.tasks[task];
+        who.textContent = (t && (t.profile || (t.profiles || []).join(', '))) || '—';
+        row.appendChild(what); row.appendChild(who); $('models-tasks').appendChild(row);
+      });
+      showCloudPickers();
       $('models-profiles').replaceChildren();
       info.profiles.forEach(function (p) {
         var row = document.createElement('div'), label = document.createElement('span');
         row.className = 'models-profile';
-        label.textContent = p.name + ' · ' + p.model + (p.remote ? ' (cloud)' : ' (local)') + (p.vision ? ' · images' : '');
+        var name = document.createElement('b'); name.textContent = p.name;
+        var meta = document.createElement('small');
+        meta.textContent = (p.model !== p.name ? p.model + ' · ' : '') + (p.remote ? 'cloud' : 'local') + (p.vision ? ' · images' : '');
+        label.appendChild(name); label.appendChild(meta);
         row.appendChild(label);
         row.appendChild(modelButton('Test', function () { testSettingsModel(p); }));
         row.appendChild(modelButton('Assign tasks…', function () { assignSettingsTasks(p.name); }));
@@ -4584,7 +4605,7 @@
         var text = document.createElement('span');
         label.className = 'check'; input.type = 'checkbox'; input.value = task;
         input.checked = selected.indexOf(task) !== -1;
-        text.textContent = modelTaskLabels[task] || task.replace(/_/g, ' ');
+        text.textContent = taskLabel(task);
         label.appendChild(input); label.appendChild(text); $('models-add-tasks').appendChild(label);
       });
       $('models-cloud').textContent = info.cloud_enabled ? 'Turn cloud off' : 'Enable cloud…';
@@ -4634,6 +4655,7 @@
     $('models-refresh').onclick = loadModels;
     $('models-tier').onchange = function () {
       $('models-apply').disabled = false;
+      showCloudPickers();
       if (this.value === 'cloud' && typeof searchCatalogue === 'function') searchCatalogue();
     };
     $('models-apply').onclick = function () { reviewModelsChange({ action: 'setup', tier: $('models-tier').value || null,
@@ -4717,7 +4739,7 @@
     tasks.forEach(function (task) {
       var label = document.createElement('label'), input = document.createElement('input'), text = document.createElement('span');
       label.className = 'check'; input.type = 'checkbox'; input.value = task; input.checked = chosen.indexOf(task) >= 0;
-      text.textContent = modelTaskLabels[task] || task;
+      text.textContent = taskLabel(task);
       label.appendChild(input); label.appendChild(text); container.appendChild(label);
     });
   }
@@ -4793,6 +4815,7 @@
 
   function renderLocalRepos(repos) {
     $('local-results').replaceChildren(); $('local-files').replaceChildren();
+    $('local-options').hidden = true;
     repos.forEach(function (repo) {
       var row = document.createElement('div'), text = document.createElement('span'), link = document.createElement('a');
       row.className = 'models-profile'; text.textContent = repo.id + ' · ' + Number(repo.downloads || 0) + ' downloads · ' + repo.badge + (repo.label ? ' · ' + repo.label : '');
@@ -4808,6 +4831,7 @@
   }
   function loadLocalFiles(repo) {
     localRepo = repo;
+    $('local-options').hidden = false;  // name, context and tasks are set before choosing a file to download
     $('local-files').textContent = 'Loading quantizations…';
     return api('/api/models/local-files?repo=' + encodeURIComponent(repo)).then(function (tree) {
       if (localRepo !== repo) return;
@@ -4849,6 +4873,7 @@
           (info.file || '') + ' · ' + (info.state || info.status || report.status) +
           (info.total ? ' · ' + (info.bytes || info.completed || 0) + '/' + info.total + ' bytes' : '') +
           (info.speed ? ' · ' + (info.speed / 1e6).toFixed(1) + ' MB/s · ETA ' + Math.ceil(info.eta_s || 0) + ' s' : '');
+        $('download-controls').hidden = report.status !== 'running';
         if (report.status === 'running') setTimeout(tick, 750);
         else if (info.state === 'pulled' && window.confirm(info.diff + '\nRegister this Ollama profile?')) {
           post('/api/models/apply', { token: info.token, confirmed: true }).then(loadSettings).catch(settingsError);
@@ -4896,6 +4921,7 @@
           $('local-' + name).setAttribute('aria-pressed', String(name === source));
         });
         $('local-query').placeholder = source === 'hf' ? 'Search GGUF models' : 'Exact Ollama model name';
+        $('local-options').hidden = source === 'hf' && !localRepo;  // an Ollama pull takes its tasks from here
       };
     });
     $('local-search').onsubmit = function (event) {

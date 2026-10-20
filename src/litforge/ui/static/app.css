@@ -786,3 +786,16 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .write-new .btn.primary { width: auto; margin-top: 0; padding: 5px 12px; }
 #view-write .muted { color: var(--muted); }
 .write-new select { width: auto; }
+
+/* Models settings: your models first, then setup; adding a model is folded away. */
+.models-card h3 { margin: 18px 0 6px; font-size: 13px; }
+.models-card .models-server { color: var(--muted); font-size: 13px; margin: 0 0 4px; }
+.models-card .models-profile b { margin-right: 8px; }
+.models-card .models-profile small { color: var(--muted); }
+.models-card details { margin: 8px 0; }
+.models-card details > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.models-card .models-add { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 16px; }
+.models-card .models-add > summary { color: var(--ink); font-weight: 600; font-size: 14px; }
+.models-tasks { display: grid; grid-template-columns: max-content 1fr; gap: 2px 16px; font-size: 13px; padding: 6px 0; }
+.models-tasks > div { display: contents; }
+.models-tasks span { color: var(--muted); }

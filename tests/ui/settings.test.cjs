@@ -81,7 +81,7 @@ test('Settings cards sit in four tabs, General first; the review output shows un
   const section = html.split('id="view-settings"')[1].split('</section>')[0];
   const tabs = [...section.matchAll(/<button type="button" data-stab="(\w+)"/g)].map(m => m[1]);
   assert.deepEqual(tabs, ['general', 'models', 'tools', 'cloud']);
-  const cards = [...section.matchAll(/<div data-stab="(\w+)" class="card settings-card"[^>]*>\s*<h2>([^<]+)<\/h2>/g)]
+  const cards = [...section.matchAll(/<div data-stab="(\w+)" class="card settings-card[^"]*"[^>]*>\s*<h2>([^<]+)<\/h2>/g)]
     .map(m => m[1] + ':' + m[2]);
   assert.deepEqual(cards, ['general:Library &amp; export', 'general:Updates', 'models:Models', 'tools:Optional tools',
     'cloud:API keys', 'cloud:Add API model', 'cloud:Cloud &amp; budget']);
