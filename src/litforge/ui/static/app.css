@@ -39,8 +39,21 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 .app { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 100vh; }
-.app.side-hidden { grid-template-columns: minmax(0, 1fr); }
-.app.side-hidden .sidebar { display: none; }
+/* Folded: a strip of icons; each keeps its tooltip. */
+.app.side-hidden { grid-template-columns: 56px minmax(0, 1fr); }
+.app.side-hidden .sidebar { padding: 14px 8px; align-items: center; }
+.app.side-hidden .brand, .app.side-hidden .nav-label, .app.side-hidden .sidebar h3,
+.app.side-hidden .side-list, .app.side-hidden .side-note { display: none; }
+.app.side-hidden .brand-row { justify-content: center; margin-bottom: 8px; }
+.app.side-hidden .nav-new, .app.side-hidden .nav-item { width: 38px; height: 34px; padding: 0; justify-content: center; }
+.app.side-hidden .side-foot { flex-direction: column; align-items: center; padding: 12px 0 0; }
+.app.side-hidden .side-foot .btn { width: 38px; padding: 6px 0; justify-content: center; }
+#btn-side-show { display: none; }  /* only on narrow screens, where the folded sidebar is hidden */
+.nav-new, .nav-item, .side-foot .btn { display: flex; align-items: center; gap: 10px; }
+.side-foot .btn { gap: 4px; }
+.side-foot .nav-ico { font-size: 14px; line-height: 1; width: 14px; text-align: center; }
+.nav-ico { flex: none; color: var(--muted); }
+.nav-item.on .nav-ico, .nav-new .nav-ico { color: var(--ink); }
 .brand-row { display: flex; align-items: center; justify-content: space-between; }
 .side-toggle {
   width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; flex: none;
@@ -76,6 +89,9 @@ header .side-toggle { border-color: var(--line); background: var(--panel); }
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
   .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .app.side-hidden { grid-template-columns: minmax(0, 1fr); }
+  .app.side-hidden .sidebar { display: none; }
+  #btn-side-show:not([hidden]) { display: inline-flex; }
   .side-list { max-height: 160px; overflow: auto; }
   header { flex-wrap: wrap; position: static; }
   header .spacer { display: none; }

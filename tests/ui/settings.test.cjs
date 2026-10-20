@@ -25,7 +25,7 @@ function setup() {
   return { ctx, $, calls };
 }
 test('Settings opens from footer and comma; Models nav removed; cards ordered', () => {
-  assert.match(html, /side-foot[\s\S]*data-view="settings"[^>]*>⚙ Settings/);
+  assert.match(html, /side-foot[\s\S]*data-view="settings"[^>]*><span class="nav-ico">⚙<\/span><span class="nav-label">Settings/);
   assert.doesNotMatch(html, /data-view="models"/);
   assert.match(html, /id="view-settings"/);
   assert.match(app, /e.key === ','[\s\S]*showView\('settings'\)/);

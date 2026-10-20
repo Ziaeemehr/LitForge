@@ -6001,19 +6001,28 @@
     var THEMES = ['auto', 'light', 'dark'], THEME_LABEL = { auto: '◐ Auto', light: '☀ Light', dark: '☾ Dark' };
     function applyTheme(t) {
       if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
-      $('btn-theme').textContent = THEME_LABEL[t];
+      $('theme-ico').textContent = THEME_LABEL[t].split(' ')[0];
+      $('theme-label').textContent = THEME_LABEL[t].split(' ')[1];
+      $('btn-theme').setAttribute('aria-label', 'Theme: ' + THEME_LABEL[t].split(' ')[1]);
       store.set('theme', t);
     }
     applyTheme(store.get('theme', 'auto'));
-    // The sidebar can be hidden for more room; the choice is remembered. Ctrl/Cmd+\ toggles it.
+    // The sidebar folds to a strip of icons for more room (hidden entirely on narrow screens); the choice is
+    // remembered. Ctrl/Cmd+\ toggles it.
     function applySidebar(hidden) {
       document.querySelector('.app').classList.toggle('side-hidden', hidden);
       $('btn-side-show').hidden = !hidden;
       store.set('sidebar-hidden', hidden);
-      (hidden ? $('btn-side-show') : $('btn-side-hide')).setAttribute('aria-expanded', String(!hidden));
+      var label = hidden ? 'Expand the sidebar (Ctrl/Cmd+\\)' : 'Fold the sidebar to icons (Ctrl/Cmd+\\)';
+      $('btn-side-hide').title = label;
+      $('btn-side-hide').setAttribute('aria-label', label);
+      $('btn-side-hide').setAttribute('aria-expanded', String(!hidden));
+      $('btn-side-show').setAttribute('aria-expanded', String(!hidden));
     }
     applySidebar(!!store.get('sidebar-hidden', false));
-    $('btn-side-hide').onclick = function () { applySidebar(true); $('btn-side-show').focus(); };
+    $('btn-side-hide').onclick = function () {
+      applySidebar(!document.querySelector('.app').classList.contains('side-hidden'));
+    };
     $('btn-side-show').onclick = function () { applySidebar(false); $('btn-side-hide').focus(); };
     document.addEventListener('keydown', function (e) {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === '\\') {

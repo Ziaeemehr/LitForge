@@ -141,7 +141,7 @@ test('console cancel button requests cancellation between steps', async () => {
 
 test('Console view has navigation and a dedicated request/preview section', () => {
   const html = fs.readFileSync('src/litforge/ui/static/index.html', 'utf8');
-  assert.match(html, /data-view="console"[^>]*>Console/);
+  assert.match(html, /data-view="console"[\s\S]*?<span class="nav-label">Console<\/span>/);
   assert.match(html, /id="view-console"/);
   assert.match(html, /id="console-request"/);
   assert.match(html, /id="console-run"[^>]*>Confirm and run/);
