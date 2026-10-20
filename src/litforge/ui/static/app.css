@@ -3,6 +3,7 @@
   --bg: #fafaf9; --panel: #ffffff; --ink: #1c1917; --muted: #6b645e; --line: #e7e5e4;
   --accent: #c2410c; --accent-soft: #fdeee4; --good: #15803d; --good-soft: #e9f7ee;
   --bad: #b91c1c; --bad-soft: #fdecea; --warn: #a16207; --chip: #f2f0ee; --bar: #f7c9ad;
+  --sel: rgba(194, 65, 12, .2); --active-line: rgba(28, 25, 23, .04);
   --shadow: 0 1px 2px rgba(28, 25, 23, .05), 0 1px 3px rgba(28, 25, 23, .07);
   --float: 0 1px 2px rgba(28, 25, 23, .06), 0 6px 18px rgba(28, 25, 23, .10);
   --cm-cmd: #9a3412; --cm-arg: #0f766e; --cm-math: #6d28d9; --cm-comment: #857c75;
@@ -15,6 +16,7 @@
     --bg: #151311; --panel: #1d1a18; --ink: #ece8e4; --muted: #a39b94; --line: #2f2b28;
     --accent: #fb8a4c; --accent-soft: #3a2418; --good: #4cc38a; --good-soft: #17301f;
     --bad: #f28b82; --bad-soft: #3a1c1a; --warn: #e0b04a; --chip: #262220; --bar: #6b3a1f;
+    --sel: rgba(251, 138, 76, .35); --active-line: rgba(236, 232, 228, .05);
     --shadow: none; --float: 0 6px 22px rgba(0, 0, 0, .45); --cm-cmd: #fdba74; --cm-arg: #5eead4; --cm-math: #c4b5fd; --cm-comment: #8d847d; color-scheme: dark;
   }
 }
@@ -22,6 +24,7 @@
     --bg: #151311; --panel: #1d1a18; --ink: #ece8e4; --muted: #a39b94; --line: #2f2b28;
     --accent: #fb8a4c; --accent-soft: #3a2418; --good: #4cc38a; --good-soft: #17301f;
     --bad: #f28b82; --bad-soft: #3a1c1a; --warn: #e0b04a; --chip: #262220; --bar: #6b3a1f;
+    --sel: rgba(251, 138, 76, .35); --active-line: rgba(236, 232, 228, .05);
     --shadow: none; --float: 0 6px 22px rgba(0, 0, 0, .45); --cm-cmd: #fdba74; --cm-arg: #5eead4; --cm-math: #c4b5fd; --cm-comment: #8d847d; color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -579,7 +582,11 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .write-cm .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Vazirmatn", "Geeza Pro",
   "Noto Sans Arabic", monospace; font-size: 13.5px; line-height: 1.75; }
 .write-cm .cm-gutters { background: var(--panel); color: var(--muted); border-right: 0; }
-.write-cm .cm-activeLine, .write-cm .cm-activeLineGutter { background: var(--chip); }
+/* The selection is drawn behind the lines, so the current line's highlight must stay see-through. */
+.write-cm .cm-activeLine { background: var(--active-line); }
+.write-cm .cm-activeLineGutter { background: var(--chip); }
+.write-cm .cm-selectionLayer .cm-selectionBackground { background: var(--sel) !important; }
+.write-cm .cm-content ::selection { background: var(--sel); }
 .write-cm .cm-cursor { border-left-color: var(--accent); }
 .write-cm .tok-typeName, .write-cm .tok-keyword, .write-cm .tok-macroName { color: var(--cm-cmd); }
 .write-cm .tok-atom, .write-cm .tok-string, .write-cm .tok-labelName { color: var(--cm-arg); }
