@@ -223,7 +223,8 @@ def assist(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str,
             int(body.get("first_line") or 1), int(body.get("error_line") or 0))
     extra: dict[str, Any] = {"context": str(body.get("context") or ""),
                              "image": wassist.decode_image(str(body.get("image") or "")),
-                             "pad_before": body.get("pad_before") is True, "pad_after": body.get("pad_after") is True}
+                             "pad_before": body.get("pad_before") is True, "pad_after": body.get("pad_after") is True,
+                             "new_env": body.get("new_env") is True}
     req = wassist.prepare(conn, doc, *args, **extra)
     gateway = app.make_gateway(conn)
     preview = wassist.preview(gateway, req).model_dump()

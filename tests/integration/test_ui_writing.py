@@ -216,7 +216,14 @@ def test_assist_image_and_abstract_routes(tmp_path: Path) -> None:
     fakes["local_vision"] = Vision()  # type: ignore[assignment]
     try:
         doc = create(base)
-        png = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
+        import struct
+        import zlib
+
+        def chunk(kind: bytes, data: bytes) -> bytes:
+            return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+        png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)) +
+               chunk(b"IDAT", zlib.compress(b"\0\xff\xff\xff")) + chunk(b"IEND", b""))
         body = {"doc": doc["id"], "action": "equation-image", "file": "main.tex", "pad_before": True,
                 "image": "data:image/png;base64," + base64.b64encode(png).decode()}
         status, job = call(base, "/api/write/assist", body)
@@ -228,6 +235,23 @@ def test_assist_image_and_abstract_routes(tmp_path: Path) -> None:
                                                        "context": "We studied a model.", "file": "main.tex"})
         assert status == 200 and job["sent"]["characters"] == len("We studied a model.")
         assert wait_job(base, job["id"])["report"]["task"] == "write_summary"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_json_body_size_is_bounded_before_reading(tmp_path: Path, monkeypatch) -> None:
+    import litforge.ui.server as server_module
+
+    monkeypatch.setattr(server_module, "MAX_JSON_BODY", 2000)
+    httpd, base, _ = _assist_server(tmp_path)
+    try:
+        doc = create(base)
+        status, res = call(base, "/api/write/assist", {"doc": doc["id"], "action": "equation-image",
+                                                       "image": "A" * 3000})
+        assert status == 413 and "too large" in res["error"]
+        save = {"doc": doc["id"], "name": "main.tex", "text": "ok", "hash": None}
+        assert call(base, "/api/write/save", save)[0] != 413
     finally:
         httpd.shutdown()
         httpd.server_close()

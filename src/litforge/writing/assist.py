@@ -42,6 +42,7 @@ IMAGE = {"equation-image", "table-image"}  # no text: the result is inserted at 
 MAX_SELECTION = 12_000
 MAX_CONTEXT = 24_000  # characters of the document read for a title or an abstract (about 6000 tokens)
 MAX_IMAGE = 8 * 1024 * 1024
+MAX_PIXELS = 40_000_000  # a full-page scan at 600 dpi is about 35 megapixels
 _IMAGE_TYPES = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")
 _REPLACEMENT = {"type": "object", "properties": {"replacement": {"type": "string"}, "note": {"type": "string"}},
                 "required": ["replacement"]}
@@ -77,24 +78,28 @@ class Request:
     evidence: dict[str, Any] = field(default_factory=dict)  # evidence id -> EvidenceSpan for citations
     context: str = ""  # the document, for a title or an abstract (numbers in it are allowed)
     images: list[bytes] = field(default_factory=list)
-    pad: tuple[bool, bool] = (False, False)  # a newline before / after an inserted image result
+    pad: tuple[bool, bool] = (False, False)  # a newline before / after an inserted block
+    new_env: bool = False  # the abstract is new: its text comes inside \\begin{abstract} ... \\end{abstract}
 
 
 def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, error: str = "",
             first_line: int = 1, error_line: int = 0, *, context: str = "", image: bytes | None = None,
-            pad_before: bool = False, pad_after: bool = False) -> Request:
+            pad_before: bool = False, pad_after: bool = False, new_env: bool = False) -> Request:
     """Build what would be sent; only the selection (and, for citations, the retrieved evidence; for a title or
     an abstract, the document; for an image action, the image) is included."""
     if action not in ACTIONS:
         raise AssistError(f"unknown action; use one of {', '.join(ACTIONS)}")
     if action in IMAGE:
         return _prepare_image(action, image or b"", pad_before, pad_after)
+    if new_env and action != "abstract":
+        raise AssistError("only an abstract can be inserted as a new environment")
     if not text.strip() and action not in SUMMARY:
         raise AssistError("select some text first")
     if len(text) > MAX_SELECTION:
         raise AssistError(f"select at most {MAX_SELECTION} characters")
     req = Request(action=action, text=text, error=error, first_line=first_line, task=ACTIONS[action],
-                  error_line=max(0, error_line - first_line + 1) if error_line else 0)
+                  error_line=max(0, error_line - first_line + 1) if error_line else 0,
+                  new_env=new_env, pad=(pad_before, pad_after) if new_env else (False, False))
     if action not in {"fix", *SUMMARY}:
         req.wrap = lr_wrapper(text)
     sent = model_text(req)
@@ -112,7 +117,10 @@ def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, err
         if not re.sub(r"\\[a-zA-Z]+\*?|[{}\[\]\s]", "", body):
             raise AssistError("the document has no text yet to write a " + action + " from")
         req.context = body
-        req.messages, req.schema = write_summary_messages(action, text, body), _REPLACEMENT
+        # Math and citations behind markers, as for a rewrite: qwen3:8b wrote $\\backslash dot{x}$ for the
+        # Persian document's $\\dot{x}$ (real run, 2026-10-20).
+        masked, req.markers = protect(body)
+        req.messages, req.schema = write_summary_messages(action, text, masked), _REPLACEMENT
         req.packet = EvidencePacket(items=[selection, EvidenceItem(id="document", paper_id="manuscript", text=body,
                                                                    page=1)], sensitive=True)
     elif action == "cite":
@@ -146,10 +154,50 @@ def decode_image(data: str) -> bytes:
     if not data:
         return b""
     payload = data.split(",", 1)[1] if data.startswith("data:") else data
+    if len(payload) > MAX_IMAGE * 4 // 3 + 4:  # refused before decoding: base64 is 4 characters per 3 bytes
+        raise AssistError(f"the image is too large: at most {MAX_IMAGE // (1024 * 1024)} MB")
     try:
         return base64.b64decode(payload, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise AssistError("the image could not be read") from exc
+
+
+def image_size(data: bytes) -> tuple[int, int] | None:
+    """Width and height from the header, or None for a damaged or truncated image. Read without decoding, so a
+    small file declaring enormous dimensions is refused before any decoder sees it."""
+    try:
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):
+            if data[12:16] != b"IHDR" or not data.endswith(b"IEND\xaeB`\x82"):
+                return None
+            return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+        if data.startswith(b"\xff\xd8"):
+            pos = 2
+            while pos + 9 < len(data):
+                if data[pos] != 0xFF:
+                    return None
+                marker, length = data[pos + 1], int.from_bytes(data[pos + 2:pos + 4], "big")
+                if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                    if b"\xff\xd9" not in data[pos:]:
+                        return None
+                    return int.from_bytes(data[pos + 7:pos + 9], "big"), int.from_bytes(data[pos + 5:pos + 7], "big")
+                pos += 2 + length
+            return None
+        if data[:6] in (b"GIF87a", b"GIF89a"):
+            if not data.rstrip(b"\0").endswith(b";"):
+                return None
+            return int.from_bytes(data[6:8], "little"), int.from_bytes(data[8:10], "little")
+        if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            kind = data[12:16]
+            if kind == b"VP8X":
+                return 1 + int.from_bytes(data[24:27], "little"), 1 + int.from_bytes(data[27:30], "little")
+            if kind == b"VP8 ":
+                return int.from_bytes(data[26:28], "little") & 0x3FFF, int.from_bytes(data[28:30], "little") & 0x3FFF
+            if kind == b"VP8L":
+                bits = int.from_bytes(data[21:25], "little")
+                return 1 + (bits & 0x3FFF), 1 + ((bits >> 14) & 0x3FFF)
+    except (IndexError, ValueError):
+        return None
+    return None
 
 
 def _prepare_image(action: str, image: bytes, pad_before: bool, pad_after: bool) -> Request:
@@ -159,6 +207,11 @@ def _prepare_image(action: str, image: bytes, pad_before: bool, pad_after: bool)
         raise AssistError(f"the image is too large: at most {MAX_IMAGE // (1024 * 1024)} MB")
     if not image.startswith(_IMAGE_TYPES) and not (image[:4] == b"RIFF" and image[8:12] == b"WEBP"):
         raise AssistError("use a PNG, JPEG, GIF or WebP image")
+    size = image_size(image)
+    if size is None:
+        raise AssistError("the image could not be read: it is damaged or incomplete")
+    if size[0] * size[1] > MAX_PIXELS:
+        raise AssistError(f"the image has too many pixels ({size[0]}×{size[1]}); crop or shrink it")
     # Sensitive: a screenshot may come from unpublished work, so a cloud route always needs approval.
     item = EvidenceItem(id="image", paper_id="manuscript", text="(image)", page=1)
     req = Request(action=action, text="", task=ACTIONS[action], images=[image], pad=(pad_before, pad_after),
@@ -275,14 +328,16 @@ def suggestion_from(conn: sqlite3.Connection, doc: Document, req: Request, conte
         if _MARKER.search(new_text):
             flags.append("the model invented markers that stand for nothing")
     if req.action in IMAGE:  # nothing to compare with: read escapes against common LaTeX math commands
-        new_text = layout_latex(repair_escapes(new_text, _MATH_COMMANDS))
+        new_text = layout_latex(repair_image_escapes(new_text))
         flags.append("transcribed from an image: check every symbol and number against it")
     else:
         new_text = _keep_edges(sent, repair_escapes(new_text, sent + " " + req.context))
     if not new_text.strip():
         raise AssistError("the model returned no text")
     sent_new = new_text
-    if req.action in IMAGE:
+    if req.new_env:
+        new_text = "\\begin{abstract}\n" + new_text.strip() + "\n\\end{abstract}"
+    if req.action in IMAGE or req.new_env:
         new_text = ("\n" if req.pad[0] else "") + new_text + ("\n" if req.pad[1] else "")
     if req.wrap:  # put the \\lr{...} back, except around a Persian translation, which must not be in it
         lead, trail = req.wrap[0][:-4], req.wrap[1][1:]
@@ -297,7 +352,8 @@ def suggestion_from(conn: sqlite3.Connection, doc: Document, req: Request, conte
     if req.action == "fix" and req.error_line:  # the broken command on the error line is meant to change
         lines = req.text.split("\n")
         exempt = set(_COMMAND.findall(lines[req.error_line - 1])) if req.error_line <= len(lines) else set()
-    flags += latex_flags(sent, sent_new, exempt)
+    # A title or an abstract may use any command the document uses (its math, \\lr{...}).
+    flags += latex_flags(sent, sent_new, exempt, set(_COMMAND.findall(req.context)))
     hunks = [_flag_hunk(h, allowed, known, conn) for h in diff_hunks(req.text, new_text)]
     if req.action == "cite":
         for hunk in hunks:
@@ -431,12 +487,23 @@ def layout_latex(text: str) -> str:
     joining its lines would comment out the rest."""
     text = text.strip()
     if re.search(r"(?<!\\)%", text):
-        return text
+        return re.sub(r"\n[ \t]*(?=\n)", "", text)  # still no blank line: it would end the equation
     text = re.sub(r"^\(\d+(?:\.\d+)*\)\s*(?=\\begin|\\\[)", "", text)
     text = re.sub(r"(\\end\{[^}]*\}|\\\])\s*\(\d+(?:\.\d+)*\)$", r"\1", text)
     text = re.sub(r"\s+", " ", text)
     lines: list[str] = []
     buffer, depth, pos = "", 0, 0
+    group, groups = 0, []  # brace depth at each character: nothing inside \text{...} or \mbox{...} is laid out
+    i = 0
+    while i < len(text):
+        groups.append(group)
+        if text[i] == "\\" and i + 1 < len(text):
+            groups.append(group)
+            i += 2
+            continue
+        group += {"{": 1, "}": -1}.get(text[i], 0)
+        i += 1
+    groups.append(group)
 
     def flush() -> None:
         nonlocal buffer
@@ -445,7 +512,7 @@ def layout_latex(text: str) -> str:
         buffer = ""
 
     for match in _LAYOUT.finditer(text):
-        if match.start() < pos:
+        if match.start() < pos or groups[match.start()] > 0:
             continue
         buffer += text[pos:match.start()]
         token, pos = match.group(0), match.end()
@@ -480,7 +547,7 @@ def layout_latex(text: str) -> str:
     return "\n".join(lines)
 
 
-def latex_flags(old: str, new: str, exempt: set[str] | None = None) -> list[str]:
+def latex_flags(old: str, new: str, exempt: set[str] | None = None, known: set[str] | None = None) -> list[str]:
     """LaTeX the suggestion dropped: commands (by count), math, and \\cite/\\ref/\\label arguments."""
     flags = []
     missing = Counter(_COMMAND.findall(old)) - Counter(_COMMAND.findall(new))
@@ -488,7 +555,7 @@ def latex_flags(old: str, new: str, exempt: set[str] | None = None) -> list[str]
         missing.pop(name, None)
     if missing:
         flags.append("LaTeX commands dropped: " + ", ".join(f"\\{c}" for c in sorted(missing)[:8]))
-    added = set(_COMMAND.findall(new)) - set(_COMMAND.findall(old)) - {"cite", "lr"}
+    added = set(_COMMAND.findall(new)) - set(_COMMAND.findall(old)) - {"cite", "lr"} - (known or set())
     if added and exempt is None:  # a fix replaces a broken command with a correct one
         flags.append("LaTeX commands added: " + ", ".join(f"\\{c}" for c in sorted(added)[:8]))
     old_math = Counter(m.strip() for m in _MATH.findall(old))
@@ -556,6 +623,18 @@ def repair_escapes(new: str, original: str) -> str:
         return match.group(0)
 
     return re.sub(r"([\t\r\f\b\n])([a-zA-Z]+)", fix, new)
+
+
+def repair_image_escapes(new: str) -> str:
+    """A reply with no backslash at all did not escape its JSON: every control character before a known command
+    was a backslash. A reply that has backslashes escaped them itself, so its newlines and tabs are real ("\\nu"
+    vs a line starting with "u"); only form feeds and backspaces, never real in LaTeX, are read as commands."""
+    if "\\" not in new:
+        return repair_escapes(new, _MATH_COMMANDS)
+    commands = set(_COMMAND.findall(_MATH_COMMANDS))
+    return re.sub(r"([\f\b])([a-zA-Z]+)",
+                  lambda m: "\\" + _CONTROL[m.group(1)] + m.group(2) if _CONTROL[m.group(1)] + m.group(2) in commands
+                  else m.group(0), new)
 
 
 def _keep_edges(original: str, new: str) -> str:

@@ -3166,9 +3166,27 @@
   var IMAGE_MAX = 8 * 1024 * 1024;  // as on the server
   var IMG = { action: null, range: null };
 
-  function commentedAt(text, pos) {
-    var prefix = text.slice(text.lastIndexOf('\n', pos - 1) + 1, pos);
-    return /(^|[^\\])%/.test(prefix);
+  // [start, end) of each comment: % to the end of its line, unless escaped. A backslash always takes the next
+  // character with it, so in \\% the % starts a comment and in \% it does not.
+  function commentRanges(text) {
+    var out = [];
+    for (var i = 0; i < text.length; i++) {
+      if (text[i] === '\\') { i++; continue; }
+      if (text[i] === '%') {
+        var end = text.indexOf('\n', i);
+        if (end < 0) end = text.length;
+        out.push([i, end]);
+        i = end;
+      }
+    }
+    return out;
+  }
+
+  // The text with comments blanked out (same length, so offsets still match the original).
+  function maskComments(text) {
+    var out = '', pos = 0;
+    commentRanges(text).forEach(function (r) { out += text.slice(pos, r[0]) + ' '.repeat(r[1] - r[0]); pos = r[1]; });
+    return out + text.slice(pos);
   }
 
   // The index of the } closing the { at `open`, or -1; escaped braces do not count.
@@ -3183,28 +3201,37 @@
   }
 
   // The text inside \title{...} (after an optional [short title]), or null.
+  // Both read the text with its comments blanked out: a commented \title or } does not count.
   function titleRange(text) {
-    var re = /\\title\s*(?:\[[^\]]*\])?\s*\{/g, m;
-    while ((m = re.exec(text))) {
-      if (commentedAt(text, m.index)) continue;
-      var open = m.index + m[0].length - 1, close = closingBrace(text, open);
-      return close < 0 ? null : { from: open + 1, to: close };
-    }
-    return null;
+    var plain = maskComments(text), m = /\\title\s*(?:\[[^\]]*\])?\s*\{/.exec(plain);
+    if (!m) return null;
+    var open = m.index + m[0].length - 1, close = closingBrace(plain, open);
+    return close < 0 ? null : { from: open + 1, to: close };
   }
 
   function abstractRange(text) {
-    var re = /\\begin\{abstract\}/g, m;
-    while ((m = re.exec(text))) {
-      if (commentedAt(text, m.index)) continue;
-      var from = m.index + m[0].length, to = text.indexOf('\\end{abstract}', from);
-      return to < 0 ? null : { from: from, to: to };
+    var plain = maskComments(text), at = plain.indexOf('\\begin{abstract}');
+    if (at < 0) return null;
+    var from = at + '\\begin{abstract}'.length, to = plain.indexOf('\\end{abstract}', from);
+    return to < 0 ? null : { from: from, to: to };
+  }
+
+  // Where a new abstract goes: on the line after \maketitle, else after the \begin{document} line; -1 if neither.
+  function abstractInsertAt(text) {
+    var plain = maskComments(text), names = ['\\maketitle', '\\begin{document}'];
+    for (var n = 0; n < names.length; n++) {
+      var at = plain.indexOf(names[n]);
+      if (at < 0) continue;
+      var end = text.indexOf('\n', at);
+      return end < 0 ? text.length : end + 1;
     }
-    return null;
+    return -1;
   }
 
   function stripComments(text) {
-    return text.split('\n').map(function (line) { return line.replace(/(^|[^\\])%.*$/, '$1'); }).join('\n');
+    var out = '', pos = 0;
+    commentRanges(text).forEach(function (r) { out += text.slice(pos, r[0]); pos = r[1]; });
+    return out + text.slice(pos);
   }
 
   // What a title or an abstract is written from: the document's body, without comments.
@@ -3229,9 +3256,7 @@
 
   function openWriteImage(action) {
     var text = W.editor.getText(), pos = W.editor.selection().to, pads = imagePads(text, pos);
-    var at = Math.max(0, pos - 40);
-    IMG = { action: action, range: { from: pos, to: pos, text: '', pad_before: pads.pad_before, pad_after: pads.pad_after,
-      anchor: text.slice(at, pos + 40), anchorAt: at } };
+    IMG = { action: action, range: { from: pos, to: pos, text: '', pad_before: pads.pad_before, pad_after: pads.pad_after } };
     $('write-image-title').textContent = IMAGE_ACTIONS[action];
     $('write-image').hidden = false;
     placeWriteSuggestion(IMG.range, $('write-image'));
@@ -3244,6 +3269,7 @@
   }
 
   function writeImageFile(file) {
+    var panel = IMG;  // a read finishing after the panel closed (or another opened) is dropped
     if (!file) return Promise.resolve();
     if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type || '')) { toast('Use a PNG, JPEG, GIF or WebP image.'); return Promise.resolve(); }
     if (file.size > IMAGE_MAX) { toast('The image is too large: at most 8 MB.'); return Promise.resolve(); }
@@ -3252,11 +3278,11 @@
       reader.onload = function () { resolve(reader.result); };
       reader.onerror = function () { reject(new Error('The image could not be read.')); };
       reader.readAsDataURL(file);
-    }).then(sendWriteImage).catch(function (e) { toast(e.message); });
+    }).then(function (url) { return sendWriteImage(url, panel); }).catch(function (e) { toast(e.message); });
   }
 
-  function sendWriteImage(dataUrl) {
-    if (!IMG.action) return Promise.resolve();
+  function sendWriteImage(dataUrl, panel) {
+    if (!IMG.action || (panel && panel !== IMG)) return Promise.resolve();
     var action = IMG.action, range = IMG.range;
     range.image = dataUrl;
     closeWriteImage();
@@ -3277,12 +3303,17 @@
     }
     if (action === 'title' || action === 'abstract') {
       var full = W.editor.getText(), found = action === 'title' ? titleRange(full) : abstractRange(full);
-      if (!found) {
-        return { problem: action === 'title' ? 'Add \\title{} to the document first.' :
-          'Add \\begin{abstract} … \\end{abstract} to the document first.' };
-      }
       // Sections in other files (\input) count too; they are read for completion already.
       var context = [documentBody(full)].concat((W.otherTexts || []).map(stripComments)).join('\n');
+      if (!found && action === 'abstract' && abstractInsertAt(full) >= 0) {  // the templates have no abstract
+        var pos = abstractInsertAt(full), pads = imagePads(full, pos);
+        return { from: pos, to: pos, text: '', context: context, new_env: true, pad_before: pads.pad_before,
+          pad_after: pads.pad_after };
+      }
+      if (!found) {
+        return { problem: action === 'title' ? 'Add \\title{} to the document first.' :
+          'Add \\begin{document} to the document first.' };
+      }
       return { from: found.from, to: found.to, text: full.slice(found.from, found.to), context: context };
     }
     var sel = W.editor.selection();
@@ -3295,12 +3326,17 @@
     if (!W.doc || !W.editor || !action) return Promise.resolve();
     if (AI.pending) { toast('Apply or reject the open suggestion first.'); return Promise.resolve(); }
     if (IMAGE_ACTIONS[action] && !given && !approved) { openWriteImage(action); return Promise.resolve(); }
-    var range = given || (AI.range && approved ? AI.range : writeAiRange(action));
+    var range = given || writeAiRange(action);
     if (range.problem) { toast(range.problem); return Promise.resolve(); }
-    range.doc = W.doc.id; range.file = W.file;
+    if (range.before == null) {  // the text around it: an empty range (a title, an insertion point) has no text to check
+      var all = W.editor.getText();
+      range.before = all.slice(Math.max(0, range.from - 40), range.from); range.after = all.slice(range.to, range.to + 40);
+    }
+    range.doc = range.doc || W.doc.id; range.file = range.file || W.file;
     AI.range = range;
     var body = { doc: W.doc.id, action: action, text: range.text, error: range.error || '', first_line: range.first_line || 1, error_line: range.error_line || 0,
       context: range.context || '', image: range.image || '', pad_before: !!range.pad_before, pad_after: !!range.pad_after,
+      new_env: !!range.new_env,
       file: W.file, approved: !!approved };
     $('write-compile-state').textContent = 'Preparing the request…';
     return post('/api/write/assist', body).then(function (res) {
@@ -3311,7 +3347,10 @@
           (res.sent.evidence ? ' and ' + res.sent.evidence + ' evidence quotes' : '') + ' to ' + p.model + ' (' +
           p.provider + ', cloud' + (p.max_cost_usd != null ? ', at most $' + p.max_cost_usd.toFixed(4) : '') + ')?');
         if (!ok) { $('write-compile-state').textContent = 'Not sent.'; return; }
-        return runWriteAi(action, true);
+        if (!W.doc || W.doc.id !== range.doc || W.file !== range.file) {  // approved for text no longer open
+          $('write-compile-state').textContent = 'Not sent: another file is open now.'; return;
+        }
+        return runWriteAi(action, true, range);  // exactly the request shown, not a new one
       }
       $('write-compile-state').textContent = 'Asking ' + (res.preview.model || res.preview.profile) +
         (res.preview.remote ? ' (cloud)' : ' (local)') + ' · sending ' + (res.sent.images ? 'an image' : res.sent.characters + ' characters') +
@@ -3450,8 +3489,9 @@
     var s = pending.suggestion, range = pending.range;
     if (range.doc && (!W.doc || W.doc.id !== range.doc || W.file !== range.file)) { dropWriteSuggestion(); return Promise.resolve(); }
     var accepted = s.hunks.filter(function (h) { return pending.accepted[h.index]; }).map(function (h) { return h.index; });
-    var now = W.editor.getText(), moved = range.anchor != null &&  // an insertion point has no text of its own
-      now.slice(range.anchorAt, range.anchorAt + range.anchor.length) !== range.anchor;
+    var now = W.editor.getText(), moved = range.before != null &&
+      (now.slice(range.from - range.before.length, range.from) !== range.before ||
+       now.slice(range.to, range.to + range.after.length) !== range.after);
     if (accepted.length && (moved || now.slice(range.from, range.to) !== s.original)) {
       toast('The text changed since the request; ask again.');
       return Promise.resolve();

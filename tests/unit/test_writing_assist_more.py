@@ -16,7 +16,20 @@ from litforge.storage.db import open_db
 from litforge.writing import assist as wa
 from litforge.writing import documents as wd
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 64
+
+def png(width: int = 2, height: int = 2) -> bytes:
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    rows = b"".join(b"\0" + b"\xff" * 3 * width for _ in range(min(height, 4)))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+PNG = png()
 BODY = (r"\section{Introduction} We fit a whole-brain model to 40 subjects and found a coupling gain of 3.25. "
         r"\section{Methods} The model uses $\alpha = 0.5$ \cite{lee2021}.")
 
@@ -132,9 +145,10 @@ def test_image_result_goes_on_its_own_lines(env) -> None:
 
 
 def test_image_reply_json_escapes_are_repaired(env) -> None:
-    # "\frac" and "\neq" sent without doubled backslashes arrive as a form feed and a newline.
-    result, _ = run_image(env, "equation-image", {"replacement": "\\[ \frac{a}{b} \neq \nu \\]"})
-    assert result["hunks"][0]["new"] == "\\[\n  \\frac{a}{b} \\neq \\nu\n\\]"
+    # A reply with no real backslash at all did not escape its JSON: "\frac" and "\neq" arrived as a form feed
+    # and a newline.
+    result, _ = run_image(env, "equation-image", {"replacement": "\frac{a}{b} \neq \nu"})
+    assert result["hunks"][0]["new"] == "\\frac{a}{b} \\neq \\nu"
 
 
 def test_table_from_image_prompt_and_flags(env) -> None:
@@ -153,6 +167,8 @@ def test_image_must_be_an_image(env) -> None:
         wa.prepare(conn, doc, "equation-image", "")
     with pytest.raises(wa.AssistError, match="at most"):
         wa.prepare(conn, doc, "equation-image", "", image=PNG + b"\0" * wa.MAX_IMAGE)
+    with pytest.raises(wa.AssistError, match="could not be read"):
+        wa.prepare(conn, doc, "equation-image", "", image=b"\x89PNG\r\n\x1a\n" + b"\0" * 64)
 
 
 def test_decode_image_accepts_data_urls_and_plain_base64() -> None:
@@ -212,3 +228,89 @@ def test_layout_leaves_text_with_comments_alone() -> None:
 def test_image_reply_is_laid_out(env) -> None:
     result, _ = run_image(env, "equation-image", {"replacement": "\\begin{equation} E = mc^2 \\end{equation} (1)"})
     assert result["hunks"][0]["new"] == "\\begin{equation}\n  E = mc^2\n\\end{equation}"
+
+
+def test_a_missing_abstract_comes_as_a_new_environment(env) -> None:
+    # Neither bundled template has an abstract; the page asks for one to be inserted after \maketitle.
+    result, _ = run_text(env, "abstract", "", {"replacement": "We fit a model."}, context=BODY, new_env=True,
+                         pad_after=True)
+    assert result["original"] == ""
+    assert result["hunks"][0]["new"] == "\\begin{abstract}\nWe fit a model.\n\\end{abstract}\n"
+
+
+def test_new_env_is_only_for_an_abstract(env) -> None:
+    conn, doc = env
+    with pytest.raises(wa.AssistError, match="abstract"):
+        wa.prepare(conn, doc, "title", "", context=BODY, new_env=True)
+
+
+# ---- round 3 (Codex review and the Persian real run) ------------------------------------------------------
+
+
+def test_image_size_reads_png_jpeg_gif_and_webp_headers() -> None:
+    import struct
+
+    assert wa.image_size(png(30, 20)) == (30, 20)
+    jpeg = (b"\xff\xd8\xff\xe0\x00\x04ab" + b"\xff\xc0\x00\x11\x08" + struct.pack(">HH", 50, 70) + b"\0" * 12 +
+            b"\xff\xd9")
+    assert wa.image_size(jpeg) == (70, 50)
+    gif = b"GIF89a" + struct.pack("<HH", 9, 8) + b"\0" * 10 + b";"
+    assert wa.image_size(gif) == (9, 8)
+    webp = b"RIFF" + b"\0" * 4 + b"WEBPVP8X" + b"\0" * 8 + (99).to_bytes(3, "little") + (49).to_bytes(3, "little")
+    assert wa.image_size(webp) == (100, 50)
+    assert wa.image_size(b"\x89PNG\r\n\x1a\n") is None  # a signature alone is not an image
+    assert wa.image_size(png()[:-12]) is None  # truncated: no IEND
+
+
+def test_image_must_be_whole_and_not_enormous(env) -> None:
+    conn, doc = env
+    with pytest.raises(wa.AssistError, match="could not be read"):
+        wa.prepare(conn, doc, "equation-image", "", image=b"\x89PNG\r\n\x1a\n" + b"\0" * 64)
+    with pytest.raises(wa.AssistError, match="too many pixels"):
+        wa.prepare(conn, doc, "equation-image", "", image=png(20_000, 20_000))
+    assert wa.prepare(conn, doc, "equation-image", "", image=png()).images == [png()]
+
+
+def test_oversized_image_payload_is_refused_before_decoding(monkeypatch) -> None:
+    def boom(*_a, **_k):
+        raise AssertionError("decoded")
+
+    monkeypatch.setattr(wa.base64, "b64decode", boom)
+    with pytest.raises(wa.AssistError, match="too large"):
+        wa.decode_image("data:image/png;base64," + "A" * (wa.MAX_IMAGE * 4 // 3 + 100))
+
+
+def test_escapes_kept_when_the_reply_escaped_backslashes_itself(env) -> None:
+    # A reply with real backslashes escaped its JSON: its newlines and tabs are real (Codex review).
+    result, _ = run_image(env, "equation-image", {"replacement": "\\begin{align}\nu &= 1 \\\\\n\tx &= 2\n\\end{align}"})
+    assert result["hunks"][0]["new"] == "\\begin{align}\n  u &= 1 \\\\\n  x &= 2\n\\end{align}"
+    result, _ = run_image(env, "equation-image", {"replacement": "\\[ \frac{a}{b} \\]"})  # \f is never real
+    assert result["hunks"][0]["new"] == "\\[\n  \\frac{a}{b}\n\\]"
+
+
+def test_layout_never_breaks_inside_a_group() -> None:
+    text = "\\begin{equation}\\text{a\\label{x}b} \\\\ \\mbox{c \\hline d}\\end{equation}"
+    assert wa.layout_latex(text) == ("\\begin{equation}\n  \\text{a\\label{x}b} \\\\\n  \\mbox{c \\hline d}\n"
+                                     "\\end{equation}")
+
+
+def test_layout_drops_blank_lines_even_with_comments() -> None:
+    got = wa.layout_latex("\\begin{equation}\nx=1 % note\n\n  \n\\end{equation}")
+    assert got == "\\begin{equation}\nx=1 % note\n\\end{equation}"
+
+
+def test_summary_math_and_citations_go_behind_markers(env) -> None:
+    conn, doc = env
+    req = wa.prepare(conn, doc, "abstract", "", context=BODY)
+    user = req.messages[1]["content"]
+    assert "\\alpha" not in user and "\\cite{lee2021}" not in user and "\u27e6" in user
+    marker = next(i + 1 for i, m in enumerate(req.markers) if m.startswith("$"))
+    result, _ = run_text(env, "abstract", "", {"replacement": f"We set \u27e6{marker}\u27e7 in 40 subjects."},
+                         context=BODY)
+    assert "$\\alpha = 0.5$" in result["hunks"][0]["new"] and not result["flags"]
+
+
+def test_title_prompt_asks_for_the_subject_not_the_headings(env) -> None:
+    conn, doc = env
+    assert "section headings" in wa.prepare(conn, doc, "title", "x", context=BODY).messages[0]["content"]
+

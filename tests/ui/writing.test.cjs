@@ -1221,11 +1221,11 @@ test('"Suggest title" sends the current title and the document, and applies to t
 test('title and abstract need the command or environment first', async () => {
   const { ctx, $, calls } = aiSetup(REPORT);
   await ctx.openWriteDoc('d1');
-  $('write-cm').children[0].value = '\\begin{document}\nText.\n\\end{document}';
+  $('write-cm').children[0].value = 'Text.';
   await ctx.runWriteAi('title', false);
   await ctx.runWriteAi('abstract', false);
   const toasts = calls.filter(c => c[0] === 'toast').map(c => c[1]).join(' | ');
-  assert.match(toasts, /\\title\{\}/); assert.match(toasts, /\\begin\{abstract\}/);
+  assert.match(toasts, /\\title\{\}/); assert.match(toasts, /\\begin\{document\}/);
   assert.ok(!calls.some(c => c[0] === '/api/write/assist'));
 });
 
@@ -1326,4 +1326,95 @@ test('a new AI action waits until the open suggestion is applied or rejected', a
   assert.equal(calls.filter(c => c[0] === '/api/write/assist').length, 1);
   assert.ok(calls.some(c => c[0] === 'toast' && /Apply or reject the open suggestion first/.test(c[1])));
   assert.notEqual($('write-image').hidden, false);
+});
+
+test('"Suggest abstract" without an abstract inserts a new one after \\maketitle', async () => {
+  const report = { id: 's5', task: 'write_summary', action: 'abstract', provider: 'ollama', model: 'q', note: '', flags: [],
+    original: '', citations: [], hunks: [{ index: 0, start: 0, end: 0, old: '', new: '\\begin{abstract}\nNew.\n\\end{abstract}\n', flags: [] }] };
+  const { ctx, $, calls } = aiSetup(report);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = '\\title{T}\n\\begin{document}\n\\maketitle\n\\section{A} Text.\n\\end{document}\n';
+  await ctx.runWriteAi('abstract', false);
+  const sent = calls.find(c => c[0] === '/api/write/assist')[1];
+  assert.equal(sent.text, ''); assert.equal(sent.new_env, true);
+  assert.match(sent.context, /Text\./);
+  await ctx.applyWriteSuggestion();
+  assert.equal(area.value, '\\title{T}\n\\begin{document}\n\\maketitle\n\\begin{abstract}\nNew.\n\\end{abstract}\n\\section{A} Text.\n\\end{document}\n');
+});
+
+test('abstractInsertAt: after \\maketitle, else after \\begin{document}, else nowhere', () => {
+  const { ctx } = setup();
+  assert.equal(ctx.abstractInsertAt('a\n\\begin{document}\n\\maketitle\nb'), 'a\n\\begin{document}\n\\maketitle\n'.length);
+  assert.equal(ctx.abstractInsertAt('\\begin{document}\nb'), '\\begin{document}\n'.length);
+  assert.equal(ctx.abstractInsertAt('% \\maketitle\n\\begin{document} x'), '% \\maketitle\n\\begin{document} x'.length);
+  assert.equal(ctx.abstractInsertAt('no document here'), -1);
+});
+
+/* ---- round 3: Codex review ---- */
+
+test('an approval resends exactly the request shown, and nothing when the user moved to another document', async () => {
+  const env = aiSetup(REPORT, true);
+  await env.ctx.openWriteDoc('d1');
+  const area = env.$('write-cm').children[0];
+  area.value = '\\title{Old}\n\\begin{document}\nBody one.\n\\end{document}';
+  env.ctx.window.confirm = () => { area.value = '\\title{Other}\n\\begin{document}\nBody two.\n\\end{document}'; return true; };
+  await env.ctx.runWriteAi('title', false);
+  const posts = env.calls.filter(c => c[0] === '/api/write/assist').map(c => c[1]);
+  assert.equal(posts.length, 2);
+  assert.equal(posts[1].text, 'Old'); assert.match(posts[1].context, /Body one/);
+  assert.equal(posts[1].approved, true);
+  const moved = aiSetup(REPORT, true);
+  await moved.ctx.openWriteDoc('d1');
+  moved.$('write-cm').children[0].value = 'one two three'; moved.$('write-cm').children[0].setSelectionRange(0, 13);
+  moved.ctx.window.confirm = () => { moved.ctx.W.doc = { id: 'd2', name: 'Other' }; return true; };
+  await moved.ctx.runWriteAi('clearer', false);
+  assert.equal(moved.calls.filter(c => c[0] === '/api/write/assist').length, 1);
+});
+
+test('an empty title is not filled in at an old offset after text was added before it', async () => {
+  const report = { id: 's6', task: 'write_summary', action: 'title', provider: 'o', model: 'q', note: '', flags: [], original: '',
+    citations: [], hunks: [{ index: 0, start: 0, end: 0, old: '', new: 'New title', flags: [] }] };
+  const { ctx, $, calls } = aiSetup(report);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = '\\title{}\n\\begin{document}\nBody.\n\\end{document}';
+  await ctx.runWriteAi('title', false);
+  area.value = 'xx' + area.value;
+  await ctx.applyWriteSuggestion();
+  assert.equal(area.value, 'xx\\title{}\n\\begin{document}\nBody.\n\\end{document}');
+  assert.ok(calls.some(c => c[0] === 'toast' && /changed since/.test(c[1])));
+});
+
+test('title and abstract are found as LaTeX reads comments and escapes', () => {
+  const { ctx } = setup();
+  const t1 = '\\title{Old % }\n continued}';
+  const r1 = ctx.titleRange(t1);
+  assert.equal(t1.slice(r1.from, r1.to), 'Old % }\n continued');
+  const t2 = '\\begin{abstract}Old\n% \\end{abstract}\ncontinued\n\\end{abstract}';
+  const r2 = ctx.abstractRange(t2);
+  assert.equal(t2.slice(r2.from, r2.to), 'Old\n% \\end{abstract}\ncontinued\n');
+  const t3 = '\\\\% \\title{Commented}\n\\title{Real}';
+  const r3 = ctx.titleRange(t3);
+  assert.equal(t3.slice(r3.from, r3.to), 'Real');
+  const t4 = '50\\% of \\title{Kept}';
+  const r4 = ctx.titleRange(t4);
+  assert.equal(t4.slice(r4.from, r4.to), 'Kept');
+  assert.equal(ctx.titleRange('\\title{a \\} b}').to, '\\title{a \\} b'.length);
+});
+
+test('a slow image read does not go to a panel opened after it', async () => {
+  const { ctx, $, calls } = aiSetup(REPORT);
+  const readers = [];
+  ctx.FileReader = class { constructor() { readers.push(this); } readAsDataURL() {} };
+  await ctx.openWriteDoc('d1');
+  $('write-cm').children[0].value = 'abc';
+  await ctx.runWriteAi('equation-image', false);
+  const reading = ctx.writeImageFile({ type: 'image/png', size: 10 });
+  ctx.closeWriteImage();
+  await ctx.runWriteAi('table-image', false);
+  readers[0].result = 'data:image/png;base64,AA=='; readers[0].onload();
+  await reading;
+  assert.ok(!calls.some(c => c[0] === '/api/write/assist'));
+  assert.equal($('write-image').hidden, false);  // the table panel is still waiting for its own image
 });

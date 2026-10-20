@@ -86,6 +86,11 @@ from litforge.updates import UpdateChecker, automatic_enabled
 from litforge.writing.compile import engine_status
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+class BodyTooLarge(ValueError):
+    pass
+
+
+MAX_JSON_BODY = 16 * 1024 * 1024  # an 8 MB image as base64 in the Write view's AI request, with room to spare
 HEARTBEAT_S = 15  # how often an open page checks in (app.js)
 IDLE_STOP_S = 120  # no check-in for this long, and no job running: the server stops itself
 STATIC = resources.files("litforge.ui") / "static"
@@ -945,6 +950,9 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
 
         def _body(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length") or 0)
+            if length > MAX_JSON_BODY:  # refused unread, before any memory is spent on it
+                self.close_connection = True
+                raise BodyTooLarge(f"request too large: at most {MAX_JSON_BODY // (1024 * 1024)} MB")
             data = json.loads(self.rfile.read(length) or b"{}") if length else {}
             if not isinstance(data, dict):
                 raise ValueError("expected a JSON object")
@@ -1106,7 +1114,10 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._import(q.get("name", "refs.csv"), q.get("project") or "default", q.get("export_dir"))
                 if url.path == "/api/write/upload":
                     return self._write_upload({k: v[0] for k, v in parse_qs(url.query).items()})
-                body = self._body()
+                try:
+                    body = self._body()
+                except BodyTooLarge as exc:
+                    return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
                 if url.path.startswith("/api/write/"):
                     return self._write_post(url.path, body)
                 if url.path == "/api/tools/tectonic/install":
