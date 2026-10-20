@@ -434,3 +434,96 @@ def test_settings_route_and_outputs_follow_the_main_file(server) -> None:
     assert status == 200 and pdf == b"%PDF-1.5 paper"
     status, res = call(base, f"/api/write/synctex?doc={doc['id']}&file=paper.tex&line=1")
     assert status == 404 and "compile" in res["error"]
+
+
+def test_archive_routes(server):
+    import io
+    import zipfile
+    from urllib.request import urlopen
+
+    base, _ = server
+    doc = create(base)
+    with urlopen(base + f"/api/write/export.zip?doc={doc['id']}") as response:
+        assert response.headers["Content-Type"] == "application/zip"
+        assert response.headers["Content-Disposition"] == 'attachment; filename="draft.zip"'
+        data = response.read()
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        assert "main.tex" in archive.namelist()
+    status, imported = call(base, "/api/write/import?project=demo&name=Imported", raw=data)
+    assert status == 200, imported
+    assert imported["template"] == "imported" and imported["name"] == "Imported"
+    assert imported["id"] != doc["id"]
+    assert call(base, f"/api/write/file?doc={imported['id']}&name=main.tex")[1]["text"] == call(
+        base, f"/api/write/file?doc={doc['id']}&name=main.tex")[1]["text"]
+    assert call(base, "/api/write/import?project=demo&name=Bad", raw=b"bad")[0] == 400
+    for headers in ({"Origin": "http://evil.example"}, {"Host": "evil.example"}):
+        assert call(base, "/api/write/import?project=demo&name=Bad", raw=data, headers=headers)[0] == 403
+
+
+def test_archive_import_size_limit_before_read(server):
+    import http.client
+    from urllib.parse import urlsplit
+
+    base, _ = server
+    url = urlsplit(base)
+    conn = http.client.HTTPConnection(url.hostname, url.port, timeout=3)
+    try:
+        conn.request("POST", "/api/write/import?project=demo&name=Big", body=None,
+                     headers={"Content-Length": str(100 * 1024 * 1024 + 1)})
+        response = conn.getresponse()
+        assert response.status in {400, 413}
+        assert b"100 MB" in response.read()
+    finally:
+        conn.close()
+
+
+def test_archive_handler_without_socket(tmp_path):
+    import io
+    import json
+    import zipfile
+    from types import SimpleNamespace
+
+    app = App(Paths(tmp_path / "data", exports_root=tmp_path / "exports"), load_config())
+    conn = app.db()
+    create_project(conn, app.paths, "demo")
+    conn.close()
+
+    class Request:
+        def __init__(self, data):
+            self.input = io.BytesIO(data)
+            self.output = bytearray()
+
+        def makefile(self, *args):
+            return self.input
+
+        def sendall(self, data):
+            self.output.extend(data)
+
+    def request(method, path, body=b"", headers=None):
+        fields = {"Host": "localhost", "Content-Length": str(len(body)), **(headers or {})}
+        raw = f"{method} {path} HTTP/1.0\r\n" + "".join(f"{k}: {v}\r\n" for k, v in fields.items())
+        req = Request(raw.encode() + b"\r\n" + body)
+        make_handler(app)(req, ("127.0.0.1", 1234), SimpleNamespace(server_address=("127.0.0.1", 1234)))
+        head, payload = bytes(req.output).split(b"\r\n\r\n", 1)
+        return head, payload
+
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr("main.tex", r"\documentclass{article}")
+    data = out.getvalue()
+    head, payload = request("POST", "/api/write/import?project=demo&name=Paper", data)
+    assert b"200 OK" in head, payload
+    doc = json.loads(payload)
+    head, payload = request("GET", f"/api/write/export.zip?doc={doc['id']}")
+    assert b"200 OK" in head and b"Content-Type: application/zip" in head
+    assert b'Content-Disposition: attachment; filename="paper.zip"' in head
+    with zipfile.ZipFile(io.BytesIO(payload)) as z:
+        assert z.read("main.tex") == b"\\documentclass{article}"
+    for headers in ({"Origin": "http://evil.example"}, {"Host": "evil.example"}):
+        head, _ = request("POST", "/api/write/import?project=demo&name=Bad", data, headers)
+        assert b"403" in head
+    head, payload = request("POST", "/api/write/import?project=demo&name=Big",
+                            headers={"Content-Length": str(100 * 1024 * 1024 + 1)})
+    assert b"400" in head and b"100 MB" in payload
+    head, payload = request("POST", "/api/write/import?project=demo&name=Bad", b"bad")
+    assert b"400" in head and b"ZIP" in payload

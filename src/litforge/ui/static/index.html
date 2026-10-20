@@ -447,6 +447,7 @@
         <input id="write-new-name" placeholder="Document name" aria-label="Document name" maxlength="200">
         <select id="write-new-template" aria-label="Template"></select>
         <button class="btn primary" id="write-create">New document</button>
+        <label class="btn" title="A .zip of a LaTeX project: an Overleaf download, a journal template or a LitForge export">Import ZIP<input type="file" id="write-import" accept=".zip,application/zip" hidden></label>
       </div>
       <p id="write-engine" class="muted" role="status"></p>
       <ul id="write-docs" class="write-docs"></ul>
@@ -457,6 +458,7 @@
         <b id="write-title"></b>
         <select id="write-file" aria-label="File"></select>
         <span id="write-save-state" class="write-save" role="status" aria-live="polite"></span>
+        <span id="write-words" class="write-save" title="Words in this file: the text only, without commands, math, citations and comments"></span>
         <span class="spacer"></span>
         <div class="seg" role="group" aria-label="Layout">
           <button type="button" data-layout="editor" aria-pressed="false" title="Editor only">Editor</button>
@@ -464,6 +466,7 @@
           <button type="button" data-layout="pdf" aria-pressed="false" title="PDF only">PDF</button>
         </div>
         <div class="pill" role="group" aria-label="Document actions">
+          <button type="button" id="write-outline-btn" aria-pressed="false" title="Sections of this file">Outline</button>
           <button type="button" id="write-cite" title="Cite a paper from the project (\cite{)">Cite</button>
           <select id="write-ai" aria-label="AI actions" title="Model actions on the selection; nothing changes until you accept">
             <option value="">AI…</option><option value="fix">Fix this error</option>
@@ -478,6 +481,12 @@
           <details class="more" id="write-more">
             <summary title="More actions">More</summary>
             <div class="more-menu" role="menu">
+              <label class="more-field">Main file<select id="write-main" title="The file that is compiled"></select></label>
+              <label class="more-field">Engine<select id="write-engine-pick">
+                <option value="tectonic">Tectonic</option><option value="xelatex">XeLaTeX (TeX Live)</option></select></label>
+              <label class="more-check" title="One engine pass: faster, but references may show ?? until a full compile"><input type="checkbox" id="write-draft"> Draft compile</label>
+              <hr>
+              <a role="menuitem" id="write-export" download title="All files of the document, without versions or build output">Download as ZIP</a>
               <button type="button" role="menuitem" id="write-rename">Rename</button>
               <button type="button" role="menuitem" class="danger" id="write-delete" title="Move this document to the project's trash folder">Delete</button>
             </div>
@@ -516,7 +525,10 @@
       </div>
       <div class="write-split" id="write-split" data-layout="split">
         <div class="write-left">
-          <div id="write-cm" class="write-cm"></div>
+          <div class="write-main">
+            <aside id="write-outline" class="write-outline" aria-label="Outline" hidden><ul id="write-outline-list"></ul></aside>
+            <div id="write-cm" class="write-cm"></div>
+          </div>
           <div id="write-spell-menu" class="spell-menu" role="menu" aria-label="Spelling" hidden></div>
           <div id="write-image" class="write-suggestion write-image" role="dialog" aria-labelledby="write-image-title" hidden>
             <div class="sg-head"><b id="write-image-title">Equation from image</b>

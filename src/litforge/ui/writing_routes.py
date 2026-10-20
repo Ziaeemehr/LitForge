@@ -6,6 +6,7 @@ import sqlite3
 import threading
 from typing import TYPE_CHECKING, Any
 
+from litforge.writing import archive as warchive
 from litforge.writing import assist as wassist
 from litforge.writing import chat as wchat
 from litforge.writing import cite as wcite
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from litforge.ui.server import App, Job
 
 MAX_FIGURE_UPLOAD = wd.MAX_FIGURE_BYTES
+MAX_ZIP_UPLOAD = 100 * 1024 * 1024
 
 
 class Conflict(Exception):
@@ -59,7 +61,7 @@ def synctex_lookup(doc: wd.Document, query: dict[str, str]) -> dict[str, Any] | 
 
 
 def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) -> Any:
-    """JSON payload for a read-only route, or bytes and a content type for the PDF."""
+    """JSON payload, or bytes, content type and optional disposition for downloads."""
     if path == "/api/write/docs":
         return {"documents": [d.as_dict() for d in wd.list_documents(conn, app.paths, query.get("project", ""))],
                 "templates": wd.TEMPLATES, "engines": wc.engine_status(app.paths)}
@@ -88,6 +90,9 @@ def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) ->
         return wcite.quotes_for_key(conn, _doc(conn, app, query), query.get("key", ""))
     if path == "/api/write/synctex":
         return synctex_lookup(_doc(conn, app, query), query)
+    if path == "/api/write/export.zip":
+        doc = _doc(conn, app, query)
+        return warchive.export_zip(doc), "application/zip", f'attachment; filename="{doc.slug}.zip"'
     if path == "/api/write/pdf":
         doc = _doc(conn, app, query)
         pdf = wd.resolve_inside(doc.folder, f".build/{doc.output_stem}.pdf", allow_hidden=True)
@@ -143,6 +148,10 @@ def post(app: App, conn: sqlite3.Connection, path: str, body: dict[str, Any]) ->
     if path == "/api/write/compile":
         return compile_job(app, doc).__dict__
     raise LookupError("not found")
+
+
+def import_archive(app: App, conn: sqlite3.Connection, query: dict[str, str], data: bytes) -> dict[str, Any]:
+    return warchive.import_zip(conn, app.paths, query.get("project", ""), query.get("name", ""), data).as_dict()
 
 
 def upload(app: App, conn: sqlite3.Connection, doc_id: str, name: str, data: bytes) -> dict[str, Any]:

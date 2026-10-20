@@ -1418,3 +1418,91 @@ test('a slow image read does not go to a panel opened after it', async () => {
   assert.ok(!calls.some(c => c[0] === '/api/write/assist'));
   assert.equal($('write-image').hidden, false);  // the table panel is still waiting for its own image
 });
+
+/* ---- editor basics: outline, word count, compile settings ---- */
+
+const THESIS = '\\documentclass{report}\n\\begin{document}\n\\chapter{Intro}\n% \\section{Old}\nText.\n' +
+  '\\section*{Aim of \\textbf{this} work}\n\\input{sections/methods}\n\\subsection[Short]{A long \\lr{TVB} title}\n' +
+  '\\section{50\\% done \\cite{a}}\n\\end{document}\n';
+
+test('outlineOf lists sections with levels and lines, skips comments and shows included files', () => {
+  const { ctx } = setup();
+  const items = [...ctx.outlineOf(THESIS)].map(i => ({ ...i }));
+  assert.deepEqual(items, [
+    { kind: 'section', level: 1, title: 'Intro', line: 3 },
+    { kind: 'section', level: 2, title: 'Aim of this work', line: 6 },
+    { kind: 'file', name: 'sections/methods.tex', line: 7 },
+    { kind: 'section', level: 3, title: 'A long TVB title', line: 8 },
+    { kind: 'section', level: 2, title: '50% done', line: 9 }]);
+  assert.equal(ctx.outlineOf('no sections').length, 0);
+});
+
+test('outlineAt finds the section the cursor is in', () => {
+  const { ctx } = setup();
+  const items = ctx.outlineOf(THESIS);
+  assert.equal(ctx.outlineAt(items, 2), -1);
+  assert.equal(ctx.outlineAt(items, 5), 0);
+  assert.equal(ctx.outlineAt(items, 7), 1);  // an \input line is not a section
+  assert.equal(ctx.outlineAt(items, 40), 4);
+});
+
+test('countWords counts the text: no preamble, commands, math, citations or comments', () => {
+  const { ctx } = setup();
+  assert.equal(ctx.countWords('\\documentclass{article}\n\\usepackage{x}\n\\begin{document}\nOne two \\textbf{three}.' +
+    ' % not this\n$a + b$ and \\cite{k} \\ref{f} four.\n\\begin{equation}x=1\\end{equation}\n\\end{document}\nafter'), 5);
+  assert.equal(ctx.countWords('A model of 40 patients (Wilson--Cowan, MRI).'), 7);
+  assert.equal(ctx.countWords('این مدل شخصی‌سازی‌شده است \\lr{TVB}.'), 5);
+  assert.equal(ctx.countWords('\\begin{tabular}{l c}\nA & B \\\\\n\\end{tabular}'), 2);
+  assert.equal(ctx.countWords(''), 0);
+});
+
+test('the outline panel opens, lists the file and jumps to a line', async () => {
+  const { ctx, $, saved } = setup();
+  await ctx.openWriteDoc('d1');
+  $('write-cm').children[0].value = THESIS;
+  ctx.setWriteOutline(true);
+  assert.equal($('write-outline').hidden, false); assert.equal(saved['write-outline'], true);
+  ctx.refreshWriteStats();
+  const rows = $('write-outline-list').children;
+  assert.equal(rows.length, 5);
+  assert.equal(rows[1].textContent, 'Aim of this work'); assert.equal(rows[1].dataset.level, '2');
+  rows[1].onclick();
+  assert.equal($('write-cm').children[0].selectionStart, THESIS.indexOf('\\section*'));
+  assert.match($('write-words').textContent, /^\d+ words$/);
+  ctx.setWriteOutline(false);
+  assert.equal($('write-outline').hidden, true);
+});
+
+test('a document opens its main file, and the settings menu changes it', async () => {
+  const doc = { id: 'd1', name: 'Thesis', main_file: 'thesis.tex', draft: false, engine: 'tectonic', pdf: false,
+    main_candidates: ['main.tex', 'thesis.tex'], files: [{ name: 'main.tex', kind: 'text' }, { name: 'thesis.tex', kind: 'text' }] };
+  const { ctx, $, calls } = setup({
+    get: url => url.startsWith('/api/write/doc?') ? doc : null,
+    post: (url, body) => url === '/api/write/settings' ? { ...doc, ...body, draft: !!body.draft, main_file: body.main_file || doc.main_file } : null
+  });
+  await ctx.openWriteDoc('d1');
+  assert.ok(calls.some(c => c[0] === 'GET' && /name=thesis\.tex/.test(c[1])));
+  assert.equal($('write-main').value, 'thesis.tex');
+  assert.equal($('write-main').children.length, 2);
+  assert.equal($('write-engine-pick').value, 'tectonic');
+  $('write-draft').checked = true;
+  await ctx.changeWriteSettings({ draft: true });
+  assert.deepEqual({ ...calls.find(c => c[0] === '/api/write/settings')[1] }, { doc: 'd1', draft: true });
+  assert.equal(ctx.W.doc.draft, true);
+  assert.match($('write-export').href, /\/api\/write\/export\.zip\?doc=d1$/);
+});
+
+test('importing a ZIP posts the file and opens the new document', async () => {
+  const { ctx, calls } = setup();
+  const sent = [];
+  ctx.fetch = async (url, opts) => { sent.push([url, opts]); return { ok: true, json: async () => ({ id: 'd1', name: 'paper' }) }; };
+  await ctx.importWriteZip({ name: 'My paper.zip', size: 1000 });
+  assert.equal(sent[0][0], '/api/write/import?project=demo&name=My%20paper');
+  assert.equal(sent[0][1].method, 'POST');
+  assert.ok(calls.some(c => c[0] === 'GET' && c[1].startsWith('/api/write/doc?doc=d1')));
+  ctx.fetch = async () => ({ ok: false, json: async () => ({ error: 'no .tex file with \\documentclass' }) });
+  await ctx.importWriteZip({ name: 'x.zip', size: 10 });
+  assert.ok(calls.some(c => c[0] === 'toast' && /documentclass/.test(c[1])));
+  await ctx.importWriteZip({ name: 'big.zip', size: 101 * 1024 * 1024 });
+  assert.ok(calls.some(c => c[0] === 'toast' && /at most 100 MB/.test(c[1])));
+});

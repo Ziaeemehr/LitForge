@@ -2102,7 +2102,8 @@
       });
       $('write-errors').replaceChildren();
       showWritePdf(doc.pdf);
-      return openWriteFile('main.tex');
+      fillWriteSettings(doc);
+      return openWriteFile(doc.main_file || 'main.tex');
     }).catch(function (e) { toast(e.message); });
   }
 
@@ -2125,9 +2126,11 @@
           $('write-file').value = file.name;
           $('write-conflict').hidden = true;
           W.editor = makeEditor($('write-cm'), file.text, {
-            change: writeChanged, blur: function () { if (W.dirty) saveWriteNow(); }, compile: compileWrite
+            change: writeChanged, blur: function () { if (W.dirty) saveWriteNow(); }, compile: compileWrite,
+            cursor: function () { if (!$('write-outline').hidden) scheduleWriteStats(150); }
           });
           writeSaveState('Saved');
+          refreshWriteStats();
           loadOtherTexts();
           return true;
         });
@@ -2153,6 +2156,7 @@
   function writeChanged() {
     W.dirty = true;
     writeSaveState('Edited');
+    scheduleWriteStats(400);  // before the save timer, which must stay the last one set
     clearTimeout(W.timer);
     W.timer = setTimeout(saveWriteNow, W.SAVE_DELAY);
   }
@@ -2778,6 +2782,133 @@
         $('write-versions').hidden = true;
         return openWriteFile(W.file, true);
       }).then(function () { toast('Version restored'); });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  /* ---- outline, word count, compile settings ---- */
+
+  var OUTLINE_LEVELS = { part: 0, chapter: 1, section: 2, subsection: 3, subsubsection: 4, paragraph: 5 };
+
+  // A heading as plain text: citations and labels dropped, other commands unwrapped (\textbf{x} -> x).
+  function headingText(tex) {
+    return tex.replace(/\\(?:[a-zA-Z]*cite[a-zA-Z]*|label|ref|eqref|footnote)\*?(?:\[[^\]]*\])*\{[^{}]*\}/g, '')
+      .replace(/\\([%&$#_{}])/g, '$1').replace(/\\[a-zA-Z]+\*?/g, '').replace(/[{}]/g, '')
+      .replace(/\s+/g, ' ').trim();
+  }
+
+  // Sections of a file (as LaTeX reads it: commented ones do not count) and the files it includes.
+  function outlineOf(text) {
+    var plain = maskComments(text), items = [], m;
+    var re = /\\(part|chapter|section|subsection|subsubsection|paragraph|input|include)\b\*?\s*(\[[^\]]*\])?\s*\{/g;
+    var lineAt = function (pos) { return text.slice(0, pos).split('\n').length; };
+    while ((m = re.exec(plain))) {
+      var open = m.index + m[0].length - 1, close = closingBrace(plain, open);
+      if (close < 0) continue;
+      var arg = text.slice(open + 1, close);
+      if (m[1] === 'input' || m[1] === 'include') {
+        var name = arg.trim();
+        if (name) items.push({ kind: 'file', name: /\.[a-z]+$/i.test(name) ? name : name + '.tex', line: lineAt(m.index) });
+      } else {
+        items.push({ kind: 'section', level: OUTLINE_LEVELS[m[1]], title: headingText(arg), line: lineAt(m.index) });
+      }
+      re.lastIndex = close + 1;
+    }
+    return items;
+  }
+
+  // The section the cursor's line is in (the last heading at or above it), or -1.
+  function outlineAt(items, line) {
+    var at = -1;
+    items.forEach(function (item, i) { if (item.kind === 'section' && item.line <= line) at = i; });
+    return at;
+  }
+
+  // Words of the text a reader sees: the document body without commands, math, citations, labels and comments.
+  function countWords(text) {
+    var t = stripComments(text), begin = t.indexOf('\\begin{document}'), end = t.indexOf('\\end{document}');
+    if (end >= 0) t = t.slice(0, end);
+    if (begin >= 0) t = t.slice(begin + '\\begin{document}'.length);
+    t = t.replace(/\\begin\{(equation|align|gather|multline|eqnarray|math|displaymath)(\*?)\}[\s\S]*?\\end\{\1\2\}/g, ' ')
+      .replace(/\$\$[\s\S]*?\$\$|\$(?:\\.|[^$\\])*\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]/g, ' ')
+      .replace(/\\begin\{(?:tabular|array|tabularx)\*?\}(?:\[[^\]]*\])?\{(?:[^{}]|\{[^{}]*\})*\}/g, ' ')
+      .replace(/\\(?:[a-zA-Z]*cite[a-zA-Z]*|[a-zA-Z]*ref|label|usepackage|documentclass|begin|end|includegraphics|input|include|bibliography|bibliographystyle|url|hspace|vspace|setlength|newcommand|renewcommand)\*?(?:\[[^\]]*\])*(?:\{[^{}]*\})?/g, ' ')
+      .replace(/\\[a-zA-Z]+\*?/g, ' ').replace(/\\./g, ' ');
+    var words = t.match(/[\p{L}\p{N}][\p{L}\p{N}\p{M}'\u2019\u200c-]*/gu);
+    return words ? words.length : 0;
+  }
+
+  function setWriteOutline(on) {
+    $('write-outline').hidden = !on;
+    $('write-outline-btn').setAttribute('aria-pressed', String(!!on));
+    store.set('write-outline', !!on);
+    if (on && W.editor) refreshWriteStats();
+  }
+
+  function refreshWriteStats() {
+    if (!W.editor) return;
+    var text = W.editor.getText(), words = countWords(text);
+    $('write-words').textContent = words.toLocaleString('en-US') + ' words';
+    if ($('write-outline').hidden) return;
+    var items = outlineOf(text), on = outlineAt(items, cursorLine(text, W.editor.selection().from));
+    var rows = items.map(function (item, i) {
+      var li = document.createElement('li');
+      if (item.kind === 'file') {
+        li.className = 'file'; li.textContent = '↳ ' + item.name; li.title = 'Open ' + item.name;
+        li.onclick = function () { return openWriteFile(item.name); };
+      } else {
+        li.textContent = item.title || '(untitled)'; li.dataset.level = String(item.level); li.title = 'Line ' + item.line;
+        if (i === on) li.className = 'on';
+        li.onclick = function () { W.editor.gotoLine(item.line); };
+      }
+      return li;
+    });
+    $('write-outline-list').replaceChildren.apply($('write-outline-list'), rows);
+  }
+
+  function scheduleWriteStats(delay) {
+    clearTimeout(W.statsTimer);
+    W.statsTimer = setTimeout(refreshWriteStats, delay);
+  }
+
+  function fillWriteSettings(doc) {
+    var select = $('write-main'), names = (doc.main_candidates || []).slice();
+    if (names.indexOf(doc.main_file) < 0) names.unshift(doc.main_file);
+    select.replaceChildren.apply(select, names.map(function (name) {
+      var opt = document.createElement('option'); opt.value = name; opt.textContent = name; return opt;
+    }));
+    select.value = doc.main_file;
+    $('write-engine-pick').value = doc.engine;
+    $('write-draft').checked = !!doc.draft;
+    $('write-export').href = '/api/write/export.zip?doc=' + encodeURIComponent(doc.id);
+  }
+
+  function changeWriteSettings(patch) {
+    var doc = W.doc;
+    return post('/api/write/settings', Object.assign({ doc: doc.id }, patch)).then(function (res) {
+      if (W.doc !== doc) return;
+      ['engine', 'main_file', 'draft'].forEach(function (k) { doc[k] = res[k]; });
+      fillWriteSettings(doc);
+      if (patch.main_file) {  // the PDF shown is the new main file's, if it was compiled before
+        return api('/api/write/doc?doc=' + encodeURIComponent(doc.id)).then(function (info) {
+          if (W.doc === doc) showWritePdf(info.pdf);
+        });
+      }
+    }).catch(function (e) { toast(e.message); fillWriteSettings(doc); });
+  }
+
+  var IMPORT_MAX = 100 * 1024 * 1024;  // as on the server
+
+  function importWriteZip(file) {
+    if (!file) return Promise.resolve();
+    if (file.size > IMPORT_MAX) { toast('The ZIP is too large: at most 100 MB.'); return Promise.resolve(); }
+    var name = file.name.replace(/\.zip$/i, '') || 'Imported';
+    return fetch('/api/write/import?project=' + encodeURIComponent(projectName()) + '&name=' + encodeURIComponent(name),
+      { method: 'POST', body: file }).then(function (r) {
+      return r.json().then(function (body) {
+        if (!r.ok) throw new Error(body.error || 'import failed');
+        toast('Imported "' + body.name + '"');
+        return openWriteDoc(body.id);
+      });
     }).catch(function (e) { toast(e.message); });
   }
 
@@ -3549,6 +3680,12 @@
     });
     setWriteLayout(store.get('write-layout', 'split'));
     setWriteSplit(store.get('write-split', 50));
+    setWriteOutline(store.get('write-outline', false));
+    $('write-outline-btn').onclick = function () { setWriteOutline($('write-outline').hidden); };
+    $('write-main').onchange = function () { changeWriteSettings({ main_file: $('write-main').value }); };
+    $('write-engine-pick').onchange = function () { changeWriteSettings({ engine: $('write-engine-pick').value }); };
+    $('write-draft').onchange = function () { changeWriteSettings({ draft: $('write-draft').checked }); };
+    $('write-import').onchange = function () { var f = $('write-import').files[0]; $('write-import').value = ''; importWriteZip(f); };
     wireWriteGutter();
     wirePdfView();
     $('write-spell').onclick = function () { setSpell(!SPELL.on); };

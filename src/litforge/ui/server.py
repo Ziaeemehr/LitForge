@@ -1008,7 +1008,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 if path.startswith("/api/write/"):
                     result = writing_routes.get(app, conn, path, query)
                     if isinstance(result, tuple):
-                        return self._send(200, result[0], result[1], {"Content-Disposition": "inline"})
+                        disposition = result[2] if len(result) > 2 else "inline"
+                        return self._send(200, result[0], result[1], {"Content-Disposition": disposition})
                     return self._json(result)
                 if path == "/api/keys":
                     return self._json(app.keys.status())
@@ -1112,6 +1113,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 if url.path == "/api/import":
                     q = {k: v[0] for k, v in parse_qs(url.query).items()}
                     return self._import(q.get("name", "refs.csv"), q.get("project") or "default", q.get("export_dir"))
+                if url.path == "/api/write/import":
+                    return self._write_import({k: v[0] for k, v in parse_qs(url.query).items()})
                 if url.path == "/api/write/upload":
                     return self._write_upload({k: v[0] for k, v in parse_qs(url.query).items()})
                 try:
@@ -1575,6 +1578,20 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 return self._json(writing_routes.post(app, conn, path, body))
             except writing_routes.Conflict as exc:
                 return self._json(exc.payload, HTTPStatus.CONFLICT)
+            finally:
+                conn.close()
+
+        def _write_import(self, query: dict[str, str]) -> None:
+            length = int(self.headers.get("Content-Length") or 0)
+            if not 0 < length <= writing_routes.MAX_ZIP_UPLOAD:
+                self.close_connection = True
+                return self._error(HTTPStatus.BAD_REQUEST, "empty or too large ZIP upload (at most 100 MB)")
+            data = self.rfile.read(length)
+            if len(data) != length:
+                return self._error(HTTPStatus.BAD_REQUEST, "incomplete ZIP upload")
+            conn = app.db()
+            try:
+                return self._json(writing_routes.import_archive(app, conn, query, data))
             finally:
                 conn.close()
 

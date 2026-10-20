@@ -551,6 +551,28 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .write-gutter:focus-visible { outline: none; }
 .write-split.resizing { cursor: col-resize; user-select: none; }
 .write-split.resizing iframe { pointer-events: none; }  /* the PDF frame would swallow the drag */
+.write-main { display: flex; flex: 1; min-height: 0; gap: 6px; }
+.write-main .write-cm { min-width: 0; }
+.write-outline { flex: none; width: 190px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); padding: 6px 0; font-size: 12px; }
+.write-outline ul { list-style: none; margin: 0; padding: 0; }
+.write-outline li { padding: 3px 10px; cursor: pointer; color: var(--muted); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; unicode-bidi: plaintext; }
+.write-outline li:hover { background: var(--chip); color: var(--ink); }
+.write-outline li.on { color: var(--accent); font-weight: 600; }
+.write-outline li[data-level="0"], .write-outline li[data-level="1"] { color: var(--ink); font-weight: 600; }
+.write-outline li[data-level="3"] { padding-left: 22px; }
+.write-outline li[data-level="4"], .write-outline li[data-level="5"] { padding-left: 34px; }
+.write-outline li.file { font-style: italic; }
+.pill .more-menu:has(.more-field) { min-width: 250px; }
+.more-menu .more-field { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 10px;
+  font-size: 12px; color: var(--muted); white-space: nowrap; }
+.more-menu .more-field select { width: 150px; font-size: 12px; padding: 3px 6px; border: 1px solid var(--line);
+  border-radius: 7px; background: var(--panel); color: var(--ink); }
+.more-menu .more-check { display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 12px; }
+.more-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.more-menu a[role="menuitem"] { display: block; padding: 6px 10px; color: var(--ink); text-decoration: none; font-size: 13px; }
+.more-menu a[role="menuitem"]:hover { background: var(--chip); }
 .write-cm { flex: 1; min-height: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
   background: var(--panel); }
 .write-cm .cm-editor { height: 100%; background: var(--panel); color: var(--ink); }

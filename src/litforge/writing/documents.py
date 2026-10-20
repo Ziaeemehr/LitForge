@@ -12,6 +12,7 @@ import sqlite3
 import threading
 import time
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path, PurePosixPath
@@ -137,34 +138,53 @@ def list_documents(conn: sqlite3.Connection, paths: Paths, project: str) -> list
 
 def create_document(conn: sqlite3.Connection, paths: Paths, project: str, name: str,
                     template: str = "article") -> Document:
+    if template not in TEMPLATES:
+        raise DocumentError(f"template must be one of {sorted(TEMPLATES)}")
+
+    def populate(doc: Document) -> None:
+        source = resources.files("litforge.writing") / "templates" / template
+        with resources.as_file(source) as src:
+            shutil.copytree(src, doc.folder, dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns("__pycache__", "__init__.py"))
+
+    return _create_document(conn, paths, project, name, template, populate)
+
+
+def _create_document(conn: sqlite3.Connection, paths: Paths, project: str, name: str, template: str,
+                     populate: Callable[[Document], None]) -> Document:
     name = name.strip()
     if not name or len(name) > 200:
         raise DocumentError("give the document a name (at most 200 characters)")
-    if template not in TEMPLATES:
-        raise DocumentError(f"template must be one of {sorted(TEMPLATES)}")
     pid = get_project_id(conn, project)
     root = writing_root(paths, project)
     root.mkdir(parents=True, exist_ok=True)
     base = _slug(name)
     doc_id = new_id()
     ts = now()
-    with transaction(conn, immediate=True):
-        taken = {str(r[0]) for r in conn.execute("SELECT slug FROM writing_documents WHERE project_id=?", (pid,))}
-        slug, n = base, 1
-        while slug in taken or (root / slug).exists():
-            n += 1
-            slug = f"{base}-{n}"
-        folder = root / slug
-        source = resources.files("litforge.writing") / "templates" / template
-        with resources.as_file(source) as src:
-            shutil.copytree(src, folder, ignore=shutil.ignore_patterns("__pycache__", "__init__.py"))
-        (folder / "figures").mkdir(exist_ok=True)
-        (folder / "references.bib").touch()
-        (folder / ".snapshots").mkdir(exist_ok=True)
-        conn.execute(
-            """INSERT INTO writing_documents(id, project_id, name, slug, template, engine, created_at, updated_at)
-               VALUES (?,?,?,?,?,'tectonic',?,?)""", (doc_id, pid, name, slug, template, ts, ts))
-    return get_document(conn, paths, doc_id)
+    folder: Path | None = None
+    try:
+        with transaction(conn, immediate=True):
+            taken = {str(r[0]) for r in conn.execute("SELECT slug FROM writing_documents WHERE project_id=?", (pid,))}
+            slug, n = base, 1
+            while slug in taken or (root / slug).exists():
+                n += 1
+                slug = f"{base}-{n}"
+            target = root / slug
+            target.mkdir()
+            folder = target  # Only remove a folder this call created.
+            conn.execute(
+                """INSERT INTO writing_documents(id, project_id, name, slug, template, engine, created_at, updated_at)
+                   VALUES (?,?,?,?,?,'tectonic',?,?)""", (doc_id, pid, name, slug, template, ts, ts))
+            populate(get_document(conn, paths, doc_id))
+            (folder / "figures").mkdir(exist_ok=True)
+            (folder / "references.bib").touch(exist_ok=True)
+            (folder / ".snapshots").mkdir(exist_ok=True)
+            doc = get_document(conn, paths, doc_id)
+        return doc
+    except BaseException:
+        if folder is not None:
+            shutil.rmtree(folder, ignore_errors=True)
+        raise
 
 
 def rename_document(conn: sqlite3.Connection, paths: Paths, doc_id: str, name: str) -> Document:
