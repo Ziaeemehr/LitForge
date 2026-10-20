@@ -171,7 +171,7 @@
     text.textContent = mailto ? 'Contact e-mail for PDF discovery: ' + mailto + ' · ' :
       'Add your contact e-mail in Settings to find more open-access copies with Unpaywall. ';
     el.appendChild(text);
-    el.appendChild(modelButton('Settings', function () { $('missing').close(); showView('settings'); }));
+    el.appendChild(modelButton('Settings', function () { $('missing').close(); showView('settings'); showSettingsTab('general'); }));
   }
 
   function fetchMissing() {
@@ -1843,7 +1843,7 @@
 
   function rereadMineru(paper) {
     return api('/api/mineru').then(function (info) {
-      if (!info.installed) { showView('settings'); return; }
+      if (!info.installed) { showView('settings'); showSettingsTab('tools'); return; }
       var estimate = mineruEstimate(paper);
       if (!window.confirm('Re-read accurately with MinerU? ' + estimate + '. Models download on first use (~2 GB).')) return;
       var target = $('mineru-paper-status');
@@ -4486,6 +4486,7 @@
 
   function openVisionModels() {
     showView('settings');
+    showSettingsTab('models');
     $('models-settings-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
@@ -4855,7 +4856,20 @@
       }).catch(settingsError);
     })();
   }
+  // One tab of cards at a time; the review output (file changes, status) shows under every tab.
+  function showSettingsTab(name) {
+    state.settingsTab = name;
+    document.querySelectorAll('#view-settings [data-stab]').forEach(function (el) {
+      if (el.tagName === 'BUTTON') el.classList.toggle('on', el.dataset.stab === name);
+      else el.hidden = el.dataset.stab !== name;
+    });
+  }
+
   function initSettings() {
+    document.querySelectorAll('.settings-tabs button').forEach(function (b) {
+      b.onclick = function () { showSettingsTab(b.dataset.stab); };
+    });
+    showSettingsTab(state.settingsTab || 'general');
     $('keys-form').onsubmit = function (event) {
       event.preventDefault();
       var request = post('/api/keys', { name: $('keys-name').value, value: $('keys-value').value });

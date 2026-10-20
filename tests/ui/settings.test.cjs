@@ -14,7 +14,7 @@ function setup() {
   }
   const elements = {}, calls = [];
   const $ = id => elements[id] ||= new Element();
-  const ctx = vm.createContext({ $, document: { createElement: () => new Element() }, setTimeout,
+  const ctx = vm.createContext({ $, document: { createElement: () => new Element(), querySelectorAll: () => [] }, setTimeout,
     window: { confirm: () => true }, api: async () => ({ keys: [], available: true }),
     post: async (url, body) => { calls.push([url, body]); return {}; },
     modelButton: (label, action) => { const b = new Element(); b.textContent = label; b.onclick = action; return b; },
@@ -30,7 +30,7 @@ test('Settings opens from footer and comma; Models nav removed; cards ordered', 
   assert.match(html, /id="view-settings"/);
   assert.match(app, /e.key === ','[\s\S]*showView\('settings'\)/);
   assert.match(html, /<kbd>,<\/kbd> Settings/);
-  const titles = ['Models', 'API keys', 'Add API model', 'Cloud &amp; budget', 'Library &amp; export'];
+  const titles = ['Library &amp; export', 'Models', 'API keys', 'Add API model', 'Cloud &amp; budget'];
   let at = html.indexOf('id="view-settings"');
   for (const title of titles) { const next = html.indexOf('>' + title + '</h2>', at); assert.ok(next > at, title); at = next; }
 });
@@ -75,4 +75,29 @@ test('Free variants and non-chat repositories are labelled', () => {
   assert.match($('local-results').children[0].children[0].textContent, /not a chat model/);
   assert.match(html, /id="local-show-all"[^>]*type="checkbox"/);
   assert.match(app, /show_all=/);
+});
+
+test('Settings cards sit in four tabs, General first; the review output shows under every tab', () => {
+  const section = html.split('id="view-settings"')[1].split('</section>')[0];
+  const tabs = [...section.matchAll(/<button type="button" data-stab="(\w+)"/g)].map(m => m[1]);
+  assert.deepEqual(tabs, ['general', 'models', 'tools', 'cloud']);
+  const cards = [...section.matchAll(/<div data-stab="(\w+)" class="card settings-card"[^>]*>\s*<h2>([^<]+)<\/h2>/g)]
+    .map(m => m[1] + ':' + m[2]);
+  assert.deepEqual(cards, ['general:Library &amp; export', 'general:Updates', 'models:Models', 'tools:Optional tools',
+    'cloud:API keys', 'cloud:Add API model', 'cloud:Cloud &amp; budget']);
+  assert.match(section, /<div class="card settings-card">\s*<details><summary>File changes/);
+});
+
+test('showSettingsTab shows only that tab and marks its button', () => {
+  const block = app.split('/* ---------- Settings ---------- */')[1].split('/* ---------- End Settings ---------- */')[0];
+  const make = (tag, stab) => ({ tagName: tag, dataset: { stab }, hidden: false, on: false,
+    classList: { toggle(_, v) { this.owner.on = v; } } });
+  const els = [make('BUTTON', 'general'), make('BUTTON', 'tools'), make('DIV', 'general'), make('DIV', 'tools')];
+  els.forEach(e => { e.classList.owner = e; });
+  const state = {};
+  const ctx = vm.createContext({ state, document: { querySelectorAll: () => els } });
+  vm.runInContext(block, ctx);
+  ctx.showSettingsTab('tools');
+  assert.equal(state.settingsTab, 'tools');
+  assert.deepEqual(els.map(e => e.tagName === 'BUTTON' ? e.on : !e.hidden), [false, true, false, true]);
 });

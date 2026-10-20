@@ -63,8 +63,19 @@
 <main id="main">
   <section id="view-settings" class="view" hidden>
     <h1>Settings</h1>
-    <p class="hint">Manage models, API keys, cloud access and library preferences.</p>
-    <div class="card settings-card">
+    <p class="hint">General preferences first; models, tools, and cloud access each have their own tab.</p>
+    <div class="tabs settings-tabs" role="group" aria-label="Settings sections"><button type="button" data-stab="general" class="on">General</button><button type="button" data-stab="models">Models</button><button type="button" data-stab="tools">Tools</button><button type="button" data-stab="cloud">Cloud &amp; keys</button></div>
+    <div data-stab="general" class="card settings-card">
+      <h2>Library &amp; export</h2>
+      <form id="settings-library">
+        <label class="f" for="settings-mailto">Contact e-mail</label><input id="settings-mailto" type="email" placeholder="you@university.edu">
+        <p class="hint">Used for OpenAlex, Crossref and Unpaywall requests; no account required.</p>
+        <label class="f" for="settings-exports">Default export folder</label><input id="settings-exports" type="text" placeholder="Absolute folder path">
+        <p class="hint">Existing project folders keep their saved choice.</p>
+        <button class="btn" type="submit">Review library settings…</button>
+      </form>
+    </div>
+    <div data-stab="general" class="card settings-card">
       <h2>Updates</h2>
       <div id="update-notice" hidden>
         <p id="update-status" role="status" aria-live="polite"></p>
@@ -80,7 +91,7 @@
       <p class="hint">Checks contact GitHub using git fetch. No library data is sent. Updates are never installed automatically.</p>
       <p id="update-auto-note" class="hint"></p>
     </div>
-    <div class="card settings-card" id="models-settings-card">
+    <div data-stab="models" class="card settings-card" id="models-settings-card">
       <h2>Models</h2>
       <p id="models-hardware" class="hint"></p>
       <p id="models-current"></p>
@@ -131,7 +142,7 @@
       <pre id="local-progress" role="status" aria-live="polite"></pre>
       <div class="row2"><button class="btn" id="download-pause">Pause</button><button class="btn" id="download-resume">Resume</button><button class="btn" id="download-cancel">Cancel download</button></div>
     </div>
-    <div class="card settings-card">
+    <div data-stab="tools" class="card settings-card">
       <h2>Optional tools</h2>
       <p>Install only what you need. Large tools are downloaded after you confirm.</p>
       <div class="tool-row">
@@ -159,7 +170,7 @@
       </div>
       <pre id="tool-tectonic-progress" role="status" aria-live="polite"></pre>
     </div>
-    <div class="card settings-card">
+    <div data-stab="cloud" class="card settings-card">
       <h2>API keys</h2>
       <p id="keys-status" class="hint">Keys resolve from the environment first, then the system keychain. Removing an entry leaves environment variables unchanged.</p>
       <div id="keys-list"></div>
@@ -169,7 +180,7 @@
         <button class="btn" type="submit" id="keys-save">Save in system keychain</button>
       </form>
     </div>
-    <div class="card settings-card">
+    <div data-stab="cloud" class="card settings-card">
       <h2>Add API model</h2>
       <form id="models-add">
         <label class="f" for="models-provider">Provider</label><select id="models-provider" required></select>
@@ -188,7 +199,7 @@
         <button class="btn" type="submit">Review API model…</button>
       </form>
     </div>
-    <div class="card settings-card">
+    <div data-stab="cloud" class="card settings-card">
       <h2>Cloud &amp; budget</h2>
       <button class="btn" id="models-cloud">Enable cloud…</button>
       <form id="settings-budget">
@@ -198,16 +209,6 @@
         <label class="f" for="budget-run">Maximum USD per run</label><input id="budget-run" type="number" min="0" step="any" required>
         <label class="f" for="budget-month">Maximum USD per month</label><input id="budget-month" type="number" min="0" step="any" required>
         <button class="btn" type="submit">Review budget &amp; policy…</button>
-      </form>
-    </div>
-    <div class="card settings-card">
-      <h2>Library &amp; export</h2>
-      <form id="settings-library">
-        <label class="f" for="settings-mailto">Contact e-mail</label><input id="settings-mailto" type="email" placeholder="you@university.edu">
-        <p class="hint">Used for OpenAlex, Crossref and Unpaywall requests; no account required.</p>
-        <label class="f" for="settings-exports">Default export folder</label><input id="settings-exports" type="text" placeholder="Absolute folder path">
-        <p class="hint">Existing project folders keep their saved choice.</p>
-        <button class="btn" type="submit">Review library settings…</button>
       </form>
     </div>
     <div class="card settings-card">
