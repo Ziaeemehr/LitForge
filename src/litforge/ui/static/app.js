@@ -4579,7 +4579,10 @@
         meta.textContent = (p.model !== p.name ? p.model + ' · ' : '') + (p.remote ? 'cloud' : 'local') + (p.vision ? ' · images' : '');
         label.appendChild(name); label.appendChild(meta);
         row.appendChild(label);
-        row.appendChild(modelButton('Test', function () { testSettingsModel(p); }));
+        var result = document.createElement('span');
+        result.className = 'models-test';
+        row.appendChild(result);
+        row.appendChild(modelButton('Test', function () { testSettingsModel(p, result); }));
         row.appendChild(modelButton('Assign tasks…', function () { assignSettingsTasks(p.name); }));
         if (p.name !== 'local' && p.name !== 'local_vision') row.appendChild(modelButton('Remove', function () {
           reviewModelsChange({ action: 'remove', name: p.name, delete_files: !p.remote && window.confirm('Also delete downloaded files owned by this profile?') });
@@ -4631,24 +4634,32 @@
     }).catch(function (e) { $('models-status').textContent = e.message; });
   }
 
-  function testSettingsModel(profile) {
+  // A one-line answer next to the model: does it answer, correctly, and how fast.
+  function testResult(j) {
+    if (j.status === 'failed') return '✗ ' + String(j.error || 'failed').split('\n')[0].slice(0, 120);
+    var r = j.report || {};
+    if (!r.reachable) return '✗ No answer';
+    return (r.valid ? '✓ Works' : '⚠ Answers, but not in the requested format') +
+      (r.latency_ms != null ? ' · ' + (r.latency_ms / 1000).toFixed(1) + ' s' : '');
+  }
+
+  function testSettingsModel(profile, out) {
+    out = out || $('models-status');
     var approved = false;
     if (profile.remote) {
       approved = window.confirm('Send a fixed diagnostic prompt' + (profile.vision ? ' and a generated test image' : '') +
         ' to ' + profile.name + '? This uses your API account and budget. No library evidence is included.');
       if (!approved) return;
     }
-    $('models-status').textContent = 'Testing ' + profile.name + '…';
+    out.textContent = 'Testing…';
     post('/api/models/test', { profile: profile.name, vision: !!profile.vision, approved: approved }).then(function (job) {
       (function tick() {
         api('/api/jobs/' + job.id).then(function (j) {
-          $('models-status').textContent = j.status === 'running' ? j.messages[j.messages.length - 1] || 'Testing…' :
-            j.status === 'failed' ? j.error : JSON.stringify(j.report, null, 2);
-          if (j.status === 'running') setTimeout(tick, 1000);
-          else loadModels();
-        }).catch(function (e) { $('models-status').textContent = e.message; });
+          if (j.status === 'running') { setTimeout(tick, 1000); return; }
+          out.textContent = testResult(j);
+        }).catch(function (e) { out.textContent = '✗ ' + e.message; });
       })();
-    }).catch(function (e) { $('models-status').textContent = e.message; });
+    }).catch(function (e) { out.textContent = '✗ ' + e.message; });
   }
 
   function initModels() {
@@ -4746,17 +4757,49 @@
   function selectedLocalTasks() {
     return Array.from($('local-tasks').querySelectorAll('input:checked')).map(function (input) { return input.value; });
   }
+  var TASK_GROUPS = [
+    ['Library and analysis', ['ask', 'audit', 'matrix_extract', 'claim_extract', 'claim_relation', 'asset_analyze',
+      'equation_compare', 'gap_design', 'console_plan', 'page_rewrite']],
+    ['Screening', ['screen', 'screen_fulltext']],
+    ['Writing', ['write_fix', 'write_rewrite', 'write_cite', 'write_chat', 'write_summary', 'write_image']]];
+
+  // Tasks in groups; the ones this model already does are ticked and fixed ("uses it now"). Saving moves the
+  // newly ticked tasks to this model (after the usual review of the file change).
   function assignSettingsTasks(name) {
     if (settingsAssignment) settingsAssignment.remove();
-    var panel = document.createElement('div'), checks = document.createElement('div');
+    var panel = document.createElement('div');
+    panel.className = 'models-assign';
     settingsAssignment = panel;
-    checks.id = 'settings-assign-checks'; checks.className = 'task-checks'; panel.appendChild(checks);
-    $('models-profiles').appendChild(panel);
-    renderTaskChecks(checks.id, modelsInfo.task_names || []);
-    panel.appendChild(modelButton('Review assignments to ' + name, function () {
-      var tasks = Array.from(checks.querySelectorAll('input:checked')).map(function (input) { return input.value; });
-      reviewModelsChange({ action: 'assign', name: name, tasks: tasks });
+    var names = modelsInfo.task_names || [], tasks = modelsInfo.tasks || {};
+    var known = [].concat.apply([], TASK_GROUPS.map(function (g) { return g[1]; }));
+    var groups = TASK_GROUPS.concat([['Other', names.filter(function (t) { return known.indexOf(t) < 0; })]]);
+    var head = document.createElement('p');
+    head.textContent = 'Tick the tasks ' + name + ' should do:';
+    panel.appendChild(head);
+    groups.forEach(function (g) {
+      var list = g[1].filter(function (t) { return names.indexOf(t) >= 0; });
+      if (!list.length) return;
+      var box = document.createElement('fieldset'), legend = document.createElement('legend');
+      legend.textContent = g[0]; box.appendChild(legend);
+      list.forEach(function (task) {
+        var label = document.createElement('label'), input = document.createElement('input'), text = document.createElement('span');
+        var now = tasks[task] && tasks[task].profile === name;
+        label.className = 'check'; input.type = 'checkbox'; input.value = task; input.checked = now; input.disabled = now;
+        text.textContent = taskLabel(task) + (now ? ' (uses it now)' : '');
+        label.appendChild(input); label.appendChild(text); box.appendChild(label);
+      });
+      panel.appendChild(box);
+    });
+    var row = document.createElement('div');
+    row.className = 'row2';
+    row.appendChild(modelButton('Save', function () {
+      var chosen = Array.from(panel.querySelectorAll('input:checked:not(:disabled)')).map(function (i) { return i.value; });
+      if (!chosen.length) { toast('Tick at least one task'); return; }
+      reviewModelsChange({ action: 'assign', name: name, tasks: chosen });  // a save reloads the list
     }));
+    row.appendChild(modelButton('Cancel', function () { panel.remove(); settingsAssignment = null; }));
+    panel.appendChild(row);
+    $('models-profiles').appendChild(panel);
   }
 
   function loadKeys() {

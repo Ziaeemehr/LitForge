@@ -121,3 +121,10 @@ test('Models tab: cloud choices only for Cloud-light, readable task names', asyn
   assert.equal(ctx.taskLabel('write_cite'), 'Write: suggest citations');
   assert.equal(ctx.taskLabel('some_new_task'), 'some new task');
 });
+
+test('a model test reads as one short line next to the model', () => {
+  const { ctx } = setup();
+  assert.equal(ctx.testResult({ status: 'done', report: { reachable: true, valid: true, latency_ms: 840 } }), '✓ Works · 0.8 s');
+  assert.match(ctx.testResult({ status: 'done', report: { reachable: true, valid: false, latency_ms: 100 } }), /^⚠ Answers, but not/);
+  assert.equal(ctx.testResult({ status: 'failed', error: 'connection refused\ntrace…' }), '✗ connection refused');
+});
