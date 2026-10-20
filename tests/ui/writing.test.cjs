@@ -1720,3 +1720,94 @@ test('a symbol command before a letter gets a space, so \\alpha N does not becom
   assert.deepEqual({ ...ctx.symbolInsert('\\frac{}{}', true, 'x') }, { text: '\\frac{}{}', cursor: 6 });
   assert.deepEqual({ ...ctx.symbolInsert('\\alpha', false, 'N') }, { text: '$\\alpha$', cursor: 8 });
 });
+
+/* ---- writing aids round 3: Codex review ---- */
+
+function movableNotes(env, mapped) {  // an editor whose note marks have moved with the text
+  env.ctx.W.editor.setNotes = notes => { env.setCalls.push(notes.map(n => n.id + '@' + n.line)); };
+  env.ctx.W.editor.noteLines = () => mapped.slice();
+}
+
+test('notes arrive with the file, before any edit', async () => {
+  const env = notesSetup();
+  await env.ctx.openWriteDoc('d1');
+  assert.deepEqual(env.ctx.writeNotes().map(n => n.id), ['n1']);
+  const fileAt = env.calls.findIndex(c => c[0] === 'GET' && c[1].startsWith('/api/write/file'));
+  const notesAt = env.calls.findIndex(c => c[0] === 'GET' && c[1].startsWith('/api/write/notes'));
+  assert.ok(notesAt >= 0 && fileAt >= 0);
+});
+
+test('a notes reply for text edited meanwhile is not applied', async () => {
+  let release;
+  const env = setup({ get: url => url.startsWith('/api/write/notes?') ? new Promise(r => { release = r; }) : null });
+  const opening = env.ctx.openWriteDoc('d1');
+  await new Promise(r => setImmediate(r));
+  release({ notes: [] });
+  await opening;
+  const later = env.ctx.loadWriteNotes();
+  env.$('write-cm').children[0].value = 'edited\n' + env.$('write-cm').children[0].value;
+  release({ notes: [{ id: 'old', file: 'main.tex', line: 1, anchor: 'x', body: 'stale' }] });
+  await later;
+  assert.deepEqual(env.ctx.writeNotes().map(n => n.id), []);
+});
+
+test('saving one note keeps the other notes where the text moved them', async () => {
+  const env = notesSetup(); env.setCalls = [];
+  env.files['main.tex'] = { text: 'a\nb\nc\nd\ne\n', hash: 'h0' };
+  await env.ctx.openWriteDoc('d1');
+  env.ctx.W.doc && (env.ctx.writeNotes().length = 0);
+  env.ctx.writeNotes().push({ id: 'n1', line: 2, anchor: 'b', body: 'one' }, { id: 'n2', line: 4, anchor: 'd', body: 'two' });
+  movableNotes(env, [{ id: 'n1', line: 3 }, { id: 'n2', line: 5 }]);
+  env.$('write-cm').children[0].value = 'new\na\nb\nc\nd\ne\n';
+  env.ctx.openWriteNote(3);
+  env.$('write-note-text').value = 'one, edited';
+  await env.ctx.saveWriteNote();
+  const sent = env.calls.find(c => c[0] === '/api/write/note')[1];
+  assert.equal(sent.id, 'n1'); assert.equal(sent.line, 3); assert.equal(sent.anchor, 'b');
+  assert.deepEqual([...env.setCalls.at(-1)].sort(), ['n1@3', 'n2@5']);
+});
+
+test('a note dialog left open follows its line while the text above changes', async () => {
+  const env = notesSetup(); env.setCalls = [];
+  env.files['main.tex'] = { text: 'a\nb\nc\nd\n', hash: 'h0' };
+  await env.ctx.openWriteDoc('d1');
+  env.ctx.writeNotes().length = 0;
+  movableNotes(env, []);
+  env.ctx.openWriteNote(4);  // a new note
+  assert.ok(env.setCalls.at(-1).includes('__new@4'));  // a mark that moves with the text
+  movableNotes(env, [{ id: '__new', line: 5 }]);
+  env.$('write-cm').children[0].value = 'x\na\nb\nc\nd\n';
+  env.$('write-note-text').value = 'on d';
+  await env.ctx.saveWriteNote();
+  const sent = env.calls.find(c => c[0] === '/api/write/note')[1];
+  assert.equal(sent.line, 5); assert.equal(sent.anchor, 'd'); assert.equal(sent.id, undefined);
+});
+
+test('a changed line text is synced even when the line did not move, and a failed sync is retried', async () => {
+  let fail = true;
+  const env = notesSetup({ post: () => null });
+  env.files['main.tex'] = { text: 'a\nclaim\nclaim\n', hash: 'h0' };
+  await env.ctx.openWriteDoc('d1');
+  env.ctx.writeNotes().length = 0;
+  env.ctx.writeNotes().push({ id: 'n1', line: 2, anchor: 'claim', body: 'x' });
+  env.$('write-cm').children[0].value = 'a\nrevised\nclaim\n';
+  const realPost = env.ctx.post;
+  env.ctx.post = (url, body) => (url === '/api/write/notes/move' && fail ? (env.calls.push([url, body]), Promise.reject(new Error('down'))) : realPost(url, body));
+  await env.ctx.syncWriteNotes();
+  assert.equal(env.ctx.writeNotes()[0].anchor, 'claim');  // not acknowledged: kept for the next try
+  fail = false;
+  await env.ctx.syncWriteNotes();
+  const moves = env.calls.filter(c => c[0] === '/api/write/notes/move');
+  assert.equal(moves.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(moves[1][1].notes)), [{ id: 'n1', line: 2, anchor: 'revised' }]);
+  assert.equal(env.ctx.writeNotes()[0].anchor, 'revised');
+});
+
+test('preview cache keys change with the macros, and figure previews expire', () => {
+  const { ctx } = setup();
+  const hit = { kind: 'math', tex: '$\\foo$' };
+  assert.notEqual(ctx.previewKey('d1', hit, '{"\\\\foo":"a"}'), ctx.previewKey('d1', hit, '{"\\\\foo":"b"}'));
+  assert.equal(ctx.previewFresh({ kind: 'math', at: 0 }, 10 ** 9), true);
+  assert.equal(ctx.previewFresh({ kind: 'figure', at: 0 }, 5000), true);
+  assert.equal(ctx.previewFresh({ kind: 'figure', at: 0 }, 60000), false);
+});

@@ -2159,8 +2159,13 @@
         toast(W.conflictHash ? 'Resolve the conflict first (reload or keep mine).' : 'Not saved yet; try again in a moment.');
         return false;
       }
-      return api('/api/write/file?doc=' + encodeURIComponent(W.doc.id) + '&name=' + encodeURIComponent(name))
-        .then(function (file) {
+      var fileReq = api('/api/write/file?doc=' + encodeURIComponent(W.doc.id) + '&name=' + encodeURIComponent(name));
+      // The notes come with the file, before any edit could move their lines.
+      var notesReq = api('/api/write/notes?doc=' + encodeURIComponent(W.doc.id) + '&file=' + encodeURIComponent(name))
+        .catch(function () { return { notes: [] }; });
+      return Promise.all([fileReq, notesReq])
+        .then(function (both) {
+          var file = both[0];
           dropWriteSuggestion();
           $('write-versions').hidden = true; VERS.selected = null;  // versions belong to the file that was open
           if (W.editor) W.editor.destroy();
@@ -2173,10 +2178,10 @@
             note: openWriteNote, hover: writeHover
           });
           closeWriteNote(); closeWriteSymbols();
+          NOTES.token = null; NOTES.list = (both[1] && both[1].notes) || [];
+          showWriteNotes();
           writeSaveState('Saved');
-          refreshWriteStats();
           loadOtherTexts();
-          loadWriteNotes();
           return true;
         });
     };
@@ -2944,21 +2949,28 @@
     return { tex: t.replace(/\\(begin|end)\{(?:equation|displaymath|math)\*?\}/g, ''), display: true };
   }
 
+  // A formula's preview depends on the macros too; a figure file may be replaced, so its preview is kept briefly.
+  function previewKey(docId, hit, macros) {
+    return [docId, hit.kind, hit.tex || hit.name, hit.kind === 'math' ? macros : ''].join('\n');
+  }
+
+  function previewFresh(entry, now) { return entry.kind !== 'figure' || now - entry.at < 30000; }
+
   function renderWritePreview(hit, dom) {
-    var doc = W.doc, key = doc.id + '\n' + hit.kind + '\n' + (hit.tex || hit.name);
-    var cached = PREVIEW.cache.get(key);
-    if (cached) { dom.replaceChildren(cached.cloneNode(true)); return Promise.resolve(); }
+    var doc = W.doc, macros = hit.kind === 'math' ? katexMacros([W.editor.getText()].concat(W.otherTexts || [])) : {};
+    var key = previewKey(doc.id, hit, JSON.stringify(macros)), cached = PREVIEW.cache.get(key);
+    if (cached && previewFresh(cached, Date.now())) { dom.replaceChildren(cached.node.cloneNode(true)); return Promise.resolve(); }
     var keep = function (node) {
+      PREVIEW.cache.delete(key);
       if (PREVIEW.cache.size >= 60) PREVIEW.cache.delete(PREVIEW.cache.keys().next().value);
-      PREVIEW.cache.set(key, node.cloneNode(true));
+      PREVIEW.cache.set(key, { node: node.cloneNode(true), kind: hit.kind, at: Date.now() });
       dom.replaceChildren(node);
     };
     var fail = function (e) { dom.textContent = e.message || String(e); };
     if (hit.kind === 'math' && window.katex) {
       var src = katexSource(hit.tex), box = document.createElement('div'), drawn = true;
       try {
-        window.katex.render(src.tex, box, { displayMode: src.display, throwOnError: true,
-          macros: katexMacros([W.editor.getText()].concat(W.otherTexts || [])) });
+        window.katex.render(src.tex, box, { displayMode: src.display, throwOnError: true, macros: macros });
       } catch (e) { drawn = false; }  // not something KaTeX draws: the engine renders it below
       if (drawn) { keep(box); return Promise.resolve(); }
     }
@@ -3009,34 +3021,44 @@
 
   /* Notes: the user's own remarks on lines, stored by LitForge (never in the .tex file). A note keeps the text of
      its line, so it finds the line again after edits made elsewhere. */
-  var NOTES = { list: [], editing: null, token: null };
+  var NOTES = { list: [], editing: null, token: null, pending: null };  // pending: the mark of a note being written
 
   function writeNotes() { return NOTES.list; }
 
+  function notesUrl() {
+    return '/api/write/notes?doc=' + encodeURIComponent(W.doc.id) + '&file=' + encodeURIComponent(W.file);
+  }
+
+  // Reloads the notes; a reply for text that changed meanwhile would put them on old lines, so it is dropped.
   function loadWriteNotes() {
-    var doc = W.doc, file = W.file, token = {};
-    NOTES.token = token; NOTES.list = [];
-    return api('/api/write/notes?doc=' + encodeURIComponent(doc.id) + '&file=' + encodeURIComponent(file))
-      .then(function (res) {
-        if (NOTES.token !== token || W.doc !== doc || W.file !== file) return;
-        NOTES.list = res.notes || [];
-        showWriteNotes();
-      }).catch(function () {});
+    var doc = W.doc, file = W.file, token = {}, text = W.editor ? W.editor.getText() : null;
+    NOTES.token = token;
+    return api(notesUrl()).then(function (res) {
+      if (NOTES.token !== token || W.doc !== doc || W.file !== file || !W.editor || W.editor.getText() !== text) return;
+      NOTES.list = res.notes || [];
+      showWriteNotes();
+    }).catch(function () {});
+  }
+
+  // The lines the editor's marks are on now (they move with the text); the plain text area keeps the stored ones.
+  function markLines() {
+    var lines = {};
+    if (W.editor && W.editor.noteLines) W.editor.noteLines().forEach(function (n) { lines[n.id] = n.line; });
+    return lines;
   }
 
   function showWriteNotes() {
-    if (W.editor && W.editor.setNotes) W.editor.setNotes(NOTES.list);
+    if (W.editor && W.editor.setNotes) {
+      var lines = markLines(), marks = NOTES.list.map(function (n) { return { id: n.id, body: n.body, line: lines[n.id] || n.line }; });
+      if (NOTES.pending) marks.push({ id: '__new', body: '', line: lines.__new || NOTES.pending.line });
+      W.editor.setNotes(marks);
+    }
     refreshWriteStats();
   }
 
-  // Where each note is now: the editor moves the marks with the text; the plain text area cannot.
   function currentNoteLines() {
-    if (W.editor && W.editor.noteLines) {
-      var lines = {};
-      W.editor.noteLines().forEach(function (n) { lines[n.id] = n.line; });
-      return NOTES.list.map(function (n) { return { note: n, line: lines[n.id] || n.line }; });
-    }
-    return NOTES.list.map(function (n) { return { note: n, line: n.line }; });
+    var lines = markLines();
+    return NOTES.list.map(function (n) { return { note: n, line: lines[n.id] || n.line }; });
   }
 
   function lineText(line) {
@@ -3048,6 +3070,8 @@
     if (!W.editor) return;
     var found = currentNoteLines().filter(function (n) { return n.line === line; })[0];
     NOTES.editing = { line: line, id: found ? found.note.id : null };
+    NOTES.pending = found ? null : { line: line };
+    if (!found) showWriteNotes();
     $('write-note-title').textContent = 'Note · line ' + line;
     $('write-note-text').value = found ? found.note.body : '';
     $('write-note-delete').hidden = !found;
@@ -3056,14 +3080,19 @@
     if ($('write-note-text').focus) $('write-note-text').focus();
   }
 
-  function closeWriteNote() { NOTES.editing = null; $('write-note').hidden = true; }
+  function closeWriteNote() {
+    var hadPending = !!NOTES.pending;
+    NOTES.editing = null; NOTES.pending = null; $('write-note').hidden = true;
+    if (hadPending && W.editor) showWriteNotes();
+  }
 
   function saveWriteNote() {
     var editing = NOTES.editing, doc = W.doc, file = W.file;
     if (!editing) return Promise.resolve();
     var body = $('write-note-text').value.trim();
     if (!body) { toast('Write a note, or delete it.'); return Promise.resolve(); }
-    var req = { doc: doc.id, file: file, line: editing.line, anchor: lineText(editing.line), body: body };
+    var line = markLines()[editing.id || '__new'] || editing.line;  // where its line is now, after any edits
+    var req = { doc: doc.id, file: file, line: line, anchor: lineText(line), body: body };
     if (editing.id) req.id = editing.id;
     return post('/api/write/note', req).then(function (note) {
       if (W.doc !== doc || W.file !== file) return;
@@ -3083,15 +3112,19 @@
     }).catch(function (e) { toast(e.message); });
   }
 
-  // After a save: store the lines notes moved to with the text, so they open there next time.
+  // After a save: store where notes are now and the text of their lines (it may have changed in place), so they
+  // open there next time. Only an acknowledged change counts: a failed one is sent again after the next save.
   function syncWriteNotes() {
     if (!W.doc || !W.editor || !NOTES.list.length) return Promise.resolve();
-    var moved = currentNoteLines().filter(function (n) { return n.line !== n.note.line; }).map(function (n) {
-      n.note.line = n.line; n.note.anchor = lineText(n.line);
-      return { id: n.note.id, line: n.line, anchor: n.note.anchor };
-    });
-    if (!moved.length) return Promise.resolve();
-    return post('/api/write/notes/move', { doc: W.doc.id, file: W.file, notes: moved }).catch(function () {});
+    var changed = currentNoteLines().map(function (n) {
+      return { note: n.note, line: n.line, anchor: lineText(n.line) };
+    }).filter(function (c) { return c.line !== c.note.line || c.anchor !== c.note.anchor; });
+    if (!changed.length) return Promise.resolve();
+    return post('/api/write/notes/move', { doc: W.doc.id, file: W.file, notes: changed.map(function (c) {
+      return { id: c.note.id, line: c.line, anchor: c.anchor };
+    }) }).then(function () {
+      changed.forEach(function (c) { c.note.line = c.line; c.note.anchor = c.anchor; });
+    }).catch(function () {});
   }
 
   /* ---- outline, word count, compile settings ---- */

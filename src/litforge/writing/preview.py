@@ -14,6 +14,12 @@ from litforge.writing import compile as wc
 from litforge.writing.documents import MAX_FIGURE_BYTES, Document, DocumentError, resolve_inside
 
 _LOCK = threading.Lock()
+WAIT_S = 20.0  # how long a preview waits for the one compiling; a runaway formula must not block every later one
+TIMEOUT_S = 12.0
+# Byte notation (^^69 is "i"), @-names (\@@input) and anything whose name is about files, packages or the engine:
+# a formula needs none of them.
+_HIDDEN = re.compile(r'\^\^|\\[a-zA-Z]*@|\\[a-zA-Z@]*(?:input|file|read|write|open|package|class|expl|catcode|'
+                     r'csname|special|immediate|jobname|makeat)[a-zA-Z@]*|\\(?:direct)?lua|\\shell', re.I)
 _PACKAGES = {'amsmath', 'amssymb', 'amsfonts', 'mathtools', 'bm', 'physics', 'siunitx',
              'mathrsfs', 'esint', 'upgreek'}
 _REFUSED = re.compile(
@@ -29,7 +35,7 @@ _ENV = re.compile(r'\\begin\{(equation\*?|align\*?|gather\*?|multline\*?|eqnarra
 
 def source_for(doc: Document, tex: str) -> str:
     tex = tex.strip()
-    if not tex or len(tex) > 4000 or _REFUSED.search(tex):
+    if not tex or len(tex) > 4000 or _REFUSED.search(tex) or _HIDDEN.search(tex):
         raise DocumentError('invalid or unsafe math preview')
     inner = None
     for start, end in [('$$', '$$'), ('$', '$'), (r'\(', r'\)'), (r'\[', r'\]')]:
@@ -55,7 +61,7 @@ def source_for(doc: Document, tex: str) -> str:
             if all(p in _PACKAGES for p in packages):
                 copied.append(r'\usepackage{' + ','.join(packages) + '}')
         elif _DEFINITION.match(line) and len(line) <= 300:
-            if _REFUSED.search(line):
+            if _REFUSED.search(line) or _HIDDEN.search(line):
                 raise DocumentError('unsafe command in preview macros')
             copied.append(line)
     return ('\\documentclass[preview,border=2pt,varwidth]{standalone}\n'
@@ -68,9 +74,13 @@ def preview_math(doc: Document, paths: Paths, tex: str) -> bytes:
         raise DocumentError('math preview is limited to 4000 characters')
     source = source_for(doc, tex)
     cache = getattr(paths, 'cache', paths.root / 'cache') / 'write-preview'
-    with _LOCK:
+    target = cache / (hashlib.sha256(source.encode()).hexdigest() + '.pdf')
+    if target.is_file():  # a cache hit never waits behind a compile
+        return target.read_bytes()
+    if not _LOCK.acquire(timeout=WAIT_S):
+        raise DocumentError('another formula is still rendering; try again in a moment')
+    try:
         cache.mkdir(parents=True, exist_ok=True)
-        target = cache / (hashlib.sha256(source.encode()).hexdigest() + '.pdf')
         if target.is_file():
             return target.read_bytes()
         with tempfile.TemporaryDirectory(prefix='litforge-preview-') as folder:
@@ -82,7 +92,7 @@ def preview_math(doc: Document, paths: Paths, tex: str) -> bytes:
             command = wc.tectonic_command(paths) if doc.engine == 'tectonic' else wc.xelatex_command()
             if command is None:
                 raise DocumentError('install Tectonic in Settings → Optional tools to preview math')
-            result = wc.compile_document(snippet, paths, timeout_s=30)
+            result = wc.compile_document(snippet, paths, timeout_s=TIMEOUT_S)
             if not result.ok or not result.pdf:
                 raise DocumentError(result.errors[0].message if result.errors else 'math preview failed')
             data = (snippet.folder / result.pdf).read_bytes()
@@ -91,6 +101,8 @@ def preview_math(doc: Document, paths: Paths, tex: str) -> bytes:
         for old in files[:-500]:
             old.unlink(missing_ok=True)
         return data
+    finally:
+        _LOCK.release()
 
 
 def figure(doc: Document, name: str) -> tuple[bytes, str, str]:

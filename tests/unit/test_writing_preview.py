@@ -71,7 +71,7 @@ def test_compile_cache_and_pruning(env, monkeypatch):
     assert wp.preview_math(doc, paths, '$x$').startswith(b'%PDF')
     assert len(list(cache.glob('*.pdf'))) == 500
     assert seen[0][0].draft and seen[0][0].main_file == 'snippet.tex'
-    assert seen[0][2] == {'timeout_s': 30}
+    assert seen[0][2] == {'timeout_s': wp.TIMEOUT_S}
     assert '$x$' in seen[0][1]
     assert '--reruns' in json.loads(record.read_text())['argv']
     record.unlink()
@@ -102,3 +102,39 @@ def test_path_scan(env):
 def test_matrices_and_cases_inside_a_formula_are_previewed(env, tex):
     # Common in real equations; a nested environment is not a second formula.
     assert tex in wp.source_for(env[2], tex)
+
+
+@pytest.mark.parametrize('tex', [r'$\^^69nput{x}$', r'$\@@input x$', r'$\InputIfFileExists{x}{}{}$',
+                                 r'$\verbatiminput{x}$', r'$\lstinputlisting{x}$', r'$\RequirePackage{x}$',
+                                 r'$\makeatletter x$', r'$\ExplSyntaxOn x$', r'$\newread\r x$', r'$\endinput$',
+                                 r'$\pdffilesize{x}$', r'$\openin x$', r'$\IfFileExists{x}{}{}$', r'$\LoadClass{x}$'])
+def test_encoded_and_file_reading_commands_are_refused(env, tex):
+    # ^^69 is "i" in TeX's byte notation, so \^^69nput is \input; names mentioning files are refused outright.
+    with pytest.raises(DocumentError):
+        wp.source_for(env[2], tex)
+
+
+def test_a_cache_hit_does_not_wait_for_a_running_compile(env, monkeypatch):
+    _, paths, doc, _, _ = env
+    first = wp.preview_math(doc, paths, '$x$')
+    assert wp._LOCK.acquire(timeout=1)  # a long compile holds the lock
+    try:
+        assert wp.preview_math(doc, paths, '$x$') == first
+    finally:
+        wp._LOCK.release()
+
+
+def test_a_preview_gives_up_waiting_for_a_stuck_one(env, monkeypatch):
+    _, paths, doc, _, _ = env
+    monkeypatch.setattr(wp, 'WAIT_S', 0.2)
+    assert wp._LOCK.acquire(timeout=1)
+    try:
+        with pytest.raises(DocumentError, match='still rendering'):
+            wp.preview_math(doc, paths, '$y$')
+    finally:
+        wp._LOCK.release()
+
+
+def test_ordinary_macro_names_are_not_refused(env):
+    (env[2].folder / env[2].main_file).write_text('\\newcommand{\\evaluate}{E}\n\\begin{document}\n')
+    assert '\\evaluate' in wp.source_for(env[2], '$\\evaluate$')
