@@ -183,3 +183,33 @@ def test_an_inserted_table_may_number_its_rows_but_not_invent_data(env) -> None:
     assert labels["hunks"][0]["flags"] == []  # real run: "Col 1 … Col 5" was flagged and pre-rejected
     data = ask("\\begin{tabular}{ll}\nGain & 3.75 \\\\\nSubjects & 128 \\\\\n\\end{tabular}")["suggestion"]
     assert any("3.75" in f and "128" in f for f in data["hunks"][0]["flags"])
+
+
+def _insert(env, insertion: str, context: str = "x\n", citations: list | None = None, question: str = "Add it"):
+    conn, paths, doc, _ = env
+    fake = FakeLlm(lambda m: {"answer": "Done.", "citations": citations or [], "insertion": insertion})
+    req = wchat.prepare(conn, doc, question, context=context)
+    return wchat.run(conn, ModelGateway(conn, Config(), providers={"local": fake}), doc, req, "main.tex"), req
+
+
+def test_an_insertion_repairs_latex_that_json_turned_into_control_characters(env) -> None:
+    # Review: "\neq" written without escaping arrives as a newline + "eq"; with no selection nothing repaired it.
+    result, _ = _insert(env, "$a \neq b$ and $\nabla f$")
+    assert result["suggestion"]["hunks"][0]["new"] == "$a \\neq b$ and $\\nabla f$"
+
+
+def test_an_insertion_may_use_the_numbers_of_the_text_around_the_cursor(env) -> None:
+    result, _ = _insert(env, "\\begin{tabular}{ll}\nGain & 3.75 \\\\\nSubjects & 128 \\\\\n\\end{tabular}",
+                        context="The gain was 3.75 in 128 subjects.\n", question="Tabulate the values above")
+    assert result["suggestion"]["hunks"][0]["flags"] == []
+
+
+def test_an_insertion_left_empty_keeps_the_answer(env) -> None:
+    result, _ = _insert(env, "\\cite{ev_missing}", citations=[{"evidence_id": "ev_missing", "quote": "nothing"}])
+    assert result["answer"] == "Done." and result["suggestion"] is None
+    assert any("insert" in f.lower() for f in result["flags"])
+
+
+def test_without_a_selection_the_reply_has_room_for_a_table(env) -> None:
+    conn, paths, doc, _ = env
+    assert wchat._cap(wchat.prepare(conn, doc, "Make a big table", context="x")) >= 2500

@@ -21,6 +21,9 @@ MAX_SELECTION = assist.MAX_SELECTION
 MAX_CONTEXT = 6000
 MAX_HISTORY = 8  # earlier messages sent along (user and assistant turns)
 MAX_TURN = 2000
+# Commands an inserted block commonly uses, so a model's unescaped "\\neq" or "\\hline" is repaired.
+_INSERT_COMMANDS = (assist._MATH_COMMANDS + r" \begin \end \hline \toprule \midrule \bottomrule \centering"
+                    r" \caption \label \textbf \textit \emph \noindent \newline \item \multicolumn \ref")
 _SCHEMA = {"type": "object", "properties": {
     "answer": {"type": "string"}, "replacement": {"type": "string"}, "insertion": {"type": "string"},
     "citations": {"type": "array", "items": {"type": "object", "properties": {
@@ -43,6 +46,7 @@ class ChatRequest:
     packet: EvidencePacket | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
     pad: tuple[bool, bool] = (False, False)  # a newline before / after text inserted at the cursor
+    context: str = ""  # the lines around the cursor (no selection): their numbers and commands are the author's
 
 
 def prepare(conn: sqlite3.Connection, doc: Document, question: str, selection: str = "", context: str = "",
@@ -68,7 +72,7 @@ def prepare(conn: sqlite3.Connection, doc: Document, question: str, selection: s
     papers = to_packet(spans, sensitive=True, max_chars_per_item=1500) if spans else None
     req = ChatRequest(question=question, selection=selection, evidence={s.id: s for s in spans},
                       wrap=assist.lr_wrapper(selection) if selection else None,
-                      pad=(False, False) if selection else (pad_before, pad_after))
+                      pad=(False, False) if selection else (pad_before, pad_after), context=context)
     shown = selection[len(req.wrap[0]):len(selection) - len(req.wrap[1])] if req.wrap else selection
     req.messages = write_chat_messages(question, shown, context, turns, papers, spans)
     req.citation_request = assist.Request(action="chat", text=selection, task=req.task, evidence=req.evidence)
@@ -96,7 +100,8 @@ def preview(gateway: ModelGateway, req: ChatRequest) -> CallPreview:
 
 
 def _cap(req: ChatRequest) -> int:
-    return min(8192, 1500 + len(req.selection))
+    # Without a selection the reply may carry a whole table or figure to insert (review: 1500 cut it off).
+    return min(8192, 1500 + len(req.selection)) if req.selection else 2500
 
 
 def run(conn: sqlite3.Connection, gateway: ModelGateway, doc: Document, req: ChatRequest, file: str,
@@ -111,15 +116,21 @@ def run(conn: sqlite3.Connection, gateway: ModelGateway, doc: Document, req: Cha
     replacement = str(content.get("replacement") or "")
     insertion = str(content.get("insertion") or "")
     if not req.selection and insertion.strip():
-        # Nothing selected: text the author asked to add (a table, an equation) goes in at the cursor.
-        edit = assist.Request(action="insert", text="", task=req.task, evidence=req.evidence, pad=req.pad)
+        # Nothing selected: text the author asked to add (a table, an equation) goes in at the cursor. The text
+        # around the cursor and common LaTeX commands tell the escape repair what "\n" + "eq" was ("\neq").
+        edit = assist.Request(action="insert", text="", task=req.task, evidence=req.evidence, pad=req.pad,
+                              context=req.context + " " + _INSERT_COMMANDS)
         assert req.citation_request is not None
+        insertion = assist.repair_escapes(insertion, edit.context)
         insertion, cited, dropped = assist._resolve_citations(conn, req.citation_request, insertion,
                                                               content.get("citations") or [])
         if dropped:
             flags.append(f"{dropped} citation(s) left out: their quote was not found in the evidence")
-        suggestion = assist.suggestion_from(conn, doc, edit, {"replacement": insertion, "note": ""},
-                                            f"{reply.provider}:{reply.model}", file, citations_in=cited)
+        try:
+            suggestion = assist.suggestion_from(conn, doc, edit, {"replacement": insertion, "note": ""},
+                                                f"{reply.provider}:{reply.model}", file, citations_in=cited)
+        except assist.AssistError:  # nothing left to insert: the answer still stands
+            flags.append("nothing to insert: the proposed text was empty once unverified citations were removed")
     if req.selection and replacement.strip() and replacement.strip() != req.selection.strip():
         # An English \\lr{...} passage translated into Persian loses the wrapper, as in the Translate action.
         persian = bool(assist._PERSIAN.search(replacement)) and not assist._PERSIAN.search(req.selection)
