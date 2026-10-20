@@ -1295,3 +1295,35 @@ test('closing the image panel sends nothing; a too large file is refused', async
   assert.ok(calls.some(c => c[0] === 'toast' && /PNG, JPEG/.test(c[1])));
   assert.ok(!calls.some(c => c[0] === '/api/write/assist'));
 });
+
+test('the image panel floats under the cursor, like the suggestion bar', async () => {
+  const { ctx, $ } = aiSetup(REPORT);
+  await ctx.openWriteDoc('d1');
+  const box = $('write-image');
+  box.parentNode = { getBoundingClientRect: () => ({ top: 100, height: 400 }) };
+  box.offsetHeight = 80;
+  const area = $('write-cm').children[0];
+  area.value = 'abc'; area.setSelectionRange(1, 1);
+  ctx.W.editor.coords = () => ({ top: 150, bottom: 170 });
+  await ctx.runWriteAi('equation-image', false);
+  assert.equal(box.style.top, '76px');
+});
+
+test('suggested text keeps its line breaks', () => {
+  const css = fs.readFileSync('src/litforge/ui/static/app.css', 'utf8');
+  assert.match(css, /\.write-suggestion \.hunk del, \.write-suggestion \.hunk ins \{[^}]*white-space: pre-wrap/);
+});
+
+test('a new AI action waits until the open suggestion is applied or rejected', async () => {
+  const { ctx, $, calls } = aiSetup(REPORT);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Intro: one two three.'; area.setSelectionRange(7, 20);
+  await ctx.runWriteAi('shorter', false);
+  assert.ok(ctx.AI_pending());
+  await ctx.runWriteAi('clearer', false);
+  await ctx.runWriteAi('equation-image', false);
+  assert.equal(calls.filter(c => c[0] === '/api/write/assist').length, 1);
+  assert.ok(calls.some(c => c[0] === 'toast' && /Apply or reject the open suggestion first/.test(c[1])));
+  assert.notEqual($('write-image').hidden, false);
+});

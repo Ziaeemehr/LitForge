@@ -116,7 +116,7 @@ def write_summary_messages(kind: str, current: str, body: str) -> list[dict[str,
 _IMAGE = {
     "equation-image": "Transcribe the equation or equations in the image into LaTeX. Return a display equation: "
                       "\\begin{equation} ... \\end{equation} for one, \\begin{align} ... \\end{align} for "
-                      "several lines. Do not add a \\label.",
+                      "several lines. Do not add a \\label and do not copy the equation number.",
     "table-image": "Transcribe the table in the image into a LaTeX table: \\begin{table}[ht] \\centering, a "
                    "tabular with one column specifier per column, \\hline under the header, and the cells in "
                    "the same order. Leave \\caption{} empty unless the image shows a caption. Use only standard "

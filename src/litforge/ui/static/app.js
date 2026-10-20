@@ -3234,6 +3234,7 @@
       anchor: text.slice(at, pos + 40), anchorAt: at } };
     $('write-image-title').textContent = IMAGE_ACTIONS[action];
     $('write-image').hidden = false;
+    placeWriteSuggestion(IMG.range, $('write-image'));
     if ($('write-image-drop').focus) $('write-image-drop').focus();
   }
 
@@ -3292,6 +3293,7 @@
   // `given` is a prepared range (an image action, after the image was given).
   function runWriteAi(action, approved, given) {
     if (!W.doc || !W.editor || !action) return Promise.resolve();
+    if (AI.pending) { toast('Apply or reject the open suggestion first.'); return Promise.resolve(); }
     if (IMAGE_ACTIONS[action] && !given && !approved) { openWriteImage(action); return Promise.resolve(); }
     var range = given || (AI.range && approved ? AI.range : writeAiRange(action));
     if (range.problem) { toast(range.problem); return Promise.resolve(); }
@@ -3378,8 +3380,8 @@
 
   // Float the bar just under the changed text; above it when there is no room below. Without
   // coordinates (plain text area) the stylesheet keeps it at the bottom right of the editor.
-  function placeWriteSuggestion(range) {
-    var box = $('write-suggestion'), at = W.editor && W.editor.coords(range.to);
+  function placeWriteSuggestion(range, panel) {
+    var box = panel || $('write-suggestion'), at = W.editor && W.editor.coords && W.editor.coords(range.to);
     box.style.top = ''; box.style.bottom = '';
     if (!at || !box.parentNode || !box.parentNode.getBoundingClientRect) return;
     var pane = box.parentNode.getBoundingClientRect(), height = box.offsetHeight || 120;

@@ -222,7 +222,7 @@ def test_assist_image_and_abstract_routes(tmp_path: Path) -> None:
         status, job = call(base, "/api/write/assist", body)
         assert status == 200 and job["sent"]["images"] == 1 and job["preview"]["model"] == "qwen2.5vl:7b"
         report = wait_job(base, job["id"])["report"]
-        assert report["hunks"][0]["new"] == "\n\\[ x^2 \\]" and fakes["local_vision"].images == [[png]]
+        assert report["hunks"][0]["new"] == "\n\\[\n  x^2\n\\]" and fakes["local_vision"].images == [[png]]
         assert call(base, "/api/write/assist", {**body, "image": "data:image/png;base64,???"})[0] == 400
         status, job = call(base, "/api/write/assist", {"doc": doc["id"], "action": "abstract", "text": "",
                                                        "context": "We studied a model.", "file": "main.tex"})

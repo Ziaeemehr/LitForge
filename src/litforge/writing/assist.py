@@ -275,7 +275,7 @@ def suggestion_from(conn: sqlite3.Connection, doc: Document, req: Request, conte
         if _MARKER.search(new_text):
             flags.append("the model invented markers that stand for nothing")
     if req.action in IMAGE:  # nothing to compare with: read escapes against common LaTeX math commands
-        new_text = repair_escapes(new_text, _MATH_COMMANDS).strip()
+        new_text = layout_latex(repair_escapes(new_text, _MATH_COMMANDS))
         flags.append("transcribed from an image: check every symbol and number against it")
     else:
         new_text = _keep_edges(sent, repair_escapes(new_text, sent + " " + req.context))
@@ -414,6 +414,70 @@ def _flag_hunk(hunk: dict[str, Any], allowed: set[Any], known: set[str], conn: s
 def _numbers(text: str) -> set[Any]:
     """Numbers in the prose, not in citation keys, labels or reference names."""
     return numbers(_KEYED.sub(" ", text))
+
+
+_LAYOUT = re.compile(r"(?P<br>\\\\(?:\[[^\]]*\])?)|(?P<begin>\\begin\{(?P<env>[^}]*)\}(?:\[[^\]]*\])?)|"
+                     r"(?P<end>\\end\{(?P<endenv>[^}]*)\})|(?P<open>\\\[)|(?P<close>\\\])|"
+                     r"(?P<alone>\\(?:hline|centering)(?![a-zA-Z]))|(?P<starts>\\(?:caption|label)(?![a-zA-Z]))")
+_INDENTED = {"equation", "align", "gather", "multline", "eqnarray", "split", "tabular", "tabularx", "array", "cases",
+             "matrix", "pmatrix", "bmatrix", "vmatrix", "aligned", "gathered"}
+_WITH_SPEC = {"tabular", "tabularx", "array"}  # \begin{tabular}{l c} keeps its column spec on its line
+
+
+def layout_latex(text: str) -> str:
+    """One LaTeX block laid out on lines: environments and \[ \] on their own lines, one table or align row per
+    line, bodies indented, no blank lines (one inside an equation breaks the compile). The vision model returned
+    whole tables on one line and copied the equation number "(1)" (real run). Text with a comment is kept as is:
+    joining its lines would comment out the rest."""
+    text = text.strip()
+    if re.search(r"(?<!\\)%", text):
+        return text
+    text = re.sub(r"^\(\d+(?:\.\d+)*\)\s*(?=\\begin|\\\[)", "", text)
+    text = re.sub(r"(\\end\{[^}]*\}|\\\])\s*\(\d+(?:\.\d+)*\)$", r"\1", text)
+    text = re.sub(r"\s+", " ", text)
+    lines: list[str] = []
+    buffer, depth, pos = "", 0, 0
+
+    def flush() -> None:
+        nonlocal buffer
+        if buffer.strip():
+            lines.append("  " * depth + buffer.strip())
+        buffer = ""
+
+    for match in _LAYOUT.finditer(text):
+        if match.start() < pos:
+            continue
+        buffer += text[pos:match.start()]
+        token, pos = match.group(0), match.end()
+        if match.group("br"):
+            buffer = buffer.rstrip() + " " + token
+            flush()
+        elif match.group("begin") or match.group("open"):
+            env = (match.group("env") or "").rstrip("*")
+            if env in _WITH_SPEC and text[pos:pos + 1] == "{":
+                depth_spec, end = 0, pos
+                for end in range(pos, len(text)):
+                    depth_spec += {"{": 1, "}": -1}.get(text[end], 0)
+                    if depth_spec == 0:
+                        break
+                token, pos = token + text[pos:end + 1], end + 1
+            flush()
+            lines.append("  " * depth + token)
+            depth += 1 if match.group("open") or env in _INDENTED else 0
+        elif match.group("end") or match.group("close"):
+            flush()
+            env = (match.group("endenv") or "").rstrip("*")
+            depth = max(0, depth - (1 if match.group("close") or env in _INDENTED else 0))
+            lines.append("  " * depth + token)
+        elif match.group("alone"):
+            flush()
+            lines.append("  " * depth + token)
+        else:  # \caption, \label: start a line
+            flush()
+            buffer = token
+    buffer += text[pos:]
+    flush()
+    return "\n".join(lines)
 
 
 def latex_flags(old: str, new: str, exempt: set[str] | None = None) -> list[str]:

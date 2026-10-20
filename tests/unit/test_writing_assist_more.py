@@ -128,13 +128,13 @@ def test_equation_from_image_goes_to_the_vision_model(env) -> None:
 
 def test_image_result_goes_on_its_own_lines(env) -> None:
     result, _ = run_image(env, "equation-image", {"replacement": "\\[ x \\]"}, pad_before=True, pad_after=True)
-    assert result["hunks"][0]["new"] == "\n\\[ x \\]\n"
+    assert result["hunks"][0]["new"] == "\n\\[\n  x\n\\]\n"
 
 
 def test_image_reply_json_escapes_are_repaired(env) -> None:
     # "\frac" and "\neq" sent without doubled backslashes arrive as a form feed and a newline.
     result, _ = run_image(env, "equation-image", {"replacement": "\\[ \frac{a}{b} \neq \nu \\]"})
-    assert result["hunks"][0]["new"] == "\\[ \\frac{a}{b} \\neq \\nu \\]"
+    assert result["hunks"][0]["new"] == "\\[\n  \\frac{a}{b} \\neq \\nu\n\\]"
 
 
 def test_table_from_image_prompt_and_flags(env) -> None:
@@ -177,3 +177,38 @@ def test_image_preview_uses_the_vision_model_and_cloud_needs_approval(env) -> No
                                                          api_key_env="X_KEY")
     cloud = wa.preview(ModelGateway(conn, config), req, profile="cloud")
     assert cloud.requires_approval  # the user's image is treated as unpublished work
+
+
+# ---- loop 1 (real run): one-line replies and copied equation numbers -------------------------------------
+
+
+def test_layout_puts_an_equation_on_its_own_lines_without_its_number() -> None:
+    got = wa.layout_latex("\\begin{equation} \\frac{a}{b} = c, \\qquad \\tau = 0.25 \\end{equation} (1)")
+    assert got == "\\begin{equation}\n  \\frac{a}{b} = c, \\qquad \\tau = 0.25\n\\end{equation}"
+    assert wa.layout_latex("(2.1) \\[ x \\]") == "\\[\n  x\n\\]"
+
+
+def test_layout_breaks_a_table_into_rows() -> None:
+    one_line = ("\\begin{table}[ht] \\centering \\begin{tabular}{l p{2cm} c} \\hline Model & Coupling & Acc (\\%) \\\\ "
+                "\\hline Kuramoto & 0.42 & 81.3 \\\\ Hopf & 0.90 & 92.1 \\\\ \\hline \\end{tabular} \\caption{} "
+                "\\end{table}")
+    assert wa.layout_latex(one_line) == "\n".join([
+        "\\begin{table}[ht]", "\\centering", "\\begin{tabular}{l p{2cm} c}", "  \\hline",
+        "  Model & Coupling & Acc (\\%) \\\\", "  \\hline", "  Kuramoto & 0.42 & 81.3 \\\\",
+        "  Hopf & 0.90 & 92.1 \\\\", "  \\hline", "\\end{tabular}", "\\caption{}", "\\end{table}"])
+
+
+def test_layout_keeps_align_rows_and_never_leaves_blank_lines() -> None:
+    got = wa.layout_latex("\\begin{align}\n\n a &= b \\\\[2pt] c &= d\n\n\\end{align}")
+    assert got == "\\begin{align}\n  a &= b \\\\[2pt]\n  c &= d\n\\end{align}"
+    assert "\n\n" not in got
+
+
+def test_layout_leaves_text_with_comments_alone() -> None:
+    text = "\\begin{equation} x % the state\n = y \\end{equation}"
+    assert wa.layout_latex(text) == text
+
+
+def test_image_reply_is_laid_out(env) -> None:
+    result, _ = run_image(env, "equation-image", {"replacement": "\\begin{equation} E = mc^2 \\end{equation} (1)"})
+    assert result["hunks"][0]["new"] == "\\begin{equation}\n  E = mc^2\n\\end{equation}"
