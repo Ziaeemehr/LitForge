@@ -54,6 +54,7 @@ _CITED = {"type": "object", "properties": {
 _COMMAND = re.compile(r"\\([a-zA-Z]+)")
 _ARG_COMMANDS = re.compile(r"\\(ref|eqref|autoref|cref|Cref|label|pageref)\*?\{([^}]*)\}")
 _KEYED = re.compile(r"\\[a-zA-Z]*(?:cite|ref|label)[a-zA-Z]*\*?(?:\[[^\]]*\])*\{[^}]*\}")
+_CITE_COMMANDS = r"\cite \citep \citet \textcite \parencite \autocite \footcite"  # what the cite action may insert
 _CITE_ONLY = re.compile(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?(?:\[[^\]]*\])*\{[^}]*\}")
 _MATH = re.compile(r"\$\$.+?\$\$|\$[^$]+\$|\\\(.+?\\\)|\\\[.+?\\\]", re.S)
 
@@ -318,8 +319,10 @@ def suggestion_from(conn: sqlite3.Connection, doc: Document, req: Request, conte
     flags: list[str] = []
     sent = model_text(req)
     if req.action == "cite":
-        new_text, citations, dropped = _resolve_citations(conn, req, str(content.get("text") or ""),
-                                                          content.get("citations") or [])
+        # Repair JSON escapes first ("\textcite" arrives as a tab + "extcite"), or the evidence ids in it are
+        # never turned into keys (real run).
+        reply = repair_escapes(str(content.get("text") or ""), sent + " " + req.context + " " + _CITE_COMMANDS)
+        new_text, citations, dropped = _resolve_citations(conn, req, reply, content.get("citations") or [])
         if dropped:
             flags.append(f"{dropped} citation(s) removed: their quote was not found in the evidence")
     else:
@@ -398,9 +401,17 @@ def _resolve_citations(conn: sqlite3.Connection, req: Request, text: str,
     """Keep only citations whose quote is really in the evidence; turn evidence ids into citation keys."""
     verified, _ = verify_quotes(conn, req.evidence, raw)
     dropped = 0
+    # Only citation commands the document already uses: \textcite without biblatex does not compile (real run).
+    usable = set(_COMMAND.findall(req.text + " " + req.context)) | {"cite"}
+    # "\\textcite" is a line break and the word "textcite": the model escaped its backslash twice (real run).
+    text = re.sub(r"(?<!\\)\\\\(?=[a-zA-Z]*cite[a-zA-Z]*\*?[\[{])", r"\\", text)
 
     def replace(match: re.Match[str]) -> str:
         nonlocal dropped
+        command = match.group(1)
+        name = re.match(r"\\([a-zA-Z]*)", command).group(1)  # type: ignore[union-attr]
+        if name not in usable:
+            command = "\\cite" + command[len(name) + 1:]
         keys = []
         for part in match.group(2).split(","):
             part = part.strip()
@@ -411,7 +422,7 @@ def _resolve_citations(conn: sqlite3.Connection, req: Request, text: str,
             elif part:
                 keys.append(part)  # a key the user already had
         keys = list(dict.fromkeys(keys))
-        return f"{match.group(1)}{{{','.join(keys)}}}" if keys else ""
+        return f"{command}{{{','.join(keys)}}}" if keys else ""
 
     out = re.sub(r"(\\[a-zA-Z]*cite[a-zA-Z]*\*?(?:\[[^\]]*\])*)\{([^}]*)\}", replace, text)
     used = {c for c in cited_keys(out)}

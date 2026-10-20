@@ -1939,3 +1939,20 @@ test('a failed sync still refreshes the status and the files (a merge may have h
   assert.ok(env.calls.some(c => c[0] === 'GET' && c[1].startsWith('/api/write/git?')));
   assert.ok(env.calls.filter(c => c[0] === 'GET' && c[1].startsWith('/api/write/file')).length > before);
 });
+
+test('Apply with nothing accepted keeps the suggestion open and says why; Reject all still rejects', async () => {
+  const { ctx, $, calls } = aiSetup(REPORT);
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'Intro: one two three.'; area.setSelectionRange(7, 20);
+  await ctx.runWriteAi('shorter', false);
+  const toggles = $('write-suggestion-hunks').children.filter(h => h.children.some(c => /^Accepted/.test(c.textContent)));
+  toggles.forEach(h => h.children.find(c => /^Accepted/.test(c.textContent)).onclick());  // every change rejected
+  await ctx.applyWriteSuggestion(false);
+  assert.equal($('write-suggestion').hidden, false);
+  assert.ok(calls.some(c => c[0] === 'toast' && /Nothing is accepted yet/.test(c[1])));
+  assert.ok(!calls.some(c => c[0] === '/api/write/assist/decide'));
+  await ctx.applyWriteSuggestion(true);
+  assert.equal($('write-suggestion').hidden, true);
+  assert.deepEqual([...calls.find(c => c[0] === '/api/write/assist/decide')[1].accepted], []);
+});

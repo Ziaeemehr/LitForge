@@ -130,6 +130,49 @@ def test_suggest_citations_keeps_only_verified_quotes(env) -> None:
     assert any("not found in the evidence" in f for f in result["flags"])
 
 
+def test_evidence_ids_become_keys_when_json_turned_the_backslash_into_an_escape(env) -> None:
+    # Real run: the model wrote "\textcite{ev_…}" in JSON, which decodes to a tab + "extcite"; the evidence id
+    # was not replaced, so the change came back flagged "unknown citation key" and pre-rejected.
+    conn, paths, doc, span = env
+    text = "The coupling gain was high across subjects."
+
+    def answer(messages):
+        ids = __import__("re").findall(r'<evidence id="([^"]+)"', messages[-1]["content"])
+        return {"text": text[:-1] + f" \textcite{{{ids[0]}}}.", "citations": [  # \t: a tab, as JSON decodes it
+            {"evidence_id": ids[0], "quote": "the coupling gain was 3.25 across 40 subjects"}]}
+
+    gw, _ = gateway(conn, answer=answer)
+    result = wa.run(conn, gw, doc, wa.prepare(conn, doc, "cite", text), "main.tex")
+    key = citation_key(conn, "p1")
+    new = "".join(h["new"] for h in result["hunks"])
+    assert f"\\cite{{{key}}}" in new and "ev_" not in new  # \textcite is not used by this document
+    assert result["citations"] and result["citations"][0]["key"] == key
+    assert all(h["flags"] == [] for h in result["hunks"])
+
+
+@pytest.mark.parametrize("written, text, expected", [
+    # \textcite needs biblatex: in a document that does not use it, the inserted citation is a plain \cite.
+    ("\\textcite{EV}", "The coupling gain was high across subjects.", "\\cite{KEY}"),
+    # A document that already uses \textcite keeps the model's choice.
+    ("\\textcite{EV}", "As \\textcite{old2020} said, the coupling gain was high.", "\\textcite{KEY}"),
+    # An over-escaped backslash would be a line break followed by the word "textcite" (real run).
+    ("\\\\cite{EV}", "The coupling gain was high across subjects.", "\\cite{KEY}"),
+])
+def test_inserted_citation_commands_compile_in_the_document(env, written, text, expected) -> None:
+    conn, paths, doc, span = env
+
+    def answer(messages):
+        ids = __import__("re").findall(r'<evidence id="([^"]+)"', messages[-1]["content"])
+        return {"text": text[:-1] + " " + written.replace("EV", ids[0]) + ".", "citations": [
+            {"evidence_id": ids[0], "quote": "the coupling gain was 3.25 across 40 subjects"}]}
+
+    gw, _ = gateway(conn, answer=answer)
+    result = wa.run(conn, gw, doc, wa.prepare(conn, doc, "cite", text), "main.tex")
+    new = wa.applied_text(text, result["hunks"], [h["index"] for h in result["hunks"]])
+    assert new.endswith(" " + expected.replace("KEY", citation_key(conn, "p1")) + ".")
+    assert "\\\\" not in new
+
+
 def test_cloud_route_requires_approval(env) -> None:
     conn, paths, doc, _ = env
     config = Config()

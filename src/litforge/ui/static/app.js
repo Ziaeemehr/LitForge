@@ -4079,11 +4079,11 @@
     reject.type = 'button'; reject.textContent = 'Reject all';
     reject.onclick = function () {
       Object.keys(AI.pending.accepted).forEach(function (k) { AI.pending.accepted[k] = false; });
-      return applyWriteSuggestion();
+      return applyWriteSuggestion(true);
     };
     var apply = document.createElement('button');
     apply.type = 'button'; apply.className = 'sg-apply'; apply.textContent = 'Apply accepted';
-    apply.onclick = applyWriteSuggestion;
+    apply.onclick = function () { return applyWriteSuggestion(false); };
     row.appendChild(reject); row.appendChild(apply);
     parts.push(row);
     $('write-suggestion-hunks').replaceChildren.apply($('write-suggestion-hunks'), parts);
@@ -4158,12 +4158,18 @@
     return out + chars.slice(pos).join('');
   }
 
-  function applyWriteSuggestion() {
+  // rejectAll: the Reject all button. "Apply accepted" with nothing accepted keeps the suggestion open: changes
+  // with a warning start as Rejected, and applying them silently recorded a rejection (real run).
+  function applyWriteSuggestion(rejectAll) {
     var pending = AI.pending;
     if (!pending) return Promise.resolve();
     var s = pending.suggestion, range = pending.range;
     if (range.doc && (!W.doc || W.doc.id !== range.doc || W.file !== range.file)) { dropWriteSuggestion(); return Promise.resolve(); }
     var accepted = s.hunks.filter(function (h) { return pending.accepted[h.index]; }).map(function (h) { return h.index; });
+    if (!accepted.length && s.hunks.length && rejectAll === false) {
+      toast('Nothing is accepted yet: a change marked ⚠ starts as Rejected; click it to accept it, or use Reject all.');
+      return Promise.resolve();
+    }
     var now = W.editor.getText(), moved = range.before != null &&
       (now.slice(range.from - range.before.length, range.from) !== range.before ||
        now.slice(range.to, range.to + range.after.length) !== range.after);
