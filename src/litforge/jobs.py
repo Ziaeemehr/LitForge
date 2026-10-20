@@ -14,12 +14,13 @@ class JobCancelled(BaseException):
 class JobControl:
     def __init__(self) -> None:
         self.cancelled = threading.Event()
+        self.reason = "cancelled: server shutdown"
         self._lock = threading.Lock()
         self.processes: dict[int, Callable[[bool], None]] = {}
 
     def check(self) -> None:
         if self.cancelled.is_set():
-            raise JobCancelled("cancelled: server shutdown")
+            raise JobCancelled(self.reason)
 
     def process_stoppers(self) -> list[Callable[[bool], None]]:
         with self._lock:

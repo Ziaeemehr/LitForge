@@ -1497,7 +1497,16 @@
     $('progress').innerHTML = '';
     var running = document.createElement('div');
     running.className = 'run';
-    running.textContent = 'working…';
+    running.textContent = 'working… ';
+    var stop = document.createElement('button');
+    stop.className = 'btn small';
+    stop.textContent = 'Stop';
+    stop.onclick = function () {
+      stop.disabled = true;
+      stop.textContent = 'Stopping…';
+      post('/api/jobs/' + job.id + '/stop', {}).catch(function (e) { stop.disabled = false; stop.textContent = 'Stop'; toast(e.message); });
+    };
+    running.appendChild(stop);
     (function tick() {
       api('/api/jobs/' + job.id).then(function (j) {
         for (; shown < j.messages.length; shown++) logLine(j.messages[shown], /^warning/.test(j.messages[shown]) ? 'err' : '');
@@ -1508,6 +1517,11 @@
         }
         running.remove();
         setBusy(false);
+        if (j.status === 'failed' && j.error === 'stopped') {
+          logLine('Stopped; what was finished before stays.', 'err');
+          toast('Stopped');
+          return;
+        }
         if (j.status === 'failed') { logLine(j.error, 'err'); toast({ export: 'Export failed', pdfs: 'Adding PDFs failed', screen: 'Screening failed', setup: 'Setting up the vision model failed' }[j.kind] || 'Search failed'); return; }
         if (j.kind === 'setup') { toast('Better math (high) is ready; exporting'); $('btn-export').click(); return; }
         if (j.kind === 'export') toast(j.messages[j.messages.length - 1].replace(/^done: /, ''));

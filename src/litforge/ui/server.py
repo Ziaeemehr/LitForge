@@ -109,6 +109,18 @@ class Job:
     report: dict[str, Any] | None = None  # structured result, for jobs whose page shows one
 
 
+class _Messages(list[str]):
+    """A job's progress log; adding a line is where a job the user stopped stops."""
+
+    def __init__(self, check: Callable[[], None]) -> None:
+        super().__init__()
+        self._check = check
+
+    def append(self, line: str) -> None:
+        self._check()
+        super().append(line)
+
+
 class App:
     """Shared state for request handlers."""
 
@@ -369,8 +381,8 @@ class App:
         return pid
 
     def start_job(self, kind: str, project: str, work: Callable[[Job], str | None]) -> Job:
-        job = Job(id=uuid.uuid4().hex, kind=kind, project=project)
         control = JobControl()
+        job = Job(id=uuid.uuid4().hex, kind=kind, project=project, messages=_Messages(control.check))
 
         def progress(message: str) -> None:
             control.check()
@@ -396,6 +408,27 @@ class App:
             self.jobs[job.id] = job
             self._workers[job.id] = worker, control
             worker.start()
+        return job
+
+    def stop_job(self, job_id: str) -> Job:
+        """Stop a running job at its next progress line (or paper); its external processes get SIGTERM,
+        then SIGKILL two seconds later. Work already finished stays."""
+        with self._workers_lock:
+            job, worker = self.jobs.get(job_id), self._workers.get(job_id)
+        if job is None:
+            raise LookupError("job not found")
+        if job.status != "running" or worker is None:
+            return job
+        control = worker[1]
+        control.reason = "stopped"
+        control.cancelled.set()
+        stoppers = control.process_stoppers()
+        for stop in stoppers:
+            stop(False)
+        if stoppers:
+            timer = threading.Timer(2, lambda: [stop(True) for stop in stoppers])
+            timer.daemon = True
+            timer.start()
         return job
 
     def shutdown(self, timeout: float = 5) -> None:
@@ -1123,6 +1156,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
                 if url.path.startswith("/api/write/"):
                     return self._write_post(url.path, body)
+                if m := re.fullmatch(r"/api/jobs/(\w+)/stop", url.path):
+                    return self._json(app.stop_job(m[1]).__dict__)
                 if url.path == "/api/tools/tectonic/install":
                     return self._json(writing_routes.install_tectonic_job(app, body).__dict__)
                 if url.path == '/api/update/check':

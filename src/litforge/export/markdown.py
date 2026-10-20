@@ -13,6 +13,7 @@ import yaml
 
 from litforge.config import Config, Paths, load_config
 from litforge.discovery.versions import format_version_label, primary_paper_ids, versions_for_paper
+from litforge.jobs import check_cancelled
 from litforge.parsing.canonical import read_canonical, to_markdown
 from litforge.parsing.display import parse_status_label, parser_install_hint
 from litforge.parsing.formulas import FORMULAS
@@ -88,6 +89,7 @@ def export_markdown(
         "|---|---|---|---|---|" + ("---|" if screened else ""),
     ]
     for row in rows:
+        check_cancelled()  # a stopped export stops between papers
         title = row["title"] or f"Untitled ({(row['sha256'] or row['id'])[:8]})"
         version_label = format_version_label(row["version"] or "unknown", row["source_url"], row["version_label"])
         slug = f"{slugify(title)}-{row['id'][:8]}"
