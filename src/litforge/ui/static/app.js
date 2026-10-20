@@ -3670,12 +3670,70 @@
     ['times', 0], ['leq', 0], ['geq', 0], ['approx', 0], ['infty', 0], ['title', 1], ['author', 1], ['date', 1],
     ['maketitle', 0], ['tableofcontents', 0], ['bibliography', 1], ['bibliographystyle', 1], ['usepackage', 1],
     ['newcommand', 2], ['input', 1], ['include', 1], ['hline', 0], ['newline', 0], ['noindent', 0],
-    ['vspace', 1], ['hspace', 1], ['begin', 1], ['end', 1],
+    ['vspace', 1], ['hspace', 1], ['begin', 1], ['end', 1], ['chapter', 1], ['documentclass', 1],
+    ['renewcommand', 2], ['newenvironment', 3], ['textcolor', 2], ['colorbox', 2], ['resizebox', 3],
+    ['scalebox', 2], ['rotatebox', 2], ['multicolumn', 3], ['multirow', 3], ['hyperref', 1], ['dfrac', 2],
+    ['tfrac', 2], ['overset', 2], ['underset', 2], ['textcite', 1], ['parencite', 1], ['autocite', 1],
+    ['subcaption', 1], ['mathbb', 1], ['text', 1], ['operatorname', 1], ['toprule', 0], ['midrule', 0],
+    ['bottomrule', 0], ['clearpage', 0], ['newpage', 0], ['appendix', 0],
     // xepersian
     ['lr', 1], ['rl', 1], ['latin', 1], ['persian', 1], ['settextfont', 1], ['setlatintextfont', 1]];
   var LATEX_ENVS = ['figure', 'figure*', 'table', 'table*', 'tabular', 'equation', 'equation*', 'align', 'align*',
     'itemize', 'enumerate', 'description', 'abstract', 'center', 'quote', 'minipage', 'thebibliography',
-    'document', 'latin', 'persian'];
+    'document', 'latin', 'persian', 'subfigure', 'tabularx', 'multicols', 'cases', 'gather', 'gather*',
+    'verbatim', 'proof', 'theorem', 'lemma'];
+
+  // Other common forms, each its own entry in the list: [signature after the name, what it is for].
+  var LATEX_FORMS = {
+    section: [['*{}', 'unnumbered'], ['[]{}', 'short title for the contents']],
+    subsection: [['*{}', 'unnumbered'], ['[]{}', 'short title for the contents']],
+    subsubsection: [['*{}', 'unnumbered']], chapter: [['*{}', 'unnumbered'], ['[]{}', 'short title for the contents']],
+    paragraph: [['*{}', 'unnumbered']],
+    includegraphics: [['[width=\\linewidth]{}', 'full line width'], ['[width=0.5\\textwidth]{}', 'half the text width'],
+      ['[height=5cm]{}', 'fixed height'], ['[scale=0.5]{}', 'scaled'], ['[angle=90]{}', 'rotated'],
+      ['[width=\\linewidth,height=6cm,keepaspectratio]{}', 'fit in a box'], ['[page=1]{}', 'one page of a PDF'],
+      ['[trim=0 0 0 0,clip]{}', 'cropped: left bottom right top']],
+    cite: [['[]{}', 'with a page or note: \\cite[p.~3]{key}']],
+    citep: [['[]{}', 'with a note (natbib)'], ['[][]{}', 'before and after notes (natbib)']],
+    citet: [['[]{}', 'with a note (natbib)']],
+    caption: [['[]{}', 'short caption for the list of figures']],
+    footnote: [['[]{}', 'with its own number']],
+    sqrt: [['[]{}', 'n-th root']],
+    item: [['[]', 'custom label']],
+    vspace: [['*{}', 'kept at a page break']], hspace: [['*{}', 'kept at a line break']],
+    usepackage: [['[]{}', 'with options']],
+    documentclass: [['{}', ''], ['[11pt,a4paper]{}', 'with options']],
+    newcommand: [['{}[]{}', 'with arguments: \\newcommand{\\name}[1]{… #1 …}'],
+      ['{}[][]{}', 'with an optional first argument']],
+    renewcommand: [['{}{}', ''], ['{}[]{}', 'with arguments']],
+    newenvironment: [['{}{}{}', ''], ['{}[]{}{}', 'with arguments']],
+    label: [['{fig:}', 'figure'], ['{tab:}', 'table'], ['{eq:}', 'equation'], ['{sec:}', 'section']],
+    textcolor: [['{}{}', 'colour, text (xcolor)']], colorbox: [['{}{}', 'colour, text (xcolor)']],
+    resizebox: [['{\\linewidth}{!}{}', 'scale to the line width (graphicx)']],
+    scalebox: [['{}{}', 'factor, content (graphicx)']], rotatebox: [['{}{}', 'angle, content'], ['[origin=c]{}{}', 'about the centre']],
+    multicolumn: [['{}{}{}', 'columns, alignment, text']], multirow: [['{}{}{}', 'rows, width (* = natural), text']],
+    hyperref: [['[]{}', 'link to a label']], input: [], include: [],
+    frac: [], dfrac: [['{}{}', 'display-size fraction (amsmath)']], tfrac: [['{}{}', 'text-size fraction (amsmath)']],
+    overset: [['{}{}', 'over, base']], underset: [['{}{}', 'under, base']],
+    textcite: [['{}', 'Author (year) — biblatex'], ['[]{}', 'with a note — biblatex']],
+    parencite: [['{}', '(Author, year) — biblatex'], ['[]{}', 'with a note — biblatex']],
+    autocite: [['{}', 'biblatex'], ['[]{}', 'with a note — biblatex']],
+    subcaption: [['{}', 'caption of a subfigure (subcaption)']],
+    mathbb: [['{}', 'ℝ, ℕ (amssymb)']], text: [['{}', 'text inside math (amsmath)']],
+    operatorname: [['{}', 'named operator (amsmath)']]
+  };
+  // Common forms of \begin{...}: what follows the name, and what it is for.
+  var LATEX_ENV_FORMS = {
+    figure: [['[htbp]', 'let LaTeX place it'], ['[H]', 'exactly here (float package)'], ['[t]', 'top of a page']],
+    'figure*': [['[t]', 'across both columns']],
+    table: [['[htbp]', 'let LaTeX place it'], ['[H]', 'exactly here (float package)']],
+    tabular: [['{lll}', 'three left columns'], ['{|l|c|r|}', 'ruled columns'], ['{p{3cm}l}', 'a wrapped column']],
+    tabularx: [['{\\linewidth}{lX}', 'full width, X stretches (tabularx)']],
+    minipage: [['{0.5\\textwidth}', 'half width'], ['[t]{0.48\\textwidth}', 'aligned at the top']],
+    enumerate: [['[label=(\\alph*)]', '(a), (b), … (enumitem)']], itemize: [['[noitemsep]', 'compact (enumitem)']],
+    subfigure: [['{0.48\\textwidth}', 'subfigure (subcaption)']],
+    multicols: [['{2}', 'two columns (multicol)']], thebibliography: [['{99}', 'widest label']]
+  };
 
   // What is being completed just before the cursor (`before` is the line up to the cursor), or null.
   function latexContext(before) {
@@ -3709,12 +3767,25 @@
     return uniqueMatches([text], /\\(?:re)?newcommand\*?\s*\{?\s*\\([a-zA-Z]+)/g);
   }
 
+  // The cursor goes into the first empty [] or {} (or the first unfinished value such as {fig:}).
+  function formCursor(apply, nameLength) {
+    var rest = apply.slice(nameLength), m = /\[\]|\{\}|:\}/.exec(rest);
+    return m ? nameLength + m.index + 1 : apply.length;
+  }
+
   function commandOptions(prefix, own) {
     var out = [];
+    var add = function (name, sig, detail) {
+      var apply = '\\' + name + sig;
+      out.push({ label: sig && detail !== '' ? apply : '\\' + name, apply: apply, detail: detail || undefined,
+        back: apply.length - formCursor(apply, name.length + 1) });
+    };
     LATEX_COMMANDS.forEach(function (c) {
       if (c[0].indexOf(prefix) !== 0) return;
-      var args = new Array(c[1] + 1).join('{}');
-      out.push({ label: '\\' + c[0], apply: '\\' + c[0] + args, back: c[1] ? 2 * c[1] - 1 : 0 });
+      add(c[0], new Array(c[1] + 1).join('{}'), '');
+      (LATEX_FORMS[c[0]] || []).forEach(function (f) {
+        if (f[0] !== new Array(c[1] + 1).join('{}')) add(c[0], f[0], f[1]);
+      });
     });
     own.forEach(function (name) {
       if (name.indexOf(prefix) !== 0 || out.some(function (o) { return o.label === '\\' + name; })) return;
@@ -3731,17 +3802,27 @@
     return { text: text, cursor: text.length, consume: 0 };
   }
 
-  function envOptions(prefix) {
-    return LATEX_ENVS.filter(function (e) { return e.indexOf(prefix) === 0; }).map(function (e) { return { label: e }; });
+  // After \\begin{ an environment's common forms are offered too (figure[htbp], tabular{lll}).
+  function envOptions(prefix, withForms) {
+    var out = [];
+    LATEX_ENVS.filter(function (e) { return e.indexOf(prefix) === 0; }).forEach(function (e) {
+      out.push({ label: e, name: e, form: '' });
+      if (withForms) (LATEX_ENV_FORMS[e] || []).forEach(function (f) {
+        out.push({ label: e + f[0], name: e, form: f[0], detail: f[1] });
+      });
+    });
+    return out;
   }
 
   // What replaces the typed environment name (`after` is the rest of the line). After \begin{ the matching \end
   // is added and the cursor goes inside, also when the editor's own auto-closed } is all that follows (it is
   // replaced: `consume`). When more follows, or after \end{, only the name is completed.
-  function envReplacement(name, isBegin, after) {
+  function envReplacement(name, isBegin, after, form) {
+    form = form || '';
     if (!isBegin) return closedReplacement(name, after);
     if (after !== '' && after !== '}') return { text: name, cursor: name.length, consume: 0 };
-    return { text: name + '}\n  \n\\end{' + name + '}', cursor: name.length + 4, consume: after.length };
+    return { text: name + '}' + form + '\n  \n\\end{' + name + '}', cursor: name.length + form.length + 4,
+      consume: after.length };
   }
 
   function citeOptions(prefix, docKeys, rows) {
@@ -3829,9 +3910,9 @@
       }) };
     }
     if (c.kind === 'env') {
-      return { from: from, validFor: /^[a-zA-Z*]*$/, options: envOptions('').map(function (o) {
-        return { label: o.label, type: 'type', apply: function (view, completion, f, t) {
-          var ins = envReplacement(o.label, c.begin, view.state.sliceDoc(t, view.state.doc.lineAt(t).to).trimEnd());
+      return { from: from, validFor: /^[a-zA-Z*]*$/, options: envOptions('', c.begin).map(function (o) {
+        return { label: o.label, detail: o.detail, type: 'type', apply: function (view, completion, f, t) {
+          var ins = envReplacement(o.name, c.begin, view.state.sliceDoc(t, view.state.doc.lineAt(t).to).trimEnd(), o.form);
           put(ins.text, ins.cursor)(view, completion, f, t + ins.consume);
         } };
       }) };

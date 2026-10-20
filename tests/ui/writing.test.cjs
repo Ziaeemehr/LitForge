@@ -1956,3 +1956,33 @@ test('Apply with nothing accepted keeps the suggestion open and says why; Reject
   assert.equal($('write-suggestion').hidden, true);
   assert.deepEqual([...calls.find(c => c[0] === '/api/write/assist/decide')[1].accepted], []);
 });
+
+test('command forms: optional [] arguments, starred and multi-argument forms, cursor in the first empty slot', () => {
+  const { ctx } = setup();
+  const opts = ctx.commandOptions('includegraphics', []);
+  const at = o => o.apply.length - o.back;  // where the cursor lands
+  assert.equal(opts[0].label, '\\includegraphics');
+  assert.equal(opts[0].apply, '\\includegraphics{}');
+  const width = opts.find(o => o.apply === '\\includegraphics[width=\\linewidth]{}');
+  assert.ok(width && width.label === width.apply && /line width/.test(width.detail));
+  assert.equal(width.apply.slice(0, at(width)), '\\includegraphics[width=\\linewidth]{');
+  const sec = ctx.commandOptions('section', []);
+  assert.ok(sec.some(o => o.apply === '\\section*{}'));
+  const short = sec.find(o => o.apply === '\\section[]{}');
+  assert.equal(short.apply.slice(0, at(short)), '\\section[');
+  const item = ctx.commandOptions('item', []).find(o => o.apply === '\\item[]');
+  assert.equal(at(item), '\\item['.length);
+  const fig = ctx.commandOptions('label', []).find(o => o.apply === '\\label{fig:}');
+  assert.equal(fig.apply.slice(0, at(fig)), '\\label{fig:');
+  assert.equal(ctx.commandOptions('section', [])[0].apply, '\\section{}');  // the plain form stays first
+});
+
+test('environment forms after \\begin{ only; the form goes after the name and the cursor inside', () => {
+  const { ctx } = setup();
+  const begin = ctx.envOptions('fig', true).map(o => o.label);
+  assert.ok(begin.includes('figure') && begin.includes('figure[htbp]') && begin.includes('figure[H]'));
+  assert.ok(!ctx.envOptions('fig', false).some(o => o.label === 'figure[htbp]'));
+  assert.deepEqual({ ...ctx.envReplacement('figure', true, '}', '[htbp]') },
+    { text: 'figure}[htbp]\n  \n\\end{figure}', cursor: 'figure}[htbp]\n  '.length, consume: 1 });
+  assert.ok(ctx.envOptions('tab', true).some(o => o.label === 'tabular{lll}'));
+});
