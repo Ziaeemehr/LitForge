@@ -1886,6 +1886,10 @@
     function NoteMarker(id, body) { this.id = id; this.body = body; }
     NoteMarker.prototype = Object.create(CM.GutterMarker.prototype);
     NoteMarker.prototype.constructor = NoteMarker;
+    // The mark sits at the line's start and must stay with the line's text: text inserted at that spot (a git
+    // conflict block, Enter at the line start) goes before it (real run: a note stayed on the conflict block).
+    NoteMarker.prototype.startSide = NoteMarker.prototype.endSide = 1;
+    NoteMarker.prototype.mapMode = 0;  // MapMode.Simple: a deleted line moves its note to where the text was, never drops it
     NoteMarker.prototype.eq = function (other) { return other.id === this.id && other.body === this.body; };
     NoteMarker.prototype.toDOM = function () {
       var dot = document.createElement('span');
@@ -2903,7 +2907,7 @@
     $('write-git-state').textContent = connected ?
       st.remote + ' · ' + (st.branch || '?') + ' · ' + plural((st.changed || []).length, 'changed file') +
       (st.ahead ? ' · ' + st.ahead + ' to push' : '') + (st.behind ? ' · ' + st.behind + ' to pull' : '') +
-      (st.last_sync ? ' · last sync ' + String(st.last_sync).slice(0, 16).replace('T', ' ') : '') :
+      (st.last_sync ? ' · last sync ' + new Date(st.last_sync).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '') :
       'Not connected to a git remote.';
   }
 

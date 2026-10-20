@@ -744,6 +744,11 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
   .write-right iframe { min-height: 60vh; }
 }
 .write-git { padding: 10px 14px; }
+.write-git .ver-head { display: flex; align-items: baseline; gap: 10px; }
+.write-git .ver-head h3 { margin: 0; flex: none; }
+.write-git #write-git-state { flex: 1; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.write-git .ver-head .spacer { display: none; }
+.write-git .btn { width: auto; margin-top: 0; white-space: nowrap; }
 .write-git .git-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 .write-git .git-row input { flex: 1; min-width: 0; font-size: 13px; padding: 5px 8px; border: 1px solid var(--line);
   border-radius: 8px; background: var(--panel); color: var(--ink); }
