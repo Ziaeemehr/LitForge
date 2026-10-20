@@ -274,8 +274,8 @@ def chat(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str, A
     history = body.get("history") if isinstance(body.get("history"), list) else []
     args = (str(body.get("question") or ""), str(body.get("selection") or ""), str(body.get("context") or ""),
             history)
-    pads = {"pad_before": body.get("pad_before") is True, "pad_after": body.get("pad_after") is True}
-    req = wchat.prepare(conn, doc, *args, **pads)
+    pad_before, pad_after = body.get("pad_before") is True, body.get("pad_after") is True
+    req = wchat.prepare(conn, doc, *args, pad_before=pad_before, pad_after=pad_after)
     gateway = app.make_gateway(conn)
     preview = wchat.preview(gateway, req).model_dump()
     sent = {"characters": len(req.question) + len(req.selection or str(body.get("context") or "")[:wchat.MAX_CONTEXT]),
@@ -291,8 +291,8 @@ def chat(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str, A
         job.messages.append(f"Asking {preview['model'] or preview['profile']}…")
         conn = app.db()
         try:
-            job.report = wchat.run(conn, app.make_gateway(conn), doc, wchat.prepare(conn, doc, *args, **pads), file,
-                                   approved=approved)
+            again = wchat.prepare(conn, doc, *args, pad_before=pad_before, pad_after=pad_after)
+            job.report = wchat.run(conn, app.make_gateway(conn), doc, again, file, approved=approved)
         finally:
             conn.close()
 
