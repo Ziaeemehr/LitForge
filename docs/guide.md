@@ -435,6 +435,14 @@ in another editor. Start from the **English article** or **Persian article** tem
   number that is not in your text or the evidence, a citation key that is unknown or not backed by a quote, drop
   LaTeX commands, math, `\cite`, `\ref` or `\label`, or add commands. Suggested citations are kept only when
   their quote is found word for word in the paper.
+- **Suggest title / Suggest abstract** write them from the document's own text (this file and the files it
+  includes), in its language, and replace what is in `\title{...}` or the `abstract` environment; without an
+  abstract, a new one is proposed after `\maketitle`. Numbers that are not in the document are flagged. Tasks:
+  `write_summary`.
+- **Equation from image / Table from image** open a small panel at the cursor: paste a screenshot (Ctrl/Cmd+V)
+  or choose a PNG, JPEG, GIF or WebP file (at most 8 MB). The local vision model (`qwen2.5vl:7b`, task
+  `write_image`) writes the LaTeX, which is proposed for insertion at the cursor on its own lines; check every
+  symbol and number against the image before applying. A cloud route asks before sending the image.
 
 From the command line:
 
