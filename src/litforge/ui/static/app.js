@@ -4587,6 +4587,7 @@
         if (p.name !== 'local' && p.name !== 'local_vision') row.appendChild(modelButton('Remove', function () {
           reviewModelsChange({ action: 'remove', name: p.name, delete_files: !p.remote && window.confirm('Also delete downloaded files owned by this profile?') });
         }));
+        else row.appendChild(document.createElement('span'));  // keeps the buttons in their columns
         $('models-profiles').appendChild(row);
       });
       var provider = $('models-provider'), previous = provider.value;

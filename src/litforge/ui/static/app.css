@@ -810,3 +810,12 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .side-foot .btn.ghost { border: 1px solid var(--line); }
 .app:not(.side-hidden) .side-foot #btn-quit { margin-left: 0; }
 #models-add-tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 12px; }
+/* Your models: name | test result | Test | Assign tasks | Remove, aligned from row to row. */
+#models-profiles > .models-profile { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto) 64px 116px 86px;
+  align-items: center; gap: 8px; margin: 4px 0; padding: 6px 0; border-bottom: 1px solid var(--line); }
+#models-profiles > .models-profile .btn { width: 100%; }
+.models-card .models-test { margin: 0; text-align: right; white-space: nowrap; }
+@media (max-width: 600px) {
+  #models-profiles > .models-profile { grid-template-columns: 1fr 1fr 1fr; }
+  #models-profiles > .models-profile > span:first-child, .models-card .models-test { grid-column: 1 / -1; text-align: left; }
+}
