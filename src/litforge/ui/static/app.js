@@ -4809,7 +4809,7 @@
         var row = document.createElement('div'), text = document.createElement('span'), option = document.createElement('option');
         row.className = 'models-profile'; text.textContent = key.name + ' · ' + key.source; row.appendChild(text);
         option.value = key.name; option.textContent = key.name; $('keys-name').appendChild(option);
-        if (info.available) row.appendChild(modelButton('Remove keychain entry', function () {
+        if (info.available && key.source === 'keychain') row.appendChild(modelButton('Remove keychain entry', function () {
           if (!window.confirm('Remove the system keychain entry for ' + key.name + '? Environment variables stay set.')) return;
           api('/api/keys', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: key.name }) })
             .then(loadKeys).catch(settingsError);

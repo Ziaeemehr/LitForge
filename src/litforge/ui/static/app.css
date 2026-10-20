@@ -809,3 +809,4 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .app:not(.side-hidden) .side-foot .btn { justify-content: flex-start; padding-left: 10px; }
 .side-foot .btn.ghost { border: 1px solid var(--line); }
 .app:not(.side-hidden) .side-foot #btn-quit { margin-left: 0; }
+#models-add-tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 12px; }
