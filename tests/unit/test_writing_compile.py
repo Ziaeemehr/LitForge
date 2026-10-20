@@ -25,15 +25,16 @@ from pathlib import Path
 Path({record!r}).write_text(json.dumps({{"argv": sys.argv, "cwd": os.getcwd(), "env": dict(os.environ)}}))
 mode = Path({mode!r}).read_text() if Path({mode!r}).exists() else "ok"
 out = Path(".build")
+stem = Path(sys.argv[-1]).stem
 if mode == "hang":
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     Path({record!r}).with_suffix(".child").write_text(str(child.pid))
     time.sleep(60)
 ok_log = "(./main.tex\\nLaTeX Warning: Citation `x' on page 1 undefined on input line 7.\\n)"
 log = {log!r} if mode == "error" else ok_log
-(out / "main.log").write_text(log)
+(out / (stem + ".log")).write_text(log)
 if mode != "error":
-    (out / "main.pdf").write_bytes(b"%PDF-1.5 fake")
+    (out / (stem + ".pdf")).write_bytes(b"%PDF-1.5 fake")
 sys.exit(1 if mode == "error" else 0)
 """
 
@@ -52,12 +53,11 @@ def env(tmp_path: Path, monkeypatch):
     create_project(conn, paths, "demo")
     doc = wd.create_document(conn, paths, "demo", "d")
     record, mode = tmp_path / "record.json", tmp_path / "mode"
-    for target in (paths.root / "tools" / "tectonic" / "tectonic", tmp_path / "bin" / "latexmk"):
+    for target in (paths.root / "tools" / "tectonic" / "tectonic", tmp_path / "bin" / "latexmk",
+                   tmp_path / "bin" / "xelatex"):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(FAKE.format(python=sys.executable, record=str(record), mode=str(mode), log=ERROR_LOG))
         target.chmod(0o755)
-    (tmp_path / "bin" / "xelatex").write_text("#!/bin/sh\n")
-    (tmp_path / "bin" / "xelatex").chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setattr(wc, "sandbox_kind", lambda: "scan")
     yield conn, paths, doc, record, mode
@@ -257,3 +257,28 @@ def test_parse_log_returns_to_main_after_a_closed_subfile() -> None:
     errors, warnings = wc.parse_log(log)
     assert [(w.file, w.line) for w in warnings] == [("sections/a.tex", 3), ("main.tex", 14)]
     assert [(e.file, e.line) for e in errors] == [("main.tex", 12)]
+
+
+def test_main_file_from_the_document(env) -> None:
+    conn, paths, doc, record, _ = env
+    (doc.folder / "paper.tex").write_text("\\documentclass{article}\n")
+    doc = wd.set_settings(conn, paths, doc.id, main_file="paper.tex")
+    result = wc.compile_document(doc, paths)
+    assert result.ok and result.pdf == ".build/paper.pdf"
+    assert json.loads(record.read_text())["argv"][-1] == "paper.tex"
+
+
+def test_draft_compile_is_one_pass(env) -> None:
+    conn, paths, doc, record, _ = env
+    doc = wd.set_settings(conn, paths, doc.id, draft=True)
+    assert wc.compile_document(doc, paths, "tectonic").ok
+    argv = json.loads(record.read_text())["argv"]
+    assert argv[argv.index("--reruns") + 1] == "0"
+    assert wc.compile_document(doc, paths, "xelatex").ok
+    argv = json.loads(record.read_text())["argv"]
+    assert Path(argv[0]).name == "xelatex"  # one xelatex run instead of latexmk's
+    assert "-no-shell-escape" in argv and "-output-directory=.build" in argv and "-synctex=1" in argv
+    assert argv[-1] == "main.tex"
+    full = wd.set_settings(conn, paths, doc.id, draft=False)
+    assert wc.compile_document(full, paths, "tectonic").ok
+    assert "--reruns" not in json.loads(record.read_text())["argv"]

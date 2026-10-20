@@ -280,3 +280,38 @@ def test_snapshots_and_names_do_not_race_with_rotation(env, monkeypatch) -> None
     # once named, a version is never rotated away
     assert (doc.folder / ".snapshots" / ids[1]).exists() == named
     assert [s["id"] for s in wd.list_snapshots(doc) if s["name"]] == ([ids[1]] if named else [])
+
+
+# ---- compile settings: engine, main file, draft ----------------------------------------------------------
+
+
+def test_settings_defaults_and_changes(env) -> None:
+    conn, paths = env
+    doc = wd.create_document(conn, paths, "demo", "Paper")
+    assert (doc.main_file, doc.draft) == ("main.tex", False)
+    assert doc.as_dict()["main_file"] == "main.tex" and doc.as_dict()["draft"] is False
+    (doc.folder / "chapters").mkdir()
+    (doc.folder / "chapters" / "thesis.tex").write_text("\\documentclass{report}\n")
+    doc = wd.set_settings(conn, paths, doc.id, main_file="chapters/thesis.tex", draft=True, engine="xelatex")
+    assert (doc.main_file, doc.draft, doc.engine) == ("chapters/thesis.tex", True, "xelatex")
+    assert wd.get_document(conn, paths, doc.id).main_file == "chapters/thesis.tex"
+    doc = wd.set_settings(conn, paths, doc.id, draft=False)  # the others stay
+    assert (doc.main_file, doc.draft, doc.engine) == ("chapters/thesis.tex", False, "xelatex")
+
+
+@pytest.mark.parametrize("bad", ["missing.tex", "references.bib", "../x.tex", ".build/main.tex", "/etc/x.tex", ""])
+def test_main_file_must_be_a_tex_file_in_the_document(env, bad: str) -> None:
+    conn, paths = env
+    doc = wd.create_document(conn, paths, "demo", "Paper")
+    (doc.folder / ".build").mkdir(exist_ok=True)
+    (doc.folder / ".build" / "main.tex").write_text("x")
+    with pytest.raises((DocumentError, ValueError)):
+        wd.set_settings(conn, paths, doc.id, main_file=bad)
+
+
+def test_main_candidates_are_tex_files_with_a_documentclass(env) -> None:
+    conn, paths = env
+    doc = wd.create_document(conn, paths, "demo", "Paper")
+    (doc.folder / "intro.tex").write_text("\\section{Intro}\n% \\documentclass{article}\n")
+    (doc.folder / "poster.tex").write_text("  \\documentclass[a0]{tikzposter}\n")
+    assert wd.main_candidates(doc) == ["main.tex", "poster.tex"]

@@ -413,3 +413,24 @@ def test_only_one_question_at_a_time_even_when_sent_together(tmp_path: Path) -> 
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_settings_route_and_outputs_follow_the_main_file(server) -> None:
+    base, app = server
+    doc = create(base)
+    folder = Path(app.paths.project_dir("demo")) / "writing" / doc["slug"]
+    (folder / "paper.tex").write_text("\\documentclass{article}\n\\begin{document}x\\end{document}\n")
+    status, info = call(base, f"/api/write/doc?doc={doc['id']}")
+    assert info["main_file"] == "main.tex" and info["main_candidates"] == ["main.tex", "paper.tex"]
+    status, changed = call(base, "/api/write/settings", {"doc": doc["id"], "main_file": "paper.tex", "draft": True,
+                                                         "engine": "xelatex"})
+    assert status == 200
+    assert (changed["main_file"], changed["draft"], changed["engine"]) == ("paper.tex", True, "xelatex")
+    assert call(base, "/api/write/settings", {"doc": doc["id"], "main_file": "../x.tex"})[0] == 400
+    (folder / ".build").mkdir(exist_ok=True)
+    (folder / ".build" / "paper.pdf").write_bytes(b"%PDF-1.5 paper")
+    assert call(base, f"/api/write/doc?doc={doc['id']}")[1]["pdf"] is True
+    status, pdf = call(base, f"/api/write/pdf?doc={doc['id']}")
+    assert status == 200 and pdf == b"%PDF-1.5 paper"
+    status, res = call(base, f"/api/write/synctex?doc={doc['id']}&file=paper.tex&line=1")
+    assert status == 404 and "compile" in res["error"]

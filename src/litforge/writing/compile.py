@@ -295,7 +295,8 @@ def _outside(arg: str) -> bool:
 # ---- compile ----------------------------------------------------------------------------------------------
 
 
-def _command(doc: Document, paths: Paths, engine: str, main: str) -> tuple[list[str], dict[str, str], list[Path]]:
+def _command(doc: Document, paths: Paths, engine: str, main: str,
+             draft: bool = False) -> tuple[list[str], dict[str, str], list[Path]]:
     env = {k: v for k, v in os.environ.items() if k in {"PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SystemRoot",
                                                          "USERPROFILE", "TEMP", "TMP", "SSL_CERT_FILE"}}
     if engine == "tectonic":
@@ -305,13 +306,20 @@ def _command(doc: Document, paths: Paths, engine: str, main: str) -> tuple[list[
         cache = tectonic_cache(paths)
         cache.mkdir(parents=True, exist_ok=True)
         env["TECTONIC_CACHE_DIR"] = str(cache)
-        argv = [command, "--untrusted", "--keep-logs", "--synctex", "--chatter", "minimal", "-o", ".build", main]
+        argv = [command, "--untrusted", "--keep-logs", "--synctex", "--chatter", "minimal", "-o", ".build",
+                *(["--reruns", "0"] if draft else []), main]
         return argv, env, [Path(command).resolve().parent, cache.resolve()]
     if engine == "xelatex":
         command = xelatex_command()
         if command is None:
             raise CompileError("latexmk and xelatex were not found; install TeX Live or MacTeX")
         env.update(openout_any="p", openin_any="p", shell_escape="f")
+        if draft:  # one xelatex run instead of latexmk's runs until the references settle
+            single = shutil.which("xelatex")
+            if single is None:
+                raise CompileError("xelatex was not found; install TeX Live or MacTeX")
+            return [single, "-synctex=1", "-no-shell-escape", "-interaction=nonstopmode", "-halt-on-error",
+                    "-file-line-error", "-output-directory=.build", main], env, []
         # -norc: a latexmkrc in the folder is Perl code and must not run.
         argv = [command, "-norc", "-xelatex", "-synctex=1", "-no-shell-escape", "-interaction=nonstopmode",
                 "-halt-on-error", "-file-line-error", "-outdir=.build", main]
@@ -319,9 +327,10 @@ def _command(doc: Document, paths: Paths, engine: str, main: str) -> tuple[list[
     raise CompileError(f"unknown engine {engine}")
 
 
-def compile_document(doc: Document, paths: Paths, engine: str | None = None, *, main: str = "main.tex",
+def compile_document(doc: Document, paths: Paths, engine: str | None = None, *, main: str | None = None,
                      timeout_s: float | None = None) -> CompileResult:
     engine = engine or doc.engine
+    main = main or doc.main_file
     started = time.monotonic()
     folder = doc.folder.resolve()
     if not (folder / main).is_file():
@@ -334,7 +343,7 @@ def compile_document(doc: Document, paths: Paths, engine: str | None = None, *, 
     if build.is_symlink():
         raise CompileError("the build folder must not be a symbolic link")
     build.mkdir(exist_ok=True)
-    argv, env, readable = _command(doc, paths, engine, main)
+    argv, env, readable = _command(doc, paths, engine, main, doc.draft)
     writable = [build, *[p for p in readable if p.name == "tectonic-cache"]]
     if timeout_s is None:
         cache = tectonic_cache(paths)

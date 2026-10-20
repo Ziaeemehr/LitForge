@@ -57,11 +57,18 @@ class Document:
     folder: Path
     created_at: str
     updated_at: str
+    main_file: str = "main.tex"
+    draft: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {"id": self.id, "project": self.project, "name": self.name, "slug": self.slug,
                 "template": self.template, "engine": self.engine, "created_at": self.created_at,
-                "updated_at": self.updated_at}
+                "updated_at": self.updated_at, "main_file": self.main_file, "draft": self.draft}
+
+    @property
+    def output_stem(self) -> str:
+        """The name the engine gives its output: .build/<stem>.pdf, .log and .synctex.gz."""
+        return Path(self.main_file).stem
 
 
 def _lock(doc_id: str) -> threading.RLock:
@@ -109,7 +116,7 @@ def _row_to_doc(paths: Paths, row: sqlite3.Row) -> Document:
     return Document(id=row["id"], project_id=row["project_id"], project=row["project"], name=row["name"],
                     slug=row["slug"], template=row["template"], engine=row["engine"],
                     folder=writing_root(paths, row["project"]) / row["slug"], created_at=row["created_at"],
-                    updated_at=row["updated_at"])
+                    updated_at=row["updated_at"], main_file=row["main_file"], draft=bool(row["draft"]))
 
 
 _SELECT = """SELECT d.*, p.name AS project FROM writing_documents d JOIN projects p ON p.id=d.project_id"""
@@ -175,6 +182,37 @@ def set_engine(conn: sqlite3.Connection, paths: Paths, doc_id: str, engine: str)
     get_document(conn, paths, doc_id)
     conn.execute("UPDATE writing_documents SET engine=? WHERE id=?", (engine, doc_id))
     return get_document(conn, paths, doc_id)
+
+
+def set_settings(conn: sqlite3.Connection, paths: Paths, doc_id: str, *, engine: str | None = None,
+                 main_file: str | None = None, draft: bool | None = None) -> Document:
+    """Change the compile settings given; the others stay."""
+    doc = get_document(conn, paths, doc_id)
+    if engine is not None:
+        doc = set_engine(conn, paths, doc_id, engine)
+    if main_file is not None:
+        target = resolve_inside(doc.folder, main_file)
+        if target.suffix.lower() != ".tex" or not target.is_file():
+            raise DocumentError("the main file must be a .tex file in the document")
+        conn.execute("UPDATE writing_documents SET main_file=? WHERE id=?",
+                     (target.relative_to(doc.folder.resolve()).as_posix(), doc_id))
+    if draft is not None:
+        conn.execute("UPDATE writing_documents SET draft=? WHERE id=?", (int(bool(draft)), doc_id))
+    return get_document(conn, paths, doc_id)
+
+
+_DOCUMENTCLASS = re.compile(r"^(?:[^%\n]|\\%)*?\\documentclass", re.M)
+
+
+def main_candidates(doc: Document) -> list[str]:
+    """The .tex files that can be compiled on their own (they have an uncommented \\documentclass)."""
+    names = []
+    for item in list_files(doc):
+        if item["kind"] == "text" and item["name"].lower().endswith(".tex"):
+            text = (doc.folder / item["name"]).read_text(encoding="utf-8", errors="replace")[:200_000]
+            if _DOCUMENTCLASS.search(text):
+                names.append(item["name"])
+    return sorted(names, key=lambda n: (n != "main.tex", n.count("/"), n))
 
 
 def delete_document(conn: sqlite3.Connection, paths: Paths, doc_id: str) -> Path:
