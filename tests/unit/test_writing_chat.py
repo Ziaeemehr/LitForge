@@ -169,3 +169,17 @@ def test_a_plain_question_without_a_selection_inserts_nothing(env) -> None:
     reply = {"answer": "A scale factor.", "citations": [], "insertion": ""}
     result, _, _ = run(env, "What is a coupling gain?", reply)
     assert result["suggestion"] is None
+
+
+def test_an_inserted_table_may_number_its_rows_but_not_invent_data(env) -> None:
+    conn, paths, doc, _ = env
+
+    def ask(insertion: str):
+        fake = FakeLlm(lambda m: {"answer": "Here.", "citations": [], "insertion": insertion})
+        req = wchat.prepare(conn, doc, "Make a table with 3 rows and 5 columns", context="x\n")
+        return wchat.run(conn, ModelGateway(conn, Config(), providers={"local": fake}), doc, req, "main.tex")
+
+    labels = ask("\\begin{tabular}{ll}\nCol 1 & Col 2 \\\\\nRow 2 & Row 3 \\\\\n\\end{tabular}")["suggestion"]
+    assert labels["hunks"][0]["flags"] == []  # real run: "Col 1 … Col 5" was flagged and pre-rejected
+    data = ask("\\begin{tabular}{ll}\nGain & 3.75 \\\\\nSubjects & 128 \\\\\n\\end{tabular}")["suggestion"]
+    assert any("3.75" in f and "128" in f for f in data["hunks"][0]["flags"])

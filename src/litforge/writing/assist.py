@@ -348,6 +348,8 @@ def suggestion_from(conn: sqlite3.Connection, doc: Document, req: Request, conte
     allowed = _numbers(req.text + " " + req.context).union(*(numbers(span.text) for span in req.evidence.values()))
     if req.action in IMAGE:
         allowed |= _numbers(new_text)  # the numbers come from the image, which only the user can compare
+    if req.action == "insert":  # an added table or list may number its rows and columns (real run: "Col 1")
+        allowed |= {n for n in _numbers(new_text) if n == n.to_integral_value() and 0 <= n <= 20}
     known = set(cited_keys(req.text)) | {c["key"] for c in citations}
     exempt: set[str] | None = None
     if req.action in {"fix", "insert", *IMAGE}:  # new LaTeX is the point of an insertion
