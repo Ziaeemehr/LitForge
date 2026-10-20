@@ -17,7 +17,7 @@ from litforge.discovery.records import WorkRecord
 from litforge.discovery.versions import infer_version
 from litforge.metadata.extract import ExtractedMetadata, extract_metadata, normalize_title
 from litforge.observability import NULL_LOG, EventLog
-from litforge.parsing.markitdown_parser import document_title, is_document
+from litforge.parsing.markitdown_parser import FOLDER_SUFFIXES, document_title, is_document
 from litforge.projects import add_paper
 from litforge.storage.cache import relative_to_root, sha256_file, store_document, store_pdf
 from litforge.storage.db import dumps, new_id, now, transaction
@@ -41,8 +41,9 @@ def iter_pdfs(sources: Iterable[Path], documents: bool = False) -> list[Path]:
     found: list[Path] = []
     for src in sources:
         if src.is_dir():
-            found += [p for p in src.rglob("*") if p.is_file() and not p.name.startswith(".")
-                      and (p.suffix.lower() == ".pdf" or (documents and is_document(p)))]
+            found += [p for p in src.rglob("*") if p.is_file()
+                      and not any(part.startswith(".") for part in p.relative_to(src).parts)
+                      and (p.suffix.lower() == ".pdf" or (documents and p.suffix.lower() in FOLDER_SUFFIXES))]
         elif src.is_file():
             found.append(src)
     return sorted({p.resolve() for p in found})
@@ -220,7 +221,13 @@ def ingest_document(conn: sqlite3.Connection, paths: Paths, path: Path, project_
     """Add one document that is not a PDF: stored with its own extension, a new paper titled by its first
     heading (or its file name). Its text is read later by the MarkItDown parser."""
     sha = sha256_file(path)
-    existing = conn.execute("SELECT id, paper_id FROM artifacts WHERE sha256=?", (sha,)).fetchone()
+    existing = conn.execute("SELECT id, paper_id, status FROM artifacts WHERE sha256=?", (sha,)).fetchone()
+    if existing is not None and existing["status"] == "quarantined":
+        # The same bytes were once taken for a broken PDF (a name that lost its extension): read them now.
+        with transaction(conn):
+            conn.execute("DELETE FROM artifact_aliases WHERE artifact_id=?", (existing["id"],))
+            conn.execute("DELETE FROM artifacts WHERE id=?", (existing["id"],))
+        existing = None
     if existing is not None:
         with transaction(conn):
             _add_alias(conn, existing["id"], path)
@@ -254,8 +261,11 @@ def ingest_paths(
     log: EventLog = NULL_LOG,
 ) -> list[IngestResult]:
     results = []
-    for pdf in iter_pdfs(sources):
+    for pdf in iter_pdfs(sources, documents=True):
         try:
+            if is_document(pdf) and not dry_run:
+                results.append(ingest_document(conn, paths, pdf, project_id, log))
+                continue
             results.append(ingest_file(conn, paths, pdf, project_id, dry_run, log))
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the batch
             log.emit("ingest.error", path=str(pdf), error=repr(exc))

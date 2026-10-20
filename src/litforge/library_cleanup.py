@@ -29,6 +29,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from litforge.config import Paths
+from litforge.parsing.markitdown_parser import DOCUMENT_SUFFIXES
 
 
 class RemovalPaper(BaseModel):
@@ -125,12 +126,15 @@ def _plan(
             continue
         assert paper is not None
         preview.papers.append(RemovalPaper(id=paper_id, title=paper['title']))
-        for artifact in conn.execute('SELECT sha256 FROM artifacts WHERE paper_id=?', (paper_id,)):
+        for artifact in conn.execute('SELECT sha256, pdf_path FROM artifacts WHERE paper_id=?', (paper_id,)):
             sha = artifact['sha256']
             if not re.fullmatch(r'[0-9a-f]{64}', sha):
                 preview.file_errors.append(FileIssue(path=str(sha), reason='invalid artifact SHA256; files kept'))
                 continue
-            for path, parsed in ((paths.pdfs / f'{sha}.pdf', False), (paths.parsed / sha, True)):
+            # The stored original: <sha>.pdf, or a document with its own extension (.docx, .html…).
+            suffix = Path(str(artifact['pdf_path'] or '')).suffix.lower()
+            stored = paths.pdfs / f'{sha}{suffix if suffix in DOCUMENT_SUFFIXES else ".pdf"}'
+            for path, parsed in ((stored, False), (paths.parsed / sha, True)):
                 try:
                     _safe_path(paths, path)
                     if not path.exists():

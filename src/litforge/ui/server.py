@@ -1703,7 +1703,9 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 return self._error(HTTPStatus.BAD_REQUEST, "not a PDF or a supported document")
             uploads = app.paths.root / "uploads"
             uploads.mkdir(parents=True, exist_ok=True)
-            safe = re.sub(r"[^\w.\-]+", "_", Path(name).name)[:100] or "paper.pdf"
+            clean = re.sub(r"[^\w.\-]+", "_", Path(name).name)
+            suffix = Path(clean).suffix[:10]  # a long name keeps its extension (review: "….docx" became "….do")
+            safe = (clean[:100 - len(suffix)] + suffix) if len(clean) > 100 else clean or "paper.pdf"
             tmp = uploads / f".{uuid.uuid4().hex}.part"
             tmp.write_bytes(data)
             dest = uploads / f"{sha256_file(tmp)[:12]}-{safe}"

@@ -211,7 +211,7 @@
     }
     html += left ? '<p>The ' + left + ' paper' + (left === 1 ? '' : 's') + ' below still need' + (left === 1 ? 's' : '') +
       ' a PDF; under each title is why it could not be downloaded. Get them in your browser, then add them with ' +
-      '+ New → My PDFs.</p>' : '<p>Every listed paper now has its PDF.</p>';
+      '+ New → My sources.</p>' : '<p>Every listed paper now has its PDF.</p>';
     $('missing-report').innerHTML = html;
     $('missing-report').hidden = false;
     if ($('report-export')) $('report-export').onclick = function () { $('missing').close(); $('btn-export').click(); };
@@ -1608,7 +1608,7 @@
 
   /* ---------- my PDFs ---------- */
 
-  // What the Export menu in the header covers, said as the My PDFs form and its report say it.
+  // What the Export menu in the header covers, said as the My sources form and its report say it.
   var SCOPE_WORDS = { all: 'all papers of the project', relevant: 'the papers marked ✓',
     'not-irrelevant': 'all papers except ✗', visible: 'the visible list and the added papers' };
   function scopeWords() { return SCOPE_WORDS[$('export-scope').value] || SCOPE_WORDS.all; }
@@ -1672,6 +1672,7 @@
 
   // PDFs and the documents MarkItDown reads (Word, PowerPoint, Excel, HTML, EPUB, Markdown, text).
   function isPdf(f) { return /\.(pdf|docx|pptx|xlsx|html?|epub|md|markdown|txt)$/i.test(f.name); }
+  function inFolder(f) { return /\.(pdf|docx|pptx|xlsx|epub)$/i.test(f.name); }
 
   // A dropped folder arrives as a directory entry: walk it (readEntries returns batches).
   function readEntry(entry) {
@@ -1682,7 +1683,11 @@
       (function next() {
         reader.readEntries(function (batch) {
           if (!batch.length) {
-            Promise.all(all.map(readEntry)).then(function (lists) { ok([].concat.apply([], lists)); });
+            // Inside a folder: PDFs and Office/EPUB documents only, never hidden folders (as on the server).
+            var kept = all.filter(function (e) {
+              return e.name.charAt(0) !== '.' && (e.isDirectory || inFolder(e));
+            });
+            Promise.all(kept.map(readEntry)).then(function (lists) { ok([].concat.apply([], lists)); });
             return;
           }
           all = all.concat(Array.prototype.slice.call(batch));
@@ -1701,9 +1706,13 @@
     }
     $('pick-pdfs').onclick = function (e) { e.preventDefault(); $('files-pdfs').click(); };
     $('pick-dir').onclick = function (e) { e.preventDefault(); $('dir-pdfs').click(); };
-    ['files-pdfs', 'dir-pdfs'].forEach(function (id) {
-      $(id).onchange = function () { add(Array.prototype.slice.call(this.files)); this.value = ''; };
-    });
+    $('files-pdfs').onchange = function () { add(Array.prototype.slice.call(this.files)); this.value = ''; };
+    $('dir-pdfs').onchange = function () {  // a folder: PDFs and Office/EPUB documents, no hidden folders
+      add(Array.prototype.filter.call(this.files, function (f) {
+        return inFolder(f) && !/(^|\/)\./.test(f.webkitRelativePath || f.name);
+      }));
+      this.value = '';
+    };
     zone.ondragover = function (e) { e.preventDefault(); zone.classList.add('over'); };
     zone.ondragleave = function () { zone.classList.remove('over'); };
     zone.ondrop = function (e) {
@@ -1792,7 +1801,7 @@
     $('pdfs-export-wrap').hidden = mode !== 'pdfs';
     $('btn-more').hidden = mode !== 'similar';
     $('btn-run').textContent = { similar: 'Find similar papers', search: 'Search', 'import': 'Import list',
-      pdfs: $('pdfs-export').checked ? 'Add PDFs & export' : 'Add PDFs' }[mode];
+      pdfs: $('pdfs-export').checked ? 'Add sources & export' : 'Add sources' }[mode];
     store.set('mode', mode);
   }
 

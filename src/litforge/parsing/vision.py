@@ -316,7 +316,9 @@ def _project_runs(conn: sqlite3.Connection, project_id: str, only: str,
             WHERE pp.project_id = ?{MARK_SCOPES[only]}""", (project_id,))}
     if paper_ids is not None:
         allowed &= set(paper_ids)
-    return [r for r in current_runs(conn, project_id) if r["paper_id"] in allowed and r["status"] != "failed"]
+    # Documents (Word, HTML…) have no pages to rewrite: left out of both the cost preview and the run.
+    return [r for r in current_runs(conn, project_id) if r["paper_id"] in allowed and r["status"] != "failed"
+            and r["parser"] != "markitdown"]
 
 
 def plan_project(conn: sqlite3.Connection, paths: Paths, project_id: str,
@@ -355,8 +357,6 @@ def enhance_project(
         row = conn.execute("SELECT p.title, a.pdf_path FROM papers p JOIN artifacts a ON a.paper_id = p.id"
                            " WHERE a.id=?", (run["artifact_id"],)).fetchone()
         title = row["title"] or run["paper_id"]
-        if not str(row["pdf_path"]).lower().endswith(".pdf"):  # a document's text needs no page rewriting
-            continue
         label = f"[{i}/{len(runs)}] {title[:70]}"
         progress(label)
 

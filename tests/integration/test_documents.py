@@ -84,7 +84,9 @@ def test_documents_are_added_read_exported_and_not_served_as_pdf(conn: sqlite3.C
                                       "<p>Text from the web.</p></body></html>", encoding="utf-8")
     (folder / "program.exe").write_bytes(b"MZ")  # not a document: ignored
 
-    report, results, parsed = add_pdfs(conn, paths, config, pid, [folder], "my documents")
+    # A folder brings its Word file; Markdown and web pages are taken when chosen one by one.
+    report, results, parsed = add_pdfs(conn, paths, config, pid, [folder, folder / "notes.md", folder / "page.html"],
+                                       "my documents")
     assert sorted(Path(r.path).name for r in results) == ["draft.docx", "notes.md", "page.html"]
     assert {p.status for p in parsed} == {"ok"} and {p.parser for p in parsed} == {"markitdown"}
     titles = sorted(r["title"] for r in conn.execute(
@@ -108,3 +110,84 @@ def test_documents_are_added_read_exported_and_not_served_as_pdf(conn: sqlite3.C
 
     again, results2, _ = add_pdfs(conn, paths, config, pid, [folder / "notes.md"], "again")
     assert [r.status for r in results2] == ["duplicate"]
+
+
+def _sample(folder: Path, name: str) -> Path:
+    from openpyxl import Workbook
+    from pptx import Presentation
+    path = folder / name
+    if name.endswith(".pptx"):
+        deck = Presentation()
+        slide = deck.slides.add_slide(deck.slide_layouts[0])
+        slide.shapes.title.text = "Deck title"
+        slide.placeholders[1].text = "Results of the fit"
+        deck.save(path)
+    elif name.endswith(".xlsx"):
+        book = Workbook()
+        book.active.append(["Gain", "Fit"])
+        book.active.append([3.25, 0.61])
+        book.save(path)
+    else:
+        path.write_text("<html><head><title>Real Title</title></head><body><nav>Home | About</nav><h1>Heading</h1>"
+                        "<p>Body <img src='https://tracker.example/x.png' alt='a chart'></p></body></html>")
+    return path
+
+
+def test_titles_of_slides_sheets_and_web_pages(tmp_path: Path) -> None:
+    # Review: a deck's title was "<!-- Slide number: 1 -->", a workbook's "Sheet", a page's its menu text.
+    from litforge.parsing.markitdown_parser import document_title
+    assert document_title(_sample(tmp_path, "deck.pptx")) == "Deck title"
+    assert document_title(_sample(tmp_path, "results-2024.xlsx")) is None  # the file name is used instead
+    assert document_title(_sample(tmp_path, "page.html")) == "Real Title"
+
+
+def test_remote_images_are_not_kept(tmp_path: Path) -> None:
+    from litforge.parsing.markitdown_parser import markdown_of
+    text = markdown_of(_sample(tmp_path, "page.html"))
+    assert "tracker.example" not in text and "a chart" in text
+
+
+def test_folders_bring_pdfs_and_office_documents_not_every_text_file(tmp_path: Path) -> None:
+    # Review: a Zotero storage folder or an export folder turned every .html/.md/.txt into a paper.
+    from litforge.ingest import iter_pdfs
+    folder = tmp_path / "papers"
+    (folder / ".hidden").mkdir(parents=True)
+    for name in ("a.pdf", "b.docx", "c.pptx", "d.epub", "notes.txt", "README.md", "snapshot.html", ".hidden/e.docx"):
+        (folder / name).write_bytes(b"x")
+    assert sorted(p.name for p in iter_pdfs([folder], documents=True)) == ["a.pdf", "b.docx", "c.pptx", "d.epub"]
+    loose = folder / "notes.txt"
+    assert iter_pdfs([loose], documents=True) == [loose.resolve()]  # a file chosen by hand is always taken
+
+
+def test_a_quarantined_file_can_be_added_again_as_a_document(conn: sqlite3.Connection, paths: Paths,
+                                                             config: Config, tmp_path: Path) -> None:
+    # Review: a Word file whose long name lost its extension was quarantined as "not a PDF"; every later
+    # upload was then skipped as a duplicate with no paper.
+    from litforge.ingest import ingest_file
+    pid = create_project(conn, paths, "docs")
+    doc = _docx(tmp_path / "draft.docx", [("Title", "Neural mass models"), ("", "Text.")])
+    wrong = tmp_path / "draft.do"
+    wrong.write_bytes(doc.read_bytes())
+    assert ingest_file(conn, paths, wrong, pid).status == "quarantined"
+    report, results, parsed = add_pdfs(conn, paths, config, pid, [doc], "again")
+    assert [r.status for r in results] == ["new"] and results[0].paper_id and parsed[0].status == "ok"
+
+
+def test_ingest_command_and_removals_handle_documents(conn: sqlite3.Connection, paths: Paths, config: Config,
+                                                      tmp_path: Path) -> None:
+    from litforge.export.markdown import remove_export
+    from litforge.ingest import ingest_paths
+    from litforge.library_cleanup import remove_papers
+    pid = create_project(conn, paths, "docs")
+    doc = _docx(tmp_path / "draft.docx", [("Title", "Neural mass models"), ("", "Text.")])
+    [res] = ingest_paths(conn, paths, [doc], pid)  # `litforge ingest draft.docx`
+    assert res.status == "new" and res.paper_id
+    stored = paths.root / conn.execute("SELECT pdf_path FROM artifacts WHERE id=?", (res.artifact_id,)).fetchone()[0]
+    assert stored.suffix == ".docx"
+    out, _ = export_markdown(conn, paths, "docs", pid, config=config)
+    assert list((out.parent / "pdfs").glob("*.docx"))
+    remove_export(out.parent)
+    assert not (out.parent / "pdfs").exists()  # review: the copied .docx was left behind
+    conn.execute("DELETE FROM project_papers WHERE paper_id=?", (res.paper_id,))
+    remove_papers(conn, paths, [res.paper_id])
+    assert not stored.exists()  # review: removing the paper left the .docx in the library

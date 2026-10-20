@@ -331,7 +331,7 @@ parses and indexes it like `add`, so exports contain the full text. `--only not-
 `--only all` widens the selection. Paywalled papers are reported and skipped; add their PDFs with
 `add`.
 
-In the web page, **+ New → My PDFs** also takes:
+In the web page, **+ New → My sources** also takes:
 
 - **Links to articles**, one per line: the article's own page (its DOI is read from the tags publishers add for
   indexers, never from the page's reference list), a `doi.org`, arXiv or OpenAlex link, or a direct PDF link. Each

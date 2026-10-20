@@ -192,7 +192,8 @@ def _remove_pdfs(pdf_dir: Path, slugs: set[str]) -> None:
     if not pdf_dir.is_dir():
         return
     for slug in slugs:
-        (pdf_dir / f"{slug}.pdf").unlink(missing_ok=True)
+        for suffix in (".pdf", *DOCUMENT_SUFFIXES):  # the PDF or the document copied for this note
+            (pdf_dir / f"{slug}{suffix}").unlink(missing_ok=True)
     if not any(pdf_dir.iterdir()):
         pdf_dir.rmdir()
 

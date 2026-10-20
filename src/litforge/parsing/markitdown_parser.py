@@ -13,6 +13,11 @@ from litforge.parsing.base import PageInfo, Paragraph, ParsedDocument, Section, 
 
 DOCUMENT_SUFFIXES = {".docx", ".pptx", ".xlsx", ".html", ".htm", ".epub", ".md", ".markdown", ".txt"}
 PLAIN_SUFFIXES = {".md", ".markdown", ".txt"}
+# A folder brings PDFs and these; web pages, notes and Markdown only when chosen one by one (review: a Zotero
+# storage or export folder turned every snapshot and note into a paper).
+FOLDER_SUFFIXES = {".docx", ".pptx", ".xlsx", ".epub"}
+MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
+_REMOTE_IMAGE = re.compile(r"!\[([^\]]*)\]\((?:https?:)?//[^)]*\)")
 INSTALL_HINT = "install the documents extra: uv sync --extra documents --inexact"
 _HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 
@@ -30,13 +35,24 @@ def markitdown_available() -> bool:
 
 
 def markdown_of(path: Path) -> str:
+    return _convert(path)[0]
+
+
+def _convert(path: Path) -> tuple[str, str | None]:
+    """The document as Markdown, and the title it declares (an HTML page's <title>). Images from the web are
+    reduced to their description: the page would otherwise load them when the text is shown."""
+    if path.stat().st_size > MAX_DOCUMENT_BYTES:
+        raise RuntimeError(f"document larger than {MAX_DOCUMENT_BYTES // 2**20} MB")
     if path.suffix.lower() in PLAIN_SUFFIXES:
-        return path.read_text(encoding="utf-8", errors="replace")
-    try:
-        from markitdown import MarkItDown
-    except ImportError as exc:
-        raise RuntimeError(f"{path.suffix} files need MarkItDown: {INSTALL_HINT}") from exc
-    return str(MarkItDown(enable_plugins=False).convert(str(path)).text_content or "")
+        text, title = path.read_text(encoding="utf-8", errors="replace"), None
+    else:
+        try:
+            from markitdown import MarkItDown
+        except ImportError as exc:
+            raise RuntimeError(f"{path.suffix} files need MarkItDown: {INSTALL_HINT}") from exc
+        result = MarkItDown(enable_plugins=False).convert(str(path))
+        text, title = str(result.text_content or ""), (result.title or "").strip() or None
+    return _REMOTE_IMAGE.sub(lambda m: m.group(1), text), title
 
 
 def document_from_markdown(markdown: str, parser: str, version: str) -> tuple[ParsedDocument, str | None]:
@@ -72,7 +88,8 @@ def document_from_markdown(markdown: str, parser: str, version: str) -> tuple[Pa
     if current.heading is not None or current.paragraphs:
         sections.append(current)
     # The first line is the title when it is short, as a reader sees it (Word's "Title" style is not a heading).
-    first = next((ln.strip().lstrip("#").strip() for ln in markdown.split("\n") if ln.strip()), "")
+    first = next((ln.strip().lstrip("#").strip() for ln in markdown.split("\n")
+                  if ln.strip() and not ln.strip().startswith("<!--")), "")  # PowerPoint: <!-- Slide number -->
     if first and len(first) <= 200 and not first.startswith(("|", "-", "*", "!")):
         title = first
     text = "\n\n".join(p.text for s in sections for p in s.paragraphs)
@@ -82,12 +99,16 @@ def document_from_markdown(markdown: str, parser: str, version: str) -> tuple[Pa
 
 
 def document_title(path: Path) -> str | None:
-    """The document's first heading (or the HTML <title>), for its library record."""
+    """The title the document declares (an HTML <title>), else its first line or heading; None for a workbook,
+    whose first heading is only a sheet name, so its file name is used."""
+    if path.suffix.lower() == ".xlsx":
+        return None
     try:
-        _doc, title = document_from_markdown(markdown_of(path), "markitdown", "")
+        text, declared = _convert(path)
+        _doc, title = document_from_markdown(text, "markitdown", "")
     except Exception:  # noqa: BLE001 - a title is optional; reading errors show up when the file is parsed
         return None
-    return title
+    return declared or title
 
 
 class MarkItDownParser:
