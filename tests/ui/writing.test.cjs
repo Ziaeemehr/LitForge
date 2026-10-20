@@ -1512,3 +1512,51 @@ test('countWords: \\bibliographystyle and figure options are not words', () => {
   assert.equal(ctx.countWords('\\begin{document}\n\\begin{figure}[h]\\centering\\caption{An equation.}\\end{figure}\n' +
     '\\bibliographystyle{plain}\n\\bibliography{refs}\n\\end{document}'), 2);
 });
+
+/* ---- editor basics round 3: Codex review ---- */
+
+test('outline titles leave out comments, and an escaped \\\\section is not a heading', () => {
+  const { ctx } = setup();
+  const items = [...ctx.outlineOf('\\section{Visible% secret\n title}\nA line\\\\section{Fake}\n\\\\\\section{Real}')];
+  assert.deepEqual(items.map(i => i.title), ['Visible title', 'Real']);
+  assert.equal(ctx.titleRange('a\\\\title{Fake}'), null);
+  assert.equal(ctx.abstractRange('\\\\begin{abstract}x\\end{abstract}'), null);
+});
+
+test('countWords: an escaped dollar is not math', () => {
+  const { ctx } = setup();
+  assert.equal(ctx.countWords('Pay \\$5 and $x$ today'), 4);
+  assert.equal(ctx.countWords('50\\% of \\$ and \\& more'), 4);
+});
+
+test('settings requests run one after another, and a late failure leaves another document alone', async () => {
+  const replies = [];
+  const doc = { id: 'd1', name: 'A', main_file: 'main.tex', draft: false, engine: 'tectonic', pdf: false,
+    main_candidates: ['main.tex'], files: [{ name: 'main.tex', kind: 'text' }] };
+  const { ctx, $, calls } = setup({
+    get: url => url.startsWith('/api/write/doc?') ? doc : null,
+    post: (url, body) => {
+      if (url !== '/api/write/settings') return null;
+      return new Promise((resolve, reject) => replies.push({ body, resolve, reject }));
+    }
+  });
+  await ctx.openWriteDoc('d1');
+  const on = ctx.changeWriteSettings({ draft: true });
+  const off = ctx.changeWriteSettings({ draft: false });
+  await new Promise(r => setImmediate(r));
+  assert.equal(replies.length, 1);  // the second waits for the first
+  replies[0].resolve({ ...doc, draft: true });
+  await on; await new Promise(r => setImmediate(r));
+  assert.equal(replies.length, 2);
+  replies[1].resolve({ ...doc, draft: false });
+  await off;
+  assert.equal($('write-draft').checked, false); assert.equal(ctx.W.doc.draft, false);
+  const failing = ctx.changeWriteSettings({ engine: 'xelatex' });
+  await new Promise(r => setImmediate(r));
+  ctx.W.doc = { ...doc, id: 'd2', engine: 'xelatex' };
+  $('write-engine-pick').value = 'xelatex';
+  replies[2].reject(new Error('boom'));
+  await failing;
+  assert.equal($('write-engine-pick').value, 'xelatex');  // d2's controls are untouched
+  assert.ok(calls.some(c => c[0] === 'toast' && c[1] === 'boom'));
+});

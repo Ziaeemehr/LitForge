@@ -68,8 +68,22 @@ class Document:
 
     @property
     def output_stem(self) -> str:
-        """The name the engine gives its output: .build/<stem>.pdf, .log and .synctex.gz."""
+        """The name the engine gives its output: <output_dir>/<stem>.pdf, .log and .synctex.gz."""
         return Path(self.main_file).stem
+
+    @property
+    def output_dir(self) -> str:
+        return output_dir_for(self.main_file)
+
+    def output(self, suffix: str) -> str:
+        return f"{self.output_dir}/{self.output_stem}{suffix}"
+
+
+def output_dir_for(main: str) -> str:
+    """Where a main file's output goes: .build, or .build/<folder> for a main file in a folder, so a/main.tex and
+    b/main.tex never share (and show) each other's PDF."""
+    parent = PurePosixPath(main).parent.as_posix()
+    return ".build" if parent == "." else f".build/{parent}"
 
 
 def _lock(doc_id: str) -> threading.RLock:

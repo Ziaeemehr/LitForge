@@ -409,6 +409,17 @@ in another editor. Start from the **English article** or **Persian article** tem
 - **Spelling.** English and Persian words are checked as you write (commands, citation keys, labels, math and
   comments are skipped); right-click an underlined word for suggestions, *Add to my dictionary* or *Ignore*. The
   **Spelling** button turns it off. Persian words joined with a half-space pass when every part is a word.
+- **Outline** opens the sections of the open file beside the editor (the one the cursor is in is highlighted);
+  click one to jump there, or an included file (`\input`) to open it. The toolbar shows the file's **word count**:
+  the text only, without commands, math, citations and comments, Persian words included.
+- **More** holds the compile settings: the **main file** (any `.tex` with a `\documentclass`, for a thesis or an
+  Overleaf project whose file is not `main.tex`), the **engine** (Tectonic, or XeLaTeX from TeX Live via `latexmk`)
+  and **Draft compile** (one engine pass: faster while writing, but references may show `??` until a full
+  compile). **Download as ZIP** saves the document's files (without versions or build output).
+- **Import ZIP** on the document list makes a new document from a `.zip`: an Overleaf download, a journal template
+  or a LitForge export. The main file is found by its `\documentclass`, and cited papers go into the `.bib` file the
+  main file names (`\bibliography{refs}` → `refs.bib`). ZIPs of at most 100 MB, 2000 files and 200 MB unpacked are
+  accepted; links and paths outside the document are refused.
 - **Compile** (Ctrl/Cmd+Enter) builds the PDF shown on the right. Errors and warnings appear under the editor with
   their line; click one to jump to it. Install the engine once in Settings → Optional tools (Tectonic); the first
   compile downloads the LaTeX packages it needs (about two minutes), later compiles take about a second and work

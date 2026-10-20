@@ -25,6 +25,12 @@ from pathlib import Path
 Path({record!r}).write_text(json.dumps({{"argv": sys.argv, "cwd": os.getcwd(), "env": dict(os.environ)}}))
 mode = Path({mode!r}).read_text() if Path({mode!r}).exists() else "ok"
 out = Path(".build")
+for i, a in enumerate(sys.argv):
+    if a == "-o":
+        out = Path(sys.argv[i + 1])
+    elif a.startswith(("-outdir=", "-output-directory=")):
+        out = Path(a.split("=", 1)[1])
+out.mkdir(parents=True, exist_ok=True)
 stem = Path(sys.argv[-1]).stem
 if mode == "hang":
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
@@ -282,3 +288,19 @@ def test_draft_compile_is_one_pass(env) -> None:
     full = wd.set_settings(conn, paths, doc.id, draft=False)
     assert wc.compile_document(full, paths, "tectonic").ok
     assert "--reruns" not in json.loads(record.read_text())["argv"]
+
+
+def test_mains_with_the_same_name_in_different_folders_keep_their_own_outputs(env) -> None:
+    conn, paths, doc, record, _ = env
+    for folder in ("a", "b"):
+        (doc.folder / folder).mkdir()
+        (doc.folder / folder / "main.tex").write_text("\\documentclass{article}\n")
+    a = wd.set_settings(conn, paths, doc.id, main_file="a/main.tex")
+    assert a.output_dir == ".build/a"
+    result = wc.compile_document(a, paths, "tectonic")
+    argv = json.loads(record.read_text())["argv"]
+    assert argv[argv.index("-o") + 1] == ".build/a" and result.pdf == ".build/a/main.pdf"
+    b = wd.set_settings(conn, paths, doc.id, main_file="b/main.tex")
+    assert not (doc.folder / b.output_dir / "main.pdf").exists()  # a's PDF is not shown as b's
+    assert wd.get_document(conn, paths, doc.id).output_dir == ".build/b"
+    assert wd.set_settings(conn, paths, doc.id, main_file="main.tex").output_dir == ".build"

@@ -527,3 +527,17 @@ def test_archive_handler_without_socket(tmp_path):
     assert b"400" in head and b"100 MB" in payload
     head, payload = request("POST", "/api/write/import?project=demo&name=Bad", b"bad")
     assert b"400" in head and b"ZIP" in payload
+
+
+def test_settings_wait_for_a_running_compile(server) -> None:
+    from litforge.ui.server import Job
+
+    base, app = server
+    doc = create(base)
+    app.jobs["busy"] = Job(id="busy", kind="writing-compile", project=doc["id"], status="running")
+    try:
+        status, res = call(base, "/api/write/settings", {"doc": doc["id"], "draft": True})
+        assert status == 400 and "compil" in res["error"]
+    finally:
+        app.jobs.pop("busy")
+    assert call(base, "/api/write/settings", {"doc": doc["id"], "draft": True})[0] == 200

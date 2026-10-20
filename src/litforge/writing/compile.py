@@ -23,7 +23,7 @@ from typing import Any
 from litforge.config import Paths
 from litforge.jobs import check_cancelled
 from litforge.parsing.mineru_parser import _run_command
-from litforge.writing.documents import TEXT_SUFFIXES, Document, list_files
+from litforge.writing.documents import TEXT_SUFFIXES, Document, list_files, output_dir_for
 
 TECTONIC_VERSION = "0.17.0"
 _RELEASE = "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%40" + TECTONIC_VERSION
@@ -295,8 +295,8 @@ def _outside(arg: str) -> bool:
 # ---- compile ----------------------------------------------------------------------------------------------
 
 
-def _command(doc: Document, paths: Paths, engine: str, main: str,
-             draft: bool = False) -> tuple[list[str], dict[str, str], list[Path]]:
+def _command(doc: Document, paths: Paths, engine: str, main: str, draft: bool = False,
+             out_dir: str = ".build") -> tuple[list[str], dict[str, str], list[Path]]:
     env = {k: v for k, v in os.environ.items() if k in {"PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SystemRoot",
                                                          "USERPROFILE", "TEMP", "TMP", "SSL_CERT_FILE"}}
     if engine == "tectonic":
@@ -306,7 +306,7 @@ def _command(doc: Document, paths: Paths, engine: str, main: str,
         cache = tectonic_cache(paths)
         cache.mkdir(parents=True, exist_ok=True)
         env["TECTONIC_CACHE_DIR"] = str(cache)
-        argv = [command, "--untrusted", "--keep-logs", "--synctex", "--chatter", "minimal", "-o", ".build",
+        argv = [command, "--untrusted", "--keep-logs", "--synctex", "--chatter", "minimal", "-o", out_dir,
                 *(["--reruns", "0"] if draft else []), main]
         return argv, env, [Path(command).resolve().parent, cache.resolve()]
     if engine == "xelatex":
@@ -319,10 +319,10 @@ def _command(doc: Document, paths: Paths, engine: str, main: str,
             if single is None:
                 raise CompileError("xelatex was not found; install TeX Live or MacTeX")
             return [single, "-synctex=1", "-no-shell-escape", "-interaction=nonstopmode", "-halt-on-error",
-                    "-file-line-error", "-output-directory=.build", main], env, []
+                    "-file-line-error", f"-output-directory={out_dir}", main], env, []
         # -norc: a latexmkrc in the folder is Perl code and must not run.
         argv = [command, "-norc", "-xelatex", "-synctex=1", "-no-shell-escape", "-interaction=nonstopmode",
-                "-halt-on-error", "-file-line-error", "-outdir=.build", main]
+                "-halt-on-error", "-file-line-error", f"-outdir={out_dir}", main]
         return argv, env, []
     raise CompileError(f"unknown engine {engine}")
 
@@ -343,7 +343,10 @@ def compile_document(doc: Document, paths: Paths, engine: str | None = None, *, 
     if build.is_symlink():
         raise CompileError("the build folder must not be a symbolic link")
     build.mkdir(exist_ok=True)
-    argv, env, readable = _command(doc, paths, engine, main, doc.draft)
+    out_dir = output_dir_for(main)
+    out = folder / out_dir
+    out.mkdir(parents=True, exist_ok=True)
+    argv, env, readable = _command(doc, paths, engine, main, doc.draft, out_dir)
     writable = [build, *[p for p in readable if p.name == "tectonic-cache"]]
     if timeout_s is None:
         cache = tectonic_cache(paths)
@@ -368,7 +371,7 @@ def compile_document(doc: Document, paths: Paths, engine: str | None = None, *, 
                                  errors=[LogItem(f"compilation took longer than {timeout_s:.0f} s and was stopped")],
                                  log=tail)
     stem = Path(main).stem
-    log_file = build / f"{stem}.log"
+    log_file = out / f"{stem}.log"
     log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.is_file() else ""
     errors, warnings = parse_log(log)
     if completed.returncode and not errors:
@@ -376,10 +379,10 @@ def compile_document(doc: Document, paths: Paths, engine: str | None = None, *, 
                       if line.strip().startswith(("error:", "caused by:")))
         if not errors:
             errors.append(LogItem(f"the engine stopped with exit code {completed.returncode}"))
-    pdf = build / f"{stem}.pdf"
+    pdf = out / f"{stem}.pdf"
     ok = completed.returncode == 0 and pdf.is_file()
     return CompileResult(ok, engine, kind, (time.monotonic() - started) * 1000,
-                         f".build/{stem}.pdf" if pdf.is_file() else None, errors, warnings,
+                         f"{out_dir}/{stem}.pdf" if pdf.is_file() else None, errors, warnings,
                          (log or completed.stderr)[-64_000:])
 
 

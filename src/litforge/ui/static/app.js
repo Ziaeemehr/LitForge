@@ -2802,9 +2802,10 @@
     var re = /\\(part|chapter|section|subsection|subsubsection|paragraph|input|include)\b\*?\s*(\[[^\]]*\])?\s*\{/g;
     var lineAt = function (pos) { return text.slice(0, pos).split('\n').length; };
     while ((m = re.exec(plain))) {
+      if (escapedAt(plain, m.index)) continue;
       var open = m.index + m[0].length - 1, close = closingBrace(plain, open);
       if (close < 0) continue;
-      var arg = text.slice(open + 1, close);
+      var arg = plain.slice(open + 1, close);  // comments inside the heading are blanked out
       if (m[1] === 'input' || m[1] === 'include') {
         var name = arg.trim();
         if (name) items.push({ kind: 'file', name: /\.[a-z]+$/i.test(name) ? name : name + '.tex', line: lineAt(m.index) });
@@ -2825,7 +2826,7 @@
 
   // Words of the text a reader sees: the document body without commands, math, citations, labels and comments.
   function countWords(text) {
-    var t = stripComments(text), begin = t.indexOf('\\begin{document}'), end = t.indexOf('\\end{document}');
+    var t = stripComments(text).replace(/\\[$%&#_{}]/g, ' '), begin = t.indexOf('\\begin{document}'), end = t.indexOf('\\end{document}');
     if (end >= 0) t = t.slice(0, end);
     if (begin >= 0) t = t.slice(begin + '\\begin{document}'.length);
     t = t.replace(/\\begin\{(equation|align|gather|multline|eqnarray|math|displaymath)(\*?)\}[\s\S]*?\\end\{\1\2\}/g, ' ')
@@ -2882,9 +2883,12 @@
     $('write-export').href = '/api/write/export.zip?doc=' + encodeURIComponent(doc.id);
   }
 
+  // One request at a time: replies arriving out of order would leave the controls showing an older setting.
   function changeWriteSettings(patch) {
     var doc = W.doc;
-    return post('/api/write/settings', Object.assign({ doc: doc.id }, patch)).then(function (res) {
+    W.settingsChain = (W.settingsChain || Promise.resolve()).then(function () {
+      return post('/api/write/settings', Object.assign({ doc: doc.id }, patch));
+    }).then(function (res) {
       if (W.doc !== doc) return;
       ['engine', 'main_file', 'draft'].forEach(function (k) { doc[k] = res[k]; });
       fillWriteSettings(doc);
@@ -2893,7 +2897,8 @@
           if (W.doc === doc) showWritePdf(info.pdf);
         });
       }
-    }).catch(function (e) { toast(e.message); fillWriteSettings(doc); });
+    }).catch(function (e) { toast(e.message); if (W.doc === doc) fillWriteSettings(doc); });
+    return W.settingsChain;
   }
 
   var IMPORT_MAX = 100 * 1024 * 1024;  // as on the server
@@ -3332,28 +3337,42 @@
   }
 
   // The text inside \title{...} (after an optional [short title]), or null.
+  // A backslash right after an odd number of backslashes is the second half of \\ (a line break), not a command.
+  function escapedAt(text, pos) {
+    var n = 0;
+    while (pos - n - 1 >= 0 && text[pos - n - 1] === '\\') n++;
+    return n % 2 === 1;
+  }
+
+  // The first match of `re` (a /g pattern) that is a real command: not escaped, not in a comment.
+  function commandMatch(plain, re, from) {
+    re.lastIndex = from || 0;
+    for (var m = re.exec(plain); m; m = re.exec(plain)) if (!escapedAt(plain, m.index)) return m;
+    return null;
+  }
+
   // Both read the text with its comments blanked out: a commented \title or } does not count.
   function titleRange(text) {
-    var plain = maskComments(text), m = /\\title\s*(?:\[[^\]]*\])?\s*\{/.exec(plain);
+    var plain = maskComments(text), m = commandMatch(plain, /\\title\s*(?:\[[^\]]*\])?\s*\{/g);
     if (!m) return null;
     var open = m.index + m[0].length - 1, close = closingBrace(plain, open);
     return close < 0 ? null : { from: open + 1, to: close };
   }
 
   function abstractRange(text) {
-    var plain = maskComments(text), at = plain.indexOf('\\begin{abstract}');
-    if (at < 0) return null;
-    var from = at + '\\begin{abstract}'.length, to = plain.indexOf('\\end{abstract}', from);
-    return to < 0 ? null : { from: from, to: to };
+    var plain = maskComments(text), m = commandMatch(plain, /\\begin\{abstract\}/g);
+    if (!m) return null;
+    var from = m.index + m[0].length, end = commandMatch(plain, /\\end\{abstract\}/g, from);
+    return end ? { from: from, to: end.index } : null;
   }
 
   // Where a new abstract goes: on the line after \maketitle, else after the \begin{document} line; -1 if neither.
   function abstractInsertAt(text) {
-    var plain = maskComments(text), names = ['\\maketitle', '\\begin{document}'];
+    var plain = maskComments(text), names = [/\\maketitle(?![a-zA-Z])/g, /\\begin\{document\}/g];
     for (var n = 0; n < names.length; n++) {
-      var at = plain.indexOf(names[n]);
-      if (at < 0) continue;
-      var end = text.indexOf('\n', at);
+      var m = commandMatch(plain, names[n]);
+      if (!m) continue;
+      var end = text.indexOf('\n', m.index);
       return end < 0 ? text.length : end + 1;
     }
     return -1;

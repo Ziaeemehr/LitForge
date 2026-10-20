@@ -37,7 +37,7 @@ _START = threading.Lock()  # one model job per document and kind  # document id 
 
 def synctex_lookup(doc: wd.Document, query: dict[str, str]) -> dict[str, Any] | None:
     """Forward (file, line) or inverse (page, x, y) lookup in the last compile's SyncTeX file."""
-    path = wd.resolve_inside(doc.folder, f".build/{doc.output_stem}.synctex.gz", allow_hidden=True)
+    path = wd.resolve_inside(doc.folder, doc.output(".synctex.gz"), allow_hidden=True)
     if not path.is_file():
         raise LookupError("no position data yet; compile the document first")
     stat = path.stat()
@@ -68,7 +68,7 @@ def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) ->
     if path == "/api/write/doc":
         doc = _doc(conn, app, query)
         return {**doc.as_dict(), "files": wd.list_files(doc), "main_candidates": wd.main_candidates(doc),
-                "pdf": (doc.folder / ".build" / f"{doc.output_stem}.pdf").is_file()}
+                "pdf": (doc.folder / doc.output(".pdf")).is_file()}
     if path == "/api/write/file":
         doc = _doc(conn, app, query)
         text, digest = wd.read_file(doc, query.get("name") or "main.tex")
@@ -95,7 +95,7 @@ def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) ->
         return warchive.export_zip(doc), "application/zip", f'attachment; filename="{doc.slug}.zip"'
     if path == "/api/write/pdf":
         doc = _doc(conn, app, query)
-        pdf = wd.resolve_inside(doc.folder, f".build/{doc.output_stem}.pdf", allow_hidden=True)
+        pdf = wd.resolve_inside(doc.folder, doc.output(".pdf"), allow_hidden=True)
         if not pdf.is_file():
             raise LookupError("no PDF yet; compile the document first")
         return pdf.read_bytes(), "application/pdf"
@@ -118,6 +118,8 @@ def post(app: App, conn: sqlite3.Connection, path: str, body: dict[str, Any]) ->
     if path == "/api/write/rename":
         return wd.rename_document(conn, app.paths, doc.id, str(body.get("name") or "")).as_dict()
     if path == "/api/write/settings":
+        if app_busy(app, doc.id):  # the running compile uses the settings it started with
+            raise ValueError("wait for the compile to finish before changing the settings")
         draft = body.get("draft")
         return wd.set_settings(conn, app.paths, doc.id, engine=body.get("engine") or None,
                                main_file=body.get("main_file") or None,
