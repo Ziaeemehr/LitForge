@@ -12,7 +12,7 @@
     mode: 'similar', projects: [], project: store.get('project', null), runId: null, data: null,
     filter: '', oa: false, onlyNew: false, hide: false, channel: null, sort: store.get('sort', 'score'),
     screenFilter: '', criteria: null, criteriaFor: null, criteriaLoading: null,
-    sel: -1, view: [], page: 'new', pdf: null, list: null, pdfs: [], missing: [], fetchReasons: {}, job: null,
+    sel: -1, view: [], page: 'new', seedPdfs: [], list: null, pdfs: [], missing: [], fetchReasons: {}, job: null,
     anchor: -1, exportsRoot: '', dirEdited: false, consolePlan: null, consoleRunId: null,
     libraryAllVersions: store.get('library-all-versions', false)
   };
@@ -1547,22 +1547,36 @@
     closeDrawer();
   }
 
-  function uploadPdf() {
-    if (!state.pdf) return Promise.resolve(null);
-    logLine('uploading ' + state.pdf.name);
-    return api('/api/upload?name=' + encodeURIComponent(state.pdf.name), { method: 'POST', body: state.pdf })
-      .then(function (r) { return r.path; });
+  /* ---------- Seed PDFs ---------- */
+  // The PDFs of a "Find similar" search; the same file picked twice is kept once.
+  function addSeedPdfs(list, picked) {
+    var out = list.slice();
+    picked.forEach(function (f) {
+      if (!out.some(function (g) { return g.name === f.name && g.size === f.size; })) out.push(f);
+    });
+    return out;
   }
+
+  // One upload at a time, in order; resolves to the saved paths.
+  function uploadSeedPdfs(files) {
+    return files.reduce(function (done, f, i) {
+      return done.then(function (paths) {
+        logLine('uploading ' + (files.length > 1 ? (i + 1) + '/' + files.length + ' ' : '') + f.name);
+        return api('/api/upload?name=' + encodeURIComponent(f.name), { method: 'POST', body: f })
+          .then(function (r) { return paths.concat([r.path]); });
+      });
+    }, Promise.resolve([]));
+  }
+  /* ---------- End Seed PDFs ---------- */
 
   function run() {
     if (state.mode === 'similar') {
       var seed = $('seed').value.trim(), title = $('title').value.trim(), abstract = $('abstract').value.trim();
-      if (!seed && !title && !abstract && !state.pdf) { toast('Give a DOI, a PDF, a title or an abstract'); return; }
+      if (!seed && !title && !abstract && !state.seedPdfs.length) { toast('Give a DOI, a PDF, a title or an abstract'); return; }
       setBusy(true);
       $('progress').innerHTML = '';
-      uploadPdf().then(function (path) {
-        var seeds = seed ? seed.split(/[\s,]+/).filter(Boolean) : [];
-        if (path) seeds.push(path);
+      uploadSeedPdfs(state.seedPdfs).then(function (paths) {
+        var seeds = (seed ? seed.split(/[\s,]+/).filter(Boolean) : []).concat(paths);
         setBusy(false);
         startSimilar({ seeds: seeds, title: title, abstract: abstract });
       }).catch(function (e) { setBusy(false); toast(e.message); });
@@ -1769,14 +1783,23 @@
     store.set('mode', mode);
   }
 
-  function dropZone(zone, input, pick, accept, onFile) {
+  // `multi`: onFile gets the list of every accepted file instead of the first file.
+  function dropZone(zone, input, pick, accept, onFile, multi) {
     pick.onclick = function (e) { e.preventDefault(); input.click(); };
-    input.onchange = function () { if (input.files[0]) onFile(input.files[0]); };
+    input.onchange = function () {
+      if (multi && input.files.length) onFile(Array.prototype.slice.call(input.files));
+      else if (input.files[0]) onFile(input.files[0]);
+    };
     zone.ondragover = function (e) { e.preventDefault(); zone.classList.add('over'); };
     zone.ondragleave = function () { zone.classList.remove('over'); };
     zone.ondrop = function (e) {
       e.preventDefault();
       zone.classList.remove('over');
+      if (multi) {
+        var ok = Array.prototype.filter.call(e.dataTransfer.files, function (f) { return accept.test(f.name); });
+        if (ok.length) onFile(ok); else toast('Unsupported file');
+        return;
+      }
       var f = e.dataTransfer.files[0];
       if (f && accept.test(f.name)) onFile(f); else toast('Unsupported file');
     };
@@ -5660,11 +5683,20 @@
     $('sort').value = state.sort;
 
     var drop = $('drop'), dropHtml = drop.innerHTML;
-    function resetPdf() { state.pdf = null; $('file').value = ''; drop.innerHTML = dropHtml; wirePdf(); }
-    function wirePdf() {
-      dropZone(drop, $('file'), $('pick'), /\.pdf$/i, function (f) { state.pdf = f; showFile(drop, f, resetPdf); });
+    function showSeedPdfs() {
+      drop.innerHTML = !state.seedPdfs.length ? dropHtml : state.seedPdfs.map(function (f, i) {
+        return '<span class="file">' + esc(f.name) + '</span> · <a href="#" data-remove="' + i + '">remove</a>';
+      }).join('<br>') + '<br><a href="#" id="pick">add more</a>';
+      drop.querySelectorAll('[data-remove]').forEach(function (a) {
+        a.onclick = function (e) { e.preventDefault(); state.seedPdfs.splice(Number(a.dataset.remove), 1); showSeedPdfs(); };
+      });
+      dropZone(drop, $('file'), $('pick'), /\.pdf$/i, function (files) {
+        state.seedPdfs = addSeedPdfs(state.seedPdfs, files);
+        $('file').value = '';
+        showSeedPdfs();
+      }, true);
     }
-    wirePdf();
+    showSeedPdfs();
     var dropList = $('drop-list'), listHtml = dropList.innerHTML;
     function resetList() { state.list = null; $('file-list').value = ''; dropList.innerHTML = listHtml; wireList(); }
     function wireList() {
