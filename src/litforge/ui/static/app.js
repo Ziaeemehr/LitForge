@@ -1522,7 +1522,7 @@
           toast('Stopped');
           return;
         }
-        if (j.status === 'failed') { logLine(j.error, 'err'); toast({ export: 'Export failed', pdfs: 'Adding PDFs failed', screen: 'Screening failed', setup: 'Setting up the vision model failed' }[j.kind] || 'Search failed'); return; }
+        if (j.status === 'failed') { logLine(j.error, 'err'); toast({ export: 'Export failed', pdfs: 'Adding PDFs failed', links: 'Adding links failed', screen: 'Screening failed', setup: 'Setting up the vision model failed' }[j.kind] || 'Search failed'); return; }
         if (j.kind === 'setup') { toast('Better math (high) is ready; exporting'); $('btn-export').click(); return; }
         if (j.kind === 'export') toast(j.messages[j.messages.length - 1].replace(/^done: /, ''));
         if (j.kind === 'pdfs' && j.report) showAddReport(j.report);
@@ -1622,9 +1622,21 @@
 
   // Upload the chosen files one by one (the server keeps them only until they are in the library),
   // then add them together with the typed folder as one background job.
+  // Links to articles: each paper joins the project and its open-access PDF is downloaded and read.
+  function addLinks(links) {
+    setBusy(true);
+    $('progress').innerHTML = '';
+    return post('/api/links', Object.assign(common(), { links: links }))
+      .then(function (job) { $('pdf-links').value = ''; poll(job); })
+      .catch(function (e) { setBusy(false); toast(e.message); });
+  }
+
   function addPdfs() {
     var folder = $('pdf-folder').value.trim(), files = state.pdfs.slice();
-    if (!folder && !files.length) { toast('Give a folder or drop PDF files'); return; }
+    var links = $('pdf-links').value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+    if (links.length && (folder || files.length)) { toast('Add the links and the PDFs one at a time'); return; }
+    if (links.length) return addLinks(links);
+    if (!folder && !files.length) { toast('Give a folder, drop PDF files or paste links'); return; }
     setBusy(true);
     $('progress').innerHTML = '';
     var uploaded = [];

@@ -265,6 +265,8 @@
           · <a href="#" id="pick-dir">choose a folder</a></div>
         <input type="file" id="files-pdfs" accept="application/pdf" multiple hidden>
         <input type="file" id="dir-pdfs" webkitdirectory multiple hidden>
+        <label class="f" for="pdf-links">or links to articles <small>(one per line: the article's page, a doi.org or arXiv link, or a PDF link)</small></label>
+        <textarea id="pdf-links" rows="3" placeholder="https://www.nature.com/articles/…&#10;https://arxiv.org/abs/2007.09114"></textarea>
         <p class="hint">Each PDF is added to the library once (identical files are recognized), its text is
           extracted, and it is attached to a matching paper found earlier. The papers then appear as a run you
           can mark ✓.</p>

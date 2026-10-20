@@ -50,6 +50,7 @@ from litforge.console import planner
 from litforge.console.actions import ActionContext
 from litforge.discovery.fetch import fetch_open_access
 from litforge.discovery.http import HttpClient
+from litforge.discovery.links import run_links
 from litforge.discovery.run import Sources, run_import, run_search
 from litforge.discovery.similar import run_similar
 from litforge.discovery.textsim import Embedder, load_embedder
@@ -706,6 +707,49 @@ class App:
 
         return self.start_job("search", project, work)
 
+    def links_job(self, body: dict[str, Any]) -> Job:
+        """Add papers from links (article pages, doi.org/arXiv/OpenAlex links): each paper joins the project and
+        its open-access PDF is downloaded and read; direct PDF links are read like the user's own PDFs."""
+        links = [str(u).strip() for u in body.get("links") or [] if str(u).strip()]
+        if not links:
+            raise ValueError("paste at least one link")
+        if len(links) > 50:
+            raise ValueError("at most 50 links at a time")
+        conn = self.db()
+        project = str(body.get("project") or "default")
+        pid = self.ensure_project(conn, project, body.get("export_dir"))
+        conn.close()
+
+        def work(job: Job) -> str | None:
+            c = self.db()
+            pdfs: list[str] = []
+            ids: list[str] = []
+            try:
+                report, pdfs = run_links(c, self.sources(), self.paths, pid, links, progress=job.messages.append)
+                job.messages += [f"warning: {e}" for e in report.errors]
+                ids = api.run_paper_ids(c, report.run_id, limit=len(links))
+                if ids:
+                    found = fetch_open_access(c, self.paths, self.config, self.make_http(), pid, "all", ids,
+                                              self.log, progress=job.messages.append,
+                                              mailto=contact_email(self.paths, self.config))
+                    job.messages.append(f"{found.downloaded} of {found.candidates} missing PDFs downloaded, "
+                                        f"{found.parsed} with full text" + (f"; {found.no_source} have no "
+                                        "open-access copy" if found.no_source else ""))
+                run_id = report.run_id
+                if pdfs:
+                    added, _results, _parsed = add_pdfs(c, self.paths, self.config, pid, [Path(f) for f in pdfs],
+                                                       "PDF links", self.log, progress=job.messages.append)
+                    run_id = run_id if ids else added.run_id
+            finally:
+                c.close()
+                for f in pdfs:  # the library keeps its own copy
+                    Path(f).unlink(missing_ok=True)
+            job.messages.append(f"done: {len(ids)} papers from links"
+                                + (f", {len(pdfs)} PDF link(s) read" if pdfs else ""))
+            return run_id
+
+        return self.start_job("links", project, work)
+
     def add_job(self, body: dict[str, Any]) -> Job:
         """Add PDFs from a folder on this computer and/or files uploaded from the page. With `export`
         ({"only": ..., "paper_ids": ...}, as for /api/export) the project's notes are exported afterwards.
@@ -1250,6 +1294,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(app.search_job(body).__dict__)
                 if url.path == "/api/add":
                     return self._json(app.add_job(body).__dict__)
+                if url.path == "/api/links":
+                    return self._json(app.links_job(body).__dict__)
                 if url.path == "/api/screen":
                     return self._json(app.screen_job(body).__dict__)
                 if url.path == "/api/criteria":
