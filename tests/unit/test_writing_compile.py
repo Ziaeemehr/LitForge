@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 import tarfile
 import time
@@ -135,14 +136,23 @@ def test_missing_engine_message(env, monkeypatch) -> None:
         wc.compile_document(doc, paths, "tectonic")
 
 
-def test_macos_profile_denies_home_and_allows_document(tmp_path: Path) -> None:
+def test_macos_profile_reads_only_allowed_paths(tmp_path: Path) -> None:
     folder = tmp_path / "doc"
     profile = wc.macos_profile(folder, [tmp_path / "engine"], [folder / ".build"], tmp_path / "scratch", network=False)
-    deny_read, allow_read = (line for line in profile.splitlines() if "file-read" in line)
-    assert '"/Users"' in deny_read and "/private/var/folders" in deny_read and "/private/etc" in deny_read
+    read = next(line for line in profile.splitlines() if "file-read-data" in line)
+    assert read.startswith("(deny file-read-data (require-not (require-any")  # an allowlist, not a denylist
+    allowed = set(re.findall(r'\(subpath "([^"]+)"\)', read))
+    assert {str(folder), str(tmp_path / "engine"), str(tmp_path / "scratch"), "/System", "/usr"} <= allowed
+    assert not {"/Users", "/private/tmp", "/private/var/folders", "/Volumes", "/private/etc"} & allowed
+    assert not any(p == str(Path.home()) or str(Path.home()).startswith(p + "/") for p in allowed)
     assert "(deny network*)" in profile and '(literal "/dev/null")' in profile
-    assert str(folder) in allow_read and str(tmp_path / "engine") in allow_read
     assert str(folder / ".build") in next(line for line in profile.splitlines() if "file-write" in line)
+
+
+def test_macos_profile_legacy_denylist_on_request(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("LITFORGE_MAC_SANDBOX", "denylist")
+    profile = wc.macos_profile(tmp_path / "doc", [], [tmp_path / "doc" / ".build"], tmp_path / "scratch")
+    assert '(deny file-read* (subpath "/Users")' in profile
 
 
 def test_bwrap_hides_home(tmp_path: Path) -> None:

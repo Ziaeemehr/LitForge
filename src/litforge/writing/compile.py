@@ -198,22 +198,42 @@ def _sb_quote(path: Path | str) -> str:
     return '"' + str(path).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+# macOS: reads of file contents are denied everywhere except the system (/usr covers MacTeX's /usr/local/texlive),
+# the document, the engine, its cache and fonts. Metadata (stat) stays readable: dyld and path lookups need it.
+MAC_SYSTEM = ["/System", "/usr", "/bin", "/sbin", "/Library/Fonts", "/Library/TeX", "/Library/Apple",
+              "/opt/homebrew", "/opt/local", "/private/var/db/dyld", "/private/var/db/timezone",
+              "/private/etc/ssl", "/private/etc/hosts", "/private/etc/resolv.conf", "/private/etc/localtime",
+              "/private/etc/services", "/private/etc/protocols", "/private/etc/texmf", "/dev"]
+
+
+def _write_rule(writable: list[Path], scratch: Path) -> str:
+    return ("(deny file-write* (require-not (require-any " +
+            " ".join(f"(subpath {_sb_quote(p)})" for p in [*writable, scratch]) +
+            ' (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))))')
+
+
 def macos_profile(folder: Path, readable: list[Path], writable: list[Path], scratch: Path,
                   network: bool = True) -> str:
-    """Deny reads of user files (all home folders, temp folders, volumes) except the document, the engine, its
-    cache and fonts; allow writes only to the build folder, the cache and a private temp folder. The network is
-    left on only for Tectonic, which downloads LaTeX packages on first use."""
-    denied = [Path("/Users"), Path("/private/tmp"), Path("/private/var/folders"), Path("/Volumes"),
-              Path("/private/etc"), Path("/private/var/root")]
-    allowed = [folder, *readable, *writable, scratch, Path.home().resolve() / "Library" / "Fonts",
-               Path("/private/etc/ssl"), Path("/private/etc/hosts"), Path("/private/etc/resolv.conf"),
-               Path("/private/etc/localtime")]
-    lines = ["(version 1)", "(allow default)",
-             "(deny file-read* " + " ".join(f"(subpath {_sb_quote(p)})" for p in denied) + ")",
-             "(allow file-read* " + " ".join(f"(subpath {_sb_quote(p)})" for p in allowed) + ")",
-             "(deny file-write* (require-not (require-any " + " ".join(
-                 f"(subpath {_sb_quote(p)})" for p in [*writable, scratch]) +
-             ' (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper"))))']
+    """Allow reading file contents only from the system, TeX, the document, the engine, its cache and fonts; allow
+    writes only to the build folder, the cache and a private temp folder. The network is left on only for Tectonic,
+    which downloads LaTeX packages on first use. LITFORGE_MAC_SANDBOX=denylist restores the older, looser profile
+    in case a TeX installation needs a path missing here."""
+    fonts = Path.home().resolve() / "Library" / "Fonts"
+    if os.environ.get("LITFORGE_MAC_SANDBOX") == "denylist":
+        denied = [Path("/Users"), Path("/private/tmp"), Path("/private/var/folders"), Path("/Volumes"),
+                  Path("/private/etc"), Path("/private/var/root")]
+        allowed = [folder, *readable, *writable, scratch, fonts,
+                   *map(Path, ["/private/etc/ssl", "/private/etc/hosts", "/private/etc/resolv.conf",
+                               "/private/etc/localtime"])]
+        lines = ["(version 1)", "(allow default)",
+                 "(deny file-read* " + " ".join(f"(subpath {_sb_quote(p)})" for p in denied) + ")",
+                 "(allow file-read* " + " ".join(f"(subpath {_sb_quote(p)})" for p in allowed) + ")"]
+    else:
+        allowed = [*map(Path, MAC_SYSTEM), folder, *readable, *writable, scratch, fonts]
+        lines = ["(version 1)", "(allow default)",
+                 "(deny file-read-data (require-not (require-any " +
+                 " ".join(f"(subpath {_sb_quote(p)})" for p in allowed) + ' (literal "/"))))']
+    lines.append(_write_rule(writable, scratch))
     if not network:
         lines.append("(deny network*)")
     return "\n".join(lines) + "\n"
