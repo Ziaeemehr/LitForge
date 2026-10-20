@@ -7,6 +7,7 @@ import os
 import plistlib
 import shlex
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -26,7 +27,7 @@ def create_shortcut(platform: str, home: Path, workdir: Path, exe: Path, icon: P
     if platform == "win32":
         return [_windows(home, workdir, exe, gui_exe)]
     if platform == "darwin":
-        return [_mac_app(home / "Applications" / "LitForge.app", workdir, exe)]
+        return [_mac_app(home / "Applications" / "LitForge.app", workdir, exe, icon)]
     entry = [
         "[Desktop Entry]",
         "Type=Application",
@@ -48,14 +49,42 @@ def create_shortcut(platform: str, home: Path, workdir: Path, exe: Path, icon: P
     return written
 
 
-def _mac_app(app: Path, workdir: Path, exe: Path) -> Path:
+def _mac_app(app: Path, workdir: Path, exe: Path, icon: Path | None = None) -> Path:
     """A minimal LitForge.app (Launchpad, Spotlight, Dock) whose executable is a shell script: no Terminal window."""
     script = f"#!/bin/sh\ncd {shlex.quote(str(workdir))} || exit 1\nexec {shlex.quote(str(exe))} ui\n"
     _write(app / "Contents" / "MacOS" / "LitForge", script, executable=True)
     info = {"CFBundleName": "LitForge", "CFBundleExecutable": "LitForge", "CFBundleIdentifier": "org.litforge.app",
             "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "1.0"}
+    if icon is not None:
+        icns = app / "Contents" / "Resources" / "LitForge.icns"
+        icns.parent.mkdir(parents=True, exist_ok=True)
+        if _make_icns(icon, icns):
+            info["CFBundleIconFile"] = "LitForge"
     (app / "Contents" / "Info.plist").write_bytes(plistlib.dumps(info))
+    os.utime(app)  # Finder and the Dock re-read the icon of a bundle whose date changed
     return app
+
+
+def _make_icns(svg: Path, out: Path) -> bool:
+    """Render `svg` into a macOS .icns with the system's own tools; False (no icon, generic one shown) if any fails."""
+    with tempfile.TemporaryDirectory() as tmp:
+        png = Path(tmp) / f"{svg.name}.png"  # qlmanage names its thumbnail after the source file
+        iconset = Path(tmp) / "LitForge.iconset"
+        iconset.mkdir()
+        try:
+            subprocess.run(["qlmanage", "-t", "-s", "1024", "-o", tmp, str(svg)],  # noqa: S603, S607
+                           check=True, capture_output=True, timeout=60)
+            for size in (16, 32, 128, 256, 512):
+                for scale, suffix in ((1, ""), (2, "@2x")):
+                    px = str(size * scale)
+                    subprocess.run(["sips", "-z", px, px, str(png),  # noqa: S603, S607
+                                    "--out", str(iconset / f"icon_{size}x{size}{suffix}.png")],
+                                   check=True, capture_output=True, timeout=60)
+            subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(out)],  # noqa: S603, S607
+                           check=True, capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return False
+    return out.is_file()
 
 
 def _windows(home: Path, workdir: Path, exe: Path, gui_exe: Path | None) -> Path:
