@@ -177,7 +177,8 @@ def _create_document(conn: sqlite3.Connection, paths: Paths, project: str, name:
                    VALUES (?,?,?,?,?,'tectonic',?,?)""", (doc_id, pid, name, slug, template, ts, ts))
             populate(get_document(conn, paths, doc_id))
             (folder / "figures").mkdir(exist_ok=True)
-            (folder / "references.bib").touch(exist_ok=True)
+            if template != "imported":  # an imported paper names its own .bib (cite.bib_file)
+                (folder / "references.bib").touch(exist_ok=True)
             (folder / ".snapshots").mkdir(exist_ok=True)
             doc = get_document(conn, paths, doc_id)
         return doc

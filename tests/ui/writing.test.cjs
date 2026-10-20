@@ -1506,3 +1506,9 @@ test('importing a ZIP posts the file and opens the new document', async () => {
   await ctx.importWriteZip({ name: 'big.zip', size: 101 * 1024 * 1024 });
   assert.ok(calls.some(c => c[0] === 'toast' && /at most 100 MB/.test(c[1])));
 });
+
+test('countWords: \\bibliographystyle and figure options are not words', () => {
+  const { ctx } = setup();
+  assert.equal(ctx.countWords('\\begin{document}\n\\begin{figure}[h]\\centering\\caption{An equation.}\\end{figure}\n' +
+    '\\bibliographystyle{plain}\n\\bibliography{refs}\n\\end{document}'), 2);
+});

@@ -65,8 +65,8 @@ def test_import_layout_and_main(env, prefix, main):
     doc = load(env, packed([(prefix + main, TEX), (prefix + "section.tex", b"body"),
                             ("__MACOSX/._main.tex", b"junk"), (prefix + ".DS_Store", b"junk")]))
     assert doc.main_file == main
-    assert {f["name"] for f in wd.list_files(doc)} == {main, "section.tex", "references.bib"}
-    assert (doc.folder / "references.bib").read_bytes() == b""
+    # No empty references.bib: an imported paper names its own .bib, which LitForge then writes to.
+    assert {f["name"] for f in wd.list_files(doc)} == {main, "section.tex"}
 
 
 def test_main_preferred(env):

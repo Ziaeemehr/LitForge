@@ -2831,7 +2831,7 @@
     t = t.replace(/\\begin\{(equation|align|gather|multline|eqnarray|math|displaymath)(\*?)\}[\s\S]*?\\end\{\1\2\}/g, ' ')
       .replace(/\$\$[\s\S]*?\$\$|\$(?:\\.|[^$\\])*\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]/g, ' ')
       .replace(/\\begin\{(?:tabular|array|tabularx)\*?\}(?:\[[^\]]*\])?\{(?:[^{}]|\{[^{}]*\})*\}/g, ' ')
-      .replace(/\\(?:[a-zA-Z]*cite[a-zA-Z]*|[a-zA-Z]*ref|label|usepackage|documentclass|begin|end|includegraphics|input|include|bibliography|bibliographystyle|url|hspace|vspace|setlength|newcommand|renewcommand)\*?(?:\[[^\]]*\])*(?:\{[^{}]*\})?/g, ' ')
+      .replace(/\\(?:[a-zA-Z]*cite[a-zA-Z]*|[a-zA-Z]*ref|label|usepackage|documentclass|begin|end|includegraphics|input|include|bibliographystyle|bibliography|url|hspace|vspace|setlength|newcommand|renewcommand)(?![a-zA-Z])\*?(?:\[[^\]]*\])*(?:\{[^{}]*\})?(?:\[[^\]]*\])*/g, ' ')
       .replace(/\\[a-zA-Z]+\*?/g, ' ').replace(/\\./g, ' ');
     var words = t.match(/[\p{L}\p{N}][\p{L}\p{N}\p{M}'\u2019\u200c-]*/gu);
     return words ? words.length : 0;

@@ -102,3 +102,29 @@ def test_search_library_matches_the_start_of_a_citation_key(env) -> None:
     key = citation_key(conn, "p1")
     assert [r["paper_id"] for r in wc.search_library(conn, doc.project_id, key[:-2])] == ["p1"]
     assert wc.search_library(conn, doc.project_id, key[2:6] + "zz") == []
+
+
+@pytest.mark.parametrize(("line", "target"), [
+    ("\\bibliography{references}", "references.bib"),
+    ("\\bibliography{refs,other}", "refs.bib"),
+    ("\\addbibresource[label=x]{lib/my.bib}", "lib/my.bib"),
+    ("% \\bibliography{commented}\n\\bibliography{real}", "real.bib"),
+    ("\\bibliography{../outside}", "references.bib"),
+    ("no bibliography at all", "references.bib"),
+])
+def test_bib_file_is_the_one_the_main_file_names(env, line: str, target: str) -> None:
+    conn, paths, doc, _ = env
+    (doc.folder / "main.tex").write_text("\\documentclass{article}\n\\begin{document}\n\\cite{x}\n" + line +
+                                         "\n\\end{document}\n")
+    assert wc.bib_file(doc) == target
+
+
+def test_sync_writes_the_bibliography_an_imported_paper_uses(env) -> None:
+    conn, paths, doc, _ = env
+    key = citation_key(conn, "p1")
+    (doc.folder / "main.tex").write_text(f"\\documentclass{{article}}\n\\cite{{{key}}}\n\\bibliography{{refs}}\n")
+    (doc.folder / "refs.bib").write_text("@article{mine, title={Mine}}\n")
+    assert wc.sync_bib(conn, doc) == [key]
+    text = (doc.folder / "refs.bib").read_text()
+    assert "@article{mine" in text and BEGIN_MARK in text and key in text
+    assert BEGIN_MARK not in (doc.folder / "references.bib").read_text()

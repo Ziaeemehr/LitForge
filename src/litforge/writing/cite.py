@@ -1,4 +1,4 @@
-"""Cite library papers and evidence from a Writing Studio document; keep its references.bib in sync."""
+"""Cite library papers and evidence from a Writing Studio document; keep its bibliography file in sync."""
 
 from __future__ import annotations
 
@@ -40,6 +40,33 @@ def document_keys(doc: Document) -> list[str]:
     return list(keys)
 
 
+_BIB_COMMAND = re.compile(r"\\(?:bibliography|addbibresource)\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}")
+
+
+def bib_file(doc: Document) -> str:
+    """The .bib file LitForge keeps its entries in: the first one the main file names (an imported paper's
+    refs.bib), else references.bib, which the templates use."""
+    from litforge.writing.documents import DocumentError, resolve_inside
+
+    try:
+        text = resolve_inside(doc.folder, doc.main_file).read_text(encoding="utf-8", errors="replace")
+    except (OSError, DocumentError):
+        return "references.bib"
+    for line in text.splitlines():
+        code = _COMMENT.sub(lambda m: m.group(0)[:m.group(0).index("%")], line)
+        for match in _BIB_COMMAND.finditer(code):
+            for name in match.group(1).split(","):
+                name = name.strip()
+                name = name if name.lower().endswith(".bib") else name + ".bib"
+                try:
+                    resolve_inside(doc.folder, name)
+                except DocumentError:
+                    continue  # a path outside the document is refused at compile time anyway
+                if name != ".bib":
+                    return name
+    return "references.bib"
+
+
 def sync_bib(conn: sqlite3.Connection, doc: Document, extra_paper_ids: list[str] | None = None) -> list[str]:
     """Write LitForge entries for every cited key that names a library paper (plus `extra_paper_ids`).
     Keys LitForge does not know are left to the user's own entries."""
@@ -51,8 +78,10 @@ def sync_bib(conn: sqlite3.Connection, doc: Document, extra_paper_ids: list[str]
         ids.setdefault(paper_id, None)
     from litforge.writing.documents import _lock, resolve_inside
 
-    with _lock(doc.id):  # resolve_inside refuses a references.bib that is a link to a file elsewhere
-        return write_bib(conn, list(ids), resolve_inside(doc.folder, "references.bib"))
+    with _lock(doc.id):  # resolve_inside refuses a .bib that is a link to a file elsewhere
+        target = resolve_inside(doc.folder, bib_file(doc))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return write_bib(conn, list(ids), target)
 
 
 def _version(conn: sqlite3.Connection, paper_id: str) -> str | None:
@@ -95,7 +124,7 @@ def search_evidence(conn: sqlite3.Connection, project_id: str, query: str, limit
 
 
 def cite(conn: sqlite3.Connection, doc: Document, paper_id: str, evidence_id: str | None = None) -> dict[str, Any]:
-    """Give the paper its key, remember where the citation came from and add its entry to references.bib."""
+    """Give the paper its key, remember where the citation came from and add its entry to the .bib file."""
     if conn.execute("SELECT 1 FROM project_papers WHERE project_id=? AND paper_id=?",
                     (doc.project_id, paper_id)).fetchone() is None:
         raise LookupError("the paper is not in this document's project")
