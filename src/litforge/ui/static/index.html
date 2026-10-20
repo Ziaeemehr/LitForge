@@ -448,6 +448,7 @@
         <select id="write-new-template" aria-label="Template"></select>
         <button class="btn primary" id="write-create">New document</button>
         <label class="btn" title="A .zip of a LaTeX project: an Overleaf download, a journal template or a LitForge export">Import ZIP<input type="file" id="write-import" accept=".zip,application/zip" hidden></label>
+        <button class="btn" id="write-clone" title="A copy of a git repository (Overleaf's git link, GitHub…) that you can sync both ways">Clone from git</button>
       </div>
       <p id="write-engine" class="muted" role="status"></p>
       <ul id="write-docs" class="write-docs"></ul>
@@ -487,6 +488,7 @@
                 <option value="tectonic">Tectonic</option><option value="xelatex">XeLaTeX (TeX Live)</option></select></label>
               <label class="more-check" title="One engine pass: faster, but references may show ?? until a full compile"><input type="checkbox" id="write-draft"> Draft compile</label>
               <hr>
+              <button type="button" role="menuitem" id="write-git-btn" title="Sync this document with a git remote (Overleaf, GitHub…)">Git sync…</button>
               <a role="menuitem" id="write-export" download title="All files of the document, without versions or build output">Download as ZIP</a>
               <button type="button" role="menuitem" id="write-rename">Rename</button>
               <button type="button" role="menuitem" class="danger" id="write-delete" title="Move this document to the project's trash folder">Delete</button>
@@ -518,6 +520,26 @@
           <ul id="write-version-list" aria-label="Versions"></ul>
           <div id="write-version-diff" class="ver-diff" aria-live="polite"></div>
         </div>
+      </div>
+      <div id="write-git" class="card write-git" hidden>
+        <div class="ver-head"><h3>Git sync</h3><span id="write-git-state" class="muted" dir="auto"></span>
+          <span class="spacer"></span>
+          <button type="button" class="sg-x" id="write-git-close" aria-label="Close git sync">×</button></div>
+        <div id="write-git-connect-row" class="git-row">
+          <input id="write-git-url" placeholder="Remote: https://github.com/you/paper.git, git@host:repo.git or Overleaf's git link"
+            aria-label="Git remote URL" autocomplete="off" spellcheck="false">
+          <button type="button" class="btn small" id="write-git-connect">Connect</button></div>
+        <div class="git-row">
+          <button type="button" class="btn small primary" id="write-git-sync" title="Save, commit, pull the remote's changes and push yours">Sync now</button>
+          <button type="button" class="btn small" id="write-git-abort" title="Undo the unfinished merge; your text before the sync comes back" hidden>Abort merge</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn small ghost" id="write-git-disconnect" title="Forget the remote; the history stays in the folder">Disconnect</button></div>
+        <p id="write-git-msg" class="muted" role="status" aria-live="polite"></p>
+        <p class="muted git-note">Uses your own git sign-in (a credential helper or an SSH key); LitForge never asks for passwords. A version is saved before every sync.</p>
+      </div>
+      <div id="write-conflicts" class="write-banner write-conflicts" role="alert" hidden>
+        <span id="write-conflicts-msg"></span>
+        <ul id="write-conflicts-list"></ul>
       </div>
       <div id="write-cite-panel" class="card write-cite" hidden>
         <div class="write-cite-tabs"><button class="btn small on" id="write-cite-tab-lib" data-tab="library">Library</button><button class="btn small" id="write-cite-tab-ev" data-tab="evidence">Evidence</button></div>

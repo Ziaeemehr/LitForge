@@ -743,6 +743,18 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
   .write-split[data-layout="split"] .write-gutter { display: none; }
   .write-right iframe { min-height: 60vh; }
 }
+.write-git { padding: 10px 14px; }
+.write-git .git-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.write-git .git-row input { flex: 1; min-width: 0; font-size: 13px; padding: 5px 8px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--panel); color: var(--ink); }
+.write-git .git-note { font-size: 11px; margin: 6px 0 0; }
+.write-git #write-git-msg { margin: 6px 0 0; }
+.write-conflicts { flex-direction: column; align-items: stretch; background: var(--warn-soft, var(--bad-soft)); }
+.write-conflicts ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.write-conflicts li { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.write-conflicts li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.write-conflicts li button { font-size: 11px; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 6px; padding: 2px 8px; cursor: pointer; }
 .write-new .btn.primary { width: auto; margin-top: 0; padding: 5px 12px; }
 #view-write .muted { color: var(--muted); }
 .write-new select { width: auto; }

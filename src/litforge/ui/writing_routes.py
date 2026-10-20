@@ -12,6 +12,7 @@ from litforge.writing import chat as wchat
 from litforge.writing import cite as wcite
 from litforge.writing import compile as wc
 from litforge.writing import documents as wd
+from litforge.writing import gitsync as wg
 from litforge.writing import notes as wn
 from litforge.writing import preview as wp
 from litforge.writing import synctex as wsync
@@ -64,6 +65,8 @@ def synctex_lookup(doc: wd.Document, query: dict[str, str]) -> dict[str, Any] | 
 
 def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) -> Any:
     """JSON payload, or bytes, content type and optional disposition for downloads."""
+    if path == "/api/write/git":
+        return wg.status(_doc(conn, app, query))
     if path == "/api/write/figure":
         return wp.figure(_doc(conn, app, query), query.get("name", ""))
     if path == "/api/write/notes":
@@ -113,7 +116,36 @@ def post(app: App, conn: sqlite3.Connection, path: str, body: dict[str, Any]) ->
         doc = wd.create_document(conn, app.paths, str(body.get("project") or ""), str(body.get("name") or ""),
                                  str(body.get("template") or "article"))
         return doc.as_dict()
+    if path == "/api/write/git/clone":
+        url = wg.validate_url(str(body.get("url") or ""))
+
+        def work(job: Job) -> None:
+            db = app.db()
+            try:
+                job.report = wg.clone(db, app.paths, str(body.get("project") or ""),
+                                      str(body.get("name") or ""), url).as_dict()
+            finally:
+                db.close()
+
+        return app.start_job("writing-git-clone", "", work).__dict__
     doc = _doc(conn, app, body)
+    if path.startswith("/api/write/git/"):
+        with _START:
+            if app_busy(app, doc.id):
+                raise ValueError("wait for the compile to finish")
+            if git_busy(app, doc.id):
+                raise ValueError("a git operation is already running for this document")
+            if path == "/api/write/git/sync":
+                def sync_work(job: Job) -> None:
+                    job.report = wg.sync(doc)
+                return app.start_job("writing-git", doc.id, sync_work).__dict__
+            if path == "/api/write/git/connect":
+                return wg.connect(doc, str(body.get("url") or ""))
+            if path == "/api/write/git/abort":
+                return wg.abort_merge(doc)
+            if path == "/api/write/git/disconnect":
+                return wg.disconnect(doc)
+            raise LookupError("not found")
     if path == "/api/write/preview":
         return wp.preview_math(doc, app.paths, str(body.get("tex") or "")), "application/pdf", "inline"
     if path == "/api/write/note":
@@ -188,7 +220,19 @@ def app_busy(app: App, doc_id: str) -> bool:
                for j in app.jobs.values())
 
 
+def git_busy(app: App, doc_id: str) -> bool:
+    return any(j.kind == "writing-git" and j.status == "running" and j.project == doc_id
+               for j in app.jobs.values())
+
+
 def compile_job(app: App, doc: wd.Document) -> Job:
+    with _START:
+        if git_busy(app, doc.id):
+            raise ValueError("wait for the git operation to finish")
+        return _compile_job(app, doc)
+
+
+def _compile_job(app: App, doc: wd.Document) -> Job:
     if app_busy(app, doc.id):
         raise ValueError("this document is already compiling")
 

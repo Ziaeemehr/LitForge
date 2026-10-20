@@ -1811,3 +1811,105 @@ test('preview cache keys change with the macros, and figure previews expire', ()
   assert.equal(ctx.previewFresh({ kind: 'figure', at: 0 }, 5000), true);
   assert.equal(ctx.previewFresh({ kind: 'figure', at: 0 }, 60000), false);
 });
+
+/* ---- git sync ---- */
+
+const CONFLICTED = 'Intro.\n<<<<<<< HEAD\nMy sentence.\n=======\nTheir sentence.\n>>>>>>> refs/remotes/origin/master\nMiddle.\n' +
+  '<<<<<<< HEAD\nA\n=======\nB\n>>>>>>> refs/remotes/origin/master\nEnd.\n';
+
+test('conflictBlocks finds each block with both sides; resolveConflict keeps mine, theirs or both', () => {
+  const { ctx } = setup();
+  const blocks = [...ctx.conflictBlocks(CONFLICTED)];
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0].mine, 'My sentence.\n'); assert.equal(blocks[0].theirs, 'Their sentence.\n');
+  assert.equal(blocks[0].line, 2); assert.equal(blocks[1].line, 8);
+  assert.equal(CONFLICTED.slice(blocks[1].from, blocks[1].to), '<<<<<<< HEAD\nA\n=======\nB\n>>>>>>> refs/remotes/origin/master\n');
+  assert.equal(ctx.resolveConflict(CONFLICTED, blocks[0], 'mine').startsWith('Intro.\nMy sentence.\nMiddle.'), true);
+  assert.equal(ctx.resolveConflict(CONFLICTED, blocks[0], 'theirs').startsWith('Intro.\nTheir sentence.\nMiddle.'), true);
+  assert.equal(ctx.resolveConflict(CONFLICTED, blocks[1], 'both').endsWith('Middle.\nA\nB\nEnd.\n'), true);
+  assert.equal(ctx.conflictBlocks('no markers here\n=======\n').length, 0);
+});
+
+test('the conflict bar lists the blocks of the open file and resolves one', async () => {
+  const { ctx, $ } = setup();
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = CONFLICTED;
+  ctx.showWriteConflicts();
+  assert.equal($('write-conflicts').hidden, false);
+  assert.match($('write-conflicts-msg').textContent, /2 conflicting/);
+  const first = $('write-conflicts-list').children[0];
+  first.querySelector = undefined;
+  const theirs = first.children.find(b => b.textContent === 'Theirs');
+  theirs.onclick();
+  assert.equal(area.value.startsWith('Intro.\nTheir sentence.\nMiddle.'), true);
+  assert.match($('write-conflicts-msg').textContent, /1 conflicting/);
+  $('write-conflicts-list').children[0].children.find(b => b.textContent === 'Mine').onclick();
+  assert.equal($('write-conflicts').hidden, true);
+});
+
+function gitSetup(status, extra = {}) {
+  const env = setup({
+    get: url => {
+      if (url.startsWith('/api/write/git?')) return status;
+      if (url.startsWith('/api/jobs/git1')) return { status: 'done', report: extra.report || { pulled: 1, pushed: 2, conflicts: [], status } };
+      if (url.startsWith('/api/jobs/clone1')) return { status: 'done', report: { id: 'd1', name: 'Cloned' } };
+      return null;
+    },
+    post: (url, body) => {
+      if (url === '/api/write/git/sync') return { id: 'git1' };
+      if (url === '/api/write/git/clone') return { id: 'clone1' };
+      if (url === '/api/write/git/connect') return { ...status, repo: true, remote: body.url, branch: 'main' };
+      if (url === '/api/write/git/abort') return { ...status, merging: false, conflicts: [] };
+      return null;
+    }
+  });
+  return env;
+}
+
+const CONNECTED = { repo: true, remote: 'https://ann:***@github.com/ann/paper.git', branch: 'main', changed: ['main.tex'],
+  ahead: 1, behind: 0, merging: false, conflicts: [], last_sync: '2026-10-20T10:00:00+00:00' };
+
+test('the git card shows the remote and syncs after saving, then reloads the file', async () => {
+  const { ctx, $, calls } = gitSetup(CONNECTED);
+  await ctx.openWriteDoc('d1');
+  await ctx.showWriteGit();
+  assert.equal($('write-git').hidden, false);
+  assert.match($('write-git-state').textContent, /github\.com\/ann\/paper\.git · main/);
+  assert.match($('write-git-state').textContent, /1 changed file/);
+  assert.equal($('write-git-connect-row').hidden, true); assert.equal($('write-git-sync').hidden, false);
+  $('write-cm').children[0].value += 'x'; $('write-cm').children[0].fire('input');
+  await ctx.syncWriteGit();
+  const order = calls.map(c => c[0]).filter(u => u === '/api/write/save' || u === '/api/write/git/sync');
+  assert.deepEqual(order, ['/api/write/save', '/api/write/git/sync']);
+  assert.match($('write-git-msg').textContent, /1 commit pulled, 2 pushed/);
+  assert.ok(calls.filter(c => c[0] === 'GET' && c[1].startsWith('/api/write/file')).length >= 2);  // reloaded
+});
+
+test('a sync with conflicts says so and opens the conflict bar', async () => {
+  const merging = { ...CONNECTED, merging: true, conflicts: ['main.tex'] };
+  const env = gitSetup(CONNECTED, { report: { pulled: 0, pushed: 0, conflicts: ['main.tex'], status: merging } });
+  env.files['main.tex'] = { text: CONFLICTED, hash: 'h0' };
+  await env.ctx.openWriteDoc('d1');
+  await env.ctx.showWriteGit();
+  await env.ctx.syncWriteGit();
+  assert.match(env.$('write-git-msg').textContent, /Conflicts in main\.tex/);
+  assert.equal(env.$('write-conflicts').hidden, false);
+  assert.equal(env.$('write-git-abort').hidden, false);
+});
+
+test('a document without a remote offers to connect one; cloning opens the new document', async () => {
+  const { ctx, $, calls } = gitSetup({ repo: false, remote: null, branch: null, changed: [], ahead: 0, behind: 0,
+    merging: false, conflicts: [], last_sync: null });
+  await ctx.openWriteDoc('d1');
+  await ctx.showWriteGit();
+  assert.equal($('write-git-connect-row').hidden, false); assert.equal($('write-git-sync').hidden, true);
+  $('write-git-url').value = '  git@github.com:ann/paper.git ';
+  await ctx.connectWriteGit();
+  assert.equal(calls.find(c => c[0] === '/api/write/git/connect')[1].url, 'git@github.com:ann/paper.git');
+  ctx.window.prompt = () => 'https://git.overleaf.com/abc123';
+  await ctx.cloneWriteGit();
+  const clone = calls.find(c => c[0] === '/api/write/git/clone')[1];
+  assert.deepEqual({ ...clone }, { project: 'demo', name: 'abc123', url: 'https://git.overleaf.com/abc123' });
+  assert.ok(calls.some(c => c[0] === 'GET' && c[1].startsWith('/api/write/doc?doc=d1')));
+});

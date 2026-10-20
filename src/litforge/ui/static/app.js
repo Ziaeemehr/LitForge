@@ -2129,19 +2129,24 @@
       .catch(function (e) { toast(e.message); });
   }
 
+  function fillWriteFileList(doc) {
+    var select = $('write-file');
+    select.replaceChildren();
+    doc.files.filter(function (f) { return f.kind === 'text'; }).forEach(function (f) {
+      var opt = document.createElement('option');
+      opt.value = f.name; opt.textContent = f.name;
+      select.appendChild(opt);
+    });
+    select.value = W.file;
+  }
+
   function openWriteDoc(id) {
     return api('/api/write/doc?doc=' + encodeURIComponent(id)).then(function (doc) {
       W.doc = doc;
       resetChat();  // one conversation per open document
       $('write-home').hidden = true; $('write-editor').hidden = false;
       $('write-title').textContent = doc.name; $('write-title').dir = 'auto';
-      var select = $('write-file');
-      select.replaceChildren();
-      doc.files.filter(function (f) { return f.kind === 'text'; }).forEach(function (f) {
-        var opt = document.createElement('option');
-        opt.value = f.name; opt.textContent = f.name;
-        select.appendChild(opt);
-      });
+      fillWriteFileList(doc);
       $('write-errors').replaceChildren();
       showWritePdf(doc.pdf);
       fillWriteSettings(doc);
@@ -2836,6 +2841,152 @@
     }).catch(function (e) { toast(e.message); });
   }
 
+  /* ---- git sync: connect a remote, sync both ways, resolve conflicting blocks ---- */
+
+  var GIT = { status: null };
+
+  // Blocks git left in a file it could not merge: <<<<<<< mine ======= theirs >>>>>>>.
+  function conflictBlocks(text) {
+    var out = [], m, re = /^<<<<<<< [^\n]*\n([\s\S]*?)^=======\n([\s\S]*?)^>>>>>>> [^\n]*(?:\n|$)/gm;
+    while ((m = re.exec(text))) {
+      out.push({ from: m.index, to: m.index + m[0].length, mine: m[1], theirs: m[2],
+        line: text.slice(0, m.index).split('\n').length });
+    }
+    return out;
+  }
+
+  function keptText(block, choice) {
+    return choice === 'mine' ? block.mine : choice === 'theirs' ? block.theirs : block.mine + block.theirs;
+  }
+
+  function resolveConflict(text, block, choice) {
+    return text.slice(0, block.from) + keptText(block, choice) + text.slice(block.to);
+  }
+
+  function showWriteConflicts() {
+    if (!W.editor) return;
+    var blocks = conflictBlocks(W.editor.getText());
+    $('write-conflicts').hidden = !blocks.length;
+    if (!blocks.length) return;
+    $('write-conflicts-msg').textContent = blocks.length + ' conflicting block' + (blocks.length === 1 ? '' : 's') +
+      ' from the git sync in this file: keep your version, theirs, or both, then Sync again.';
+    var rows = blocks.map(function (block, i) {
+      var li = document.createElement('li'), label = document.createElement('span');
+      label.textContent = 'Line ' + block.line + ': ' + block.mine.trim().slice(0, 60);
+      label.title = 'Yours:\n' + block.mine + '\nTheirs:\n' + block.theirs; label.dir = 'auto';
+      label.onclick = function () { W.editor.gotoLine(block.line); };
+      li.appendChild(label);
+      [['mine', 'Mine'], ['theirs', 'Theirs'], ['both', 'Both']].forEach(function (c) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.textContent = c[1];
+        b.onclick = function () {
+          var now = conflictBlocks(W.editor.getText())[i];  // positions as they are now
+          if (!now) return;
+          W.editor.replace(now.from, now.to, keptText(now, c[0]));
+          showWriteConflicts();
+        };
+        li.appendChild(b);
+      });
+      return li;
+    });
+    $('write-conflicts-list').replaceChildren.apply($('write-conflicts-list'), rows);
+  }
+
+  function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+  function renderWriteGit(st) {
+    GIT.status = st;
+    var connected = !!st.remote;
+    $('write-git-connect-row').hidden = connected;
+    $('write-git-sync').hidden = !connected; $('write-git-disconnect').hidden = !connected;
+    $('write-git-abort').hidden = !st.merging;
+    $('write-git-state').textContent = connected ?
+      st.remote + ' · ' + (st.branch || '?') + ' · ' + plural((st.changed || []).length, 'changed file') +
+      (st.ahead ? ' · ' + st.ahead + ' to push' : '') + (st.behind ? ' · ' + st.behind + ' to pull' : '') +
+      (st.last_sync ? ' · last sync ' + String(st.last_sync).slice(0, 16).replace('T', ' ') : '') :
+      'Not connected to a git remote.';
+  }
+
+  function showWriteGit() {
+    var doc = W.doc;
+    $('write-git').hidden = false; $('write-git-msg').textContent = '';
+    return api('/api/write/git?doc=' + encodeURIComponent(doc.id)).then(function (st) {
+      if (W.doc === doc) renderWriteGit(st);
+    }).catch(function (e) { $('write-git-msg').textContent = e.message; });
+  }
+
+  function connectWriteGit() {
+    var doc = W.doc, url = $('write-git-url').value.trim();
+    if (!url) { $('write-git-msg').textContent = 'Paste the remote\'s URL first.'; return Promise.resolve(); }
+    return post('/api/write/git/connect', { doc: doc.id, url: url }).then(function (st) {
+      if (W.doc !== doc) return;
+      renderWriteGit(st); $('write-git-msg').textContent = 'Connected. Sync now to send the document there.';
+    }).catch(function (e) { $('write-git-msg').textContent = e.message; });
+  }
+
+  function waitJob(id) {
+    return api('/api/jobs/' + encodeURIComponent(id)).then(function (j) {
+      if (j.status !== 'running') return j;
+      return new Promise(function (resolve) { setTimeout(resolve, 800); }).then(function () { return waitJob(id); });
+    });
+  }
+
+  // The files may have changed on disk (pulled): the file list and the open file are read again.
+  function reloadWriteFiles() {
+    var doc = W.doc;
+    return api('/api/write/doc?doc=' + encodeURIComponent(doc.id)).then(function (info) {
+      if (W.doc !== doc) return;
+      doc.files = info.files; fillWriteFileList(doc);
+      return W.dirty ? null : openWriteFile(W.file, true);
+    }).then(showWriteConflicts);
+  }
+
+  function syncWriteGit() {
+    var doc = W.doc;
+    $('write-git-msg').textContent = 'Saving…';
+    return saveWriteNow().then(function () {
+      if (W.dirty || W.conflictHash) throw new Error('Save the file first (see the banner above).');
+      $('write-git-msg').textContent = 'Syncing with the remote…';
+      return post('/api/write/git/sync', { doc: doc.id });
+    }).then(function (job) { return waitJob(job.id); }).then(function (j) {
+      if (W.doc !== doc) return;
+      if (j.status === 'failed') throw new Error(j.error || 'git sync failed');
+      var r = j.report;
+      renderWriteGit(r.status);
+      $('write-git-msg').textContent = r.conflicts.length ?
+        'Conflicts in ' + r.conflicts.join(', ') + ': choose a version for each marked block, then Sync again (or Abort merge).' :
+        'Synced: ' + plural(r.pulled, 'commit') + ' pulled, ' + r.pushed + ' pushed.';
+      return reloadWriteFiles();
+    }).catch(function (e) { $('write-git-msg').textContent = e.message; });
+  }
+
+  function abortWriteGit() {
+    var doc = W.doc;
+    return post('/api/write/git/abort', { doc: doc.id }).then(function (st) {
+      renderWriteGit(st); $('write-git-msg').textContent = 'The merge was undone.';
+      return reloadWriteFiles();
+    }).catch(function (e) { $('write-git-msg').textContent = e.message; });
+  }
+
+  function disconnectWriteGit() {
+    if (!window.confirm('Forget this document\'s git remote? Its history stays in the folder.')) return Promise.resolve();
+    return post('/api/write/git/disconnect', { doc: W.doc.id }).then(renderWriteGit)
+      .catch(function (e) { $('write-git-msg').textContent = e.message; });
+  }
+
+  function cloneWriteGit() {
+    var url = (window.prompt('Git URL to clone (Overleaf\'s git link, GitHub, GitLab…). Your own git sign-in is used.') || '').trim();
+    if (!url) return Promise.resolve();
+    var name = url.replace(/\/+$/, '').split(/[/:]/).pop().replace(/\.git$/i, '') || 'Cloned';
+    toast('Cloning ' + name + '…');
+    return post('/api/write/git/clone', { project: projectName(), name: name, url: url })
+      .then(function (job) { return waitJob(job.id); })
+      .then(function (j) {
+        if (j.status === 'failed') throw new Error(j.error || 'clone failed');
+        return openWriteDoc(j.report.id);
+      }).catch(function (e) { toast(e.message); });
+  }
+
   /* ---- writing aids: math symbols, previews on hover, notes on lines ---- */
 
   var MATH_ENVS = 'equation|align|gather|multline|eqnarray|displaymath|math|alignat|flalign';
@@ -3189,6 +3340,7 @@
 
   function refreshWriteStats() {
     if (!W.editor) return;
+    if (!$('write-conflicts').hidden || W.editor.getText().indexOf('<<<<<<< ') >= 0) showWriteConflicts();
     var text = W.editor.getText(), words = countWords(text);
     $('write-words').textContent = words.toLocaleString('en-US') + ' words';
     if ($('write-outline').hidden) return;
@@ -4056,6 +4208,13 @@
     setWriteSplit(store.get('write-split', 50));
     setWriteOutline(store.get('write-outline', false));
     $('write-outline-btn').onclick = function () { setWriteOutline($('write-outline').hidden); };
+    $('write-git-btn').onclick = function () { $('write-more').open = false; return showWriteGit(); };
+    $('write-git-close').onclick = function () { $('write-git').hidden = true; };
+    $('write-git-connect').onclick = connectWriteGit;
+    $('write-git-sync').onclick = syncWriteGit;
+    $('write-git-abort').onclick = abortWriteGit;
+    $('write-git-disconnect').onclick = disconnectWriteGit;
+    $('write-clone').onclick = cloneWriteGit;
     $('write-symbols-btn').onclick = function () { if ($('write-symbols').hidden) openWriteSymbols(); else closeWriteSymbols(); };
     $('write-symbols-close').onclick = closeWriteSymbols;
     $('write-symbols-q').addEventListener('input', renderWriteSymbols);

@@ -627,3 +627,91 @@ def test_writing_aids_handler_without_socket(tmp_path, monkeypatch):
     assert request('POST', '/api/write/note', {**body, 'file': 'main.tex', 'line': 1, 'body': ''})[0] == 400
     assert request('POST', '/api/write/note/delete', {**body, 'id': note['id']})[0] == 200
     assert request('POST', '/api/write/note/delete', {**body, 'id': note['id']})[0] == 404
+
+
+def _git_remote(tmp_path):
+    import shutil
+    import subprocess
+
+    if not shutil.which('git'):
+        pytest.skip('git is not installed')
+    remote = tmp_path / 'remote.git'
+    subprocess.run(['git', 'init', '--bare', '--initial-branch=main', str(remote)], check=True,
+                   capture_output=True)
+    return str(remote)
+
+
+def test_git_http_routes(server, tmp_path):
+    base, _ = server
+    remote = _git_remote(tmp_path)
+    doc = create(base)
+    body = {'doc': doc['id']}
+    assert call(base, f"/api/write/git?doc={doc['id']}")[1]['repo'] is False
+    code, result = call(base, '/api/write/git/connect', {**body, 'url': remote})
+    assert code == 200 and result['remote'] == remote
+    _, job = call(base, '/api/write/git/sync', body)
+    done = wait_job(base, job['id'])
+    assert done['status'] == 'done' and done['report']['pushed'] == 1
+    _, job = call(base, '/api/write/git/clone', {'project': 'demo', 'name': 'Clone', 'url': remote})
+    done = wait_job(base, job['id'])
+    assert done['status'] == 'done' and done['report']['template'] == 'git'
+    assert call(base, '/api/write/git/abort', body)[0] == 400
+    assert call(base, '/api/write/git/disconnect', body)[1]['remote'] is None
+
+
+def test_git_routes_without_sockets(tmp_path, monkeypatch):
+    import time
+
+    from litforge.ui import writing_routes as routes
+    from litforge.ui.server import Job
+    from litforge.writing import documents as wd
+    from litforge.writing import gitsync as gs
+
+    monkeypatch.setenv('HOME', str(tmp_path))
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(tmp_path / '.gitconfig'))
+    remote = _git_remote(tmp_path)
+    paths = Paths(tmp_path / 'data', exports_root=tmp_path / 'exports')
+    app = App(paths, load_config())
+    conn = app.db()
+    create_project(conn, paths, 'demo')
+    doc = wd.create_document(conn, paths, 'demo', 'Paper')
+    body = {'doc': doc.id}
+
+    def post(action, extra=None):
+        return routes.post(app, conn, '/api/write/git/' + action, {**body, **(extra or {})})
+
+    def done(job):
+        deadline = time.monotonic() + 10
+        while app.jobs[job['id']].status == 'running' and time.monotonic() < deadline:
+            time.sleep(.01)
+        result = app.jobs[job['id']]
+        assert result.status == 'done', result.error
+        return result.report
+
+    try:
+        assert not routes.get(app, conn, '/api/write/git', body)['repo']
+        assert post('connect', {'url': remote})['repo']
+        assert done(post('sync'))['pushed'] == 1
+        cloned = done(routes.post(app, conn, '/api/write/git/clone',
+                                 {'project': 'demo', 'name': 'Clone', 'url': remote}))
+        assert cloned['template'] == 'git'
+        other = wd.get_document(conn, paths, cloned['id'])
+        (doc.folder / 'main.tex').write_text('local\n')
+        (other.folder / 'main.tex').write_text('remote\n')
+        gs.sync(other)
+        assert done(post('sync'))['conflicts'] == ['main.tex']
+        assert not post('abort')['merging']
+        assert post('disconnect')['remote'] is None
+        for kind, message in [('writing-compile', 'compile'), ('writing-git', 'already running')]:
+            busy = Job(id='busy', kind=kind, project=doc.id)
+            app.jobs[busy.id] = busy
+            for action in ('connect', 'sync', 'abort', 'disconnect'):
+                with pytest.raises(ValueError, match=message):
+                    post(action, {'url': remote})
+            if kind == 'writing-git':
+                with pytest.raises(ValueError, match='git operation'):
+                    routes.compile_job(app, doc)
+            del app.jobs[busy.id]
+    finally:
+        conn.close()
+        app.shutdown()
