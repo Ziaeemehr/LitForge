@@ -412,6 +412,15 @@ in another editor. Start from the **English article** or **Persian article** tem
 - **Outline** opens the sections of the open file beside the editor (the one the cursor is in is highlighted);
   click one to jump there, or an included file (`\input`) to open it. The toolbar shows the file's **word count**:
   the text only, without commands, math, citations and comments, Persian words included.
+- **Symbols** opens a searchable palette of math symbols (Greek letters, relations, arrows, operators, accents…):
+  type `alpha`, `leq` or `arrow` and click one (or press Enter for the first). Inside math the command is inserted;
+  elsewhere it comes wrapped in `$...$`.
+- **Previews.** Rest the pointer on math (`$...$`, `\[...\]`, `equation`, `align`…) to see it rendered, with your own
+  `\newcommand`s; what the fast renderer cannot draw is compiled with the document's engine. Rest it on an
+  `\includegraphics` to see the figure (PNG, JPEG or PDF).
+- **Notes.** Click the narrow column left of the line numbers to write a note on that line: a reminder for yourself,
+  never compiled or exported. Lines with notes show a dot; the notes are also listed under **Outline**. A note
+  follows its line when you edit around it.
 - **More** holds the compile settings: the **main file** (any `.tex` with a `\documentclass`, for a thesis or an
   Overleaf project whose file is not `main.tex`), the **engine** (Tectonic, or XeLaTeX from TeX Live via `latexmk`)
   and **Draft compile** (one engine pass: faster while writing, but references may show `??` until a full

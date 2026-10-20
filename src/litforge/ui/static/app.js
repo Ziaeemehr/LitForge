@@ -1845,6 +1845,7 @@
         selection: function () { return { from: area.selectionStart, to: area.selectionEnd,
           text: area.value.slice(area.selectionStart, area.selectionEnd) }; },
         replace: function (from, to, t) { area.setRangeText(t, from, to, 'end'); handlers.change(); },
+        select: function (from, to) { area.focus(); area.setSelectionRange(from, to); },
         lineRange: function (n) { return lineRange(area.value, n); },
         mark: function () {}, coords: function () { return null; },
         destroy: function () { parent.replaceChildren(); }
@@ -1881,9 +1882,35 @@
       },
       provide: function (f) { return CM.EditorView.decorations.from(f); }
     });
+    // Notes: a dot in a gutter left of the line numbers; the marks move with the text.
+    function NoteMarker(id, body) { this.id = id; this.body = body; }
+    NoteMarker.prototype = Object.create(CM.GutterMarker.prototype);
+    NoteMarker.prototype.constructor = NoteMarker;
+    NoteMarker.prototype.eq = function (other) { return other.id === this.id && other.body === this.body; };
+    NoteMarker.prototype.toDOM = function () {
+      var dot = document.createElement('span');
+      dot.className = 'cm-note-dot'; dot.textContent = '●'; dot.title = this.body;
+      return dot;
+    };
+    var setNotes = CM.StateEffect.define();
+    var notesField = CM.StateField.define({
+      create: function () { return CM.RangeSet.empty; },
+      update: function (notes, tr) {
+        notes = notes.map(tr.changes);
+        tr.effects.forEach(function (e) { if (e.is(setNotes)) notes = e.value; });
+        return notes;
+      }
+    });
+    var notesGutter = CM.gutter({ class: 'cm-notes-gutter', markers: function (v) { return v.state.field(notesField); },
+      initialSpacer: function () { return new NoteMarker('', ''); },
+      domEventHandlers: { mousedown: function (v, block) {
+        if (handlers.note) handlers.note(v.state.doc.lineAt(block.from).number);
+        return true;
+      } } });
     var view = new CM.EditorView({
       parent: parent,
-      state: CM.EditorState.create({ doc: text, extensions: [markField, spellField,
+      state: CM.EditorState.create({ doc: text, extensions: [markField, spellField, notesField, notesGutter,
+        CM.hoverTooltip(function (v, pos) { return handlers.hover ? handlers.hover(v, pos) : null; }, { hoverTime: 450 }),
         CM.lineNumbers(), CM.highlightActiveLineGutter(), CM.history(), CM.foldGutter(), CM.drawSelection(),
         CM.indentOnInput(), CM.bracketMatching(), CM.closeBrackets(), CM.highlightActiveLine(),
         CM.highlightSelectionMatches(), CM.StreamLanguage.define(CM.stex),
@@ -1940,6 +1967,21 @@
       replace: function (from, to, t) {
         view.dispatch({ changes: { from: from, to: to, insert: t }, selection: { anchor: from + t.length } });
         view.focus();
+      },
+      select: function (from, to) { view.dispatch({ selection: { anchor: from, head: to } }); view.focus(); },
+      setNotes: function (notes) {
+        var doc = view.state.doc;
+        var ranges = notes.filter(function (n) { return n.line >= 1 && n.line <= doc.lines; }).map(function (n) {
+          return new NoteMarker(n.id, n.body).range(doc.line(n.line).from);
+        }).sort(function (a, b) { return a.from - b.from; });
+        view.dispatch({ effects: setNotes.of(CM.RangeSet.of(ranges)) });
+      },
+      noteLines: function () {
+        var out = [];
+        view.state.field(notesField).between(0, view.state.doc.length, function (from, to, marker) {
+          out.push({ id: marker.id, line: view.state.doc.lineAt(from).number });
+        });
+        return out;
       },
       lineRange: function (n) { return lineRange(view.state.doc.toString(), n); },
       mark: function (range) {  // highlight the text a suggestion would change; null clears it
@@ -2127,11 +2169,14 @@
           $('write-conflict').hidden = true;
           W.editor = makeEditor($('write-cm'), file.text, {
             change: writeChanged, blur: function () { if (W.dirty) saveWriteNow(); }, compile: compileWrite,
-            cursor: function () { if (!$('write-outline').hidden) scheduleWriteStats(150); }
+            cursor: function () { if (!$('write-outline').hidden) scheduleWriteStats(150); },
+            note: openWriteNote, hover: writeHover
           });
+          closeWriteNote(); closeWriteSymbols();
           writeSaveState('Saved');
           refreshWriteStats();
           loadOtherTexts();
+          loadWriteNotes();
           return true;
         });
     };
@@ -2177,6 +2222,7 @@
         $('write-conflict').hidden = true;
         writeSaveState(W.dirty ? 'Edited' : 'Saved');
         if (W.dirty) W.timer = setTimeout(saveWriteNow, W.SAVE_DELAY);
+        else syncWriteNotes();  // the saved text is what the notes' new lines refer to
       })
       .catch(function (e) {
         if (e.status === 409) {
@@ -2785,6 +2831,265 @@
     }).catch(function (e) { toast(e.message); });
   }
 
+  /* ---- writing aids: math symbols, previews on hover, notes on lines ---- */
+
+  var MATH_ENVS = 'equation|align|gather|multline|eqnarray|displaymath|math|alignat|flalign';
+  var PREVIEW_MAX = 4000;  // characters of math sent for a preview (as on the server)
+
+  // The math span (delimiters included) that `pos` is in, as LaTeX reads the text: escaped dollars, \\[ line
+  // breaks and comments do not count.
+  function mathSpanAt(text, pos) {
+    var plain = maskComments(text), open = null, m;
+    var re = new RegExp('\\$\\$|\\$|\\\\\\(|\\\\\\)|\\\\\\[|\\\\\\]|\\\\(begin|end)\\{(' + MATH_ENVS + ')(\\*?)\\}', 'g');
+    while ((m = re.exec(plain))) {
+      if (escapedAt(plain, m.index)) continue;
+      var tok = m[0];
+      if (!open) {
+        if (m.index > pos) return null;
+        if (tok === '$$' || tok === '$' || tok === '\\(' || tok === '\\[' || m[1] === 'begin') {
+          open = { tok: tok, from: m.index, env: m[1] === 'begin' ? m[2] + m[3] : null };
+        }
+        continue;
+      }
+      var closes = open.env ? (m[1] === 'end' && m[2] + m[3] === open.env) :
+        (open.tok === '$$' && tok === '$$') || (open.tok === '$' && tok === '$') ||
+        (open.tok === '\\(' && tok === '\\)') || (open.tok === '\\[' && tok === '\\]');
+      if (!closes) continue;
+      var to = m.index + tok.length;
+      if (open.from <= pos && pos < to) return { from: open.from, to: to };
+      open = null;
+    }
+    return null;
+  }
+
+  function figureAt(text, pos) {
+    var plain = maskComments(text), m, re = /\\includegraphics\*?\s*(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g;
+    while ((m = re.exec(plain))) {
+      if (escapedAt(plain, m.index)) continue;
+      if (m.index > pos) return null;
+      if (pos < m.index + m[0].length) return { from: m.index, to: m.index + m[0].length, name: m[1].trim() };
+    }
+    return null;
+  }
+
+  function hoverPreview(text, pos) {
+    var math = mathSpanAt(text, pos);
+    if (math) return math.to - math.from > PREVIEW_MAX ? null : { kind: 'math', from: math.from, to: math.to, tex: text.slice(math.from, math.to) };
+    var fig = figureAt(text, pos);
+    return fig ? { kind: 'figure', from: fig.from, to: fig.to, name: fig.name } : null;
+  }
+
+  // What to insert for a palette symbol: $...$ around it outside math; the cursor goes into its first {}.
+  function symbolInsert(command, inMath) {
+    var text = inMath ? command : '$' + command + '$', brace = command.indexOf('{}');
+    return { text: text, cursor: brace >= 0 ? (inMath ? 0 : 1) + brace + 1 : text.length };
+  }
+
+  function openWriteSymbols() {
+    if (!W.editor) return;
+    var sel = W.editor.selection();
+    $('write-symbols').hidden = false;
+    placeWriteSuggestion({ to: sel.to }, $('write-symbols'));
+    $('write-symbols-q').value = '';
+    renderWriteSymbols();
+    if ($('write-symbols-q').focus) $('write-symbols-q').focus();
+  }
+
+  function closeWriteSymbols() { $('write-symbols').hidden = true; }
+
+  function renderWriteSymbols() {
+    var found = window.LitForgeSymbols ? window.LitForgeSymbols.search($('write-symbols-q').value).slice(0, 160) : [];
+    var buttons = found.map(function (sym) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = sym.glyph; b.title = sym.command;
+      b.setAttribute('aria-label', sym.command + ' (' + sym.words + ')');
+      b.onclick = function () { insertWriteSymbol(sym.command); };
+      return b;
+    });
+    $('write-symbols-grid').replaceChildren.apply($('write-symbols-grid'), buttons);
+  }
+
+  function insertWriteSymbol(command) {
+    var sel = W.editor.selection(), span = mathSpanAt(W.editor.getText(), sel.from);
+    var ins = symbolInsert(command, !!span && span.from < sel.from && sel.from < span.to);
+    W.editor.replace(sel.from, sel.to, ins.text);
+    if (W.editor.select) W.editor.select(sel.from + ins.cursor, sel.from + ins.cursor);
+    closeWriteSymbols();
+  }
+
+  /* Previews: math through KaTeX (already on the page); what KaTeX cannot draw, and PDF figures, through the
+     server and PDF.js. */
+  var PREVIEW = { cache: new Map() };
+
+  // \newcommand, \renewcommand and \DeclareMathOperator lines of the document, as KaTeX macros.
+  function katexMacros(texts) {
+    var macros = {};
+    texts.forEach(function (t) {
+      stripComments(t || '').replace(/\\(?:re|provide)?newcommand\*?\s*\{?(\\[a-zA-Z]+)\}?\s*(?:\[\d\])?\s*\{((?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*)\}/g,
+        function (all, name, body) { macros[name] = body; return all; })
+        .replace(/\\DeclareMathOperator(\*?)\s*\{(\\[a-zA-Z]+)\}\s*\{([^{}]*)\}/g, function (all, star, name, body) {
+          macros[name] = '\\operatorname' + star + '{' + body + '}'; return all;
+        });
+    });
+    return macros;
+  }
+
+  function katexSource(tex) {
+    var t = tex.replace(/\\label\{[^{}]*\}/g, '').replace(/\\(?:eq)?ref\{[^{}]*\}/g, '??').replace(/\\nonumber|\\notag/g, '');
+    var m = /^\$\$([\s\S]*)\$\$$/.exec(t) || /^\\\[([\s\S]*)\\\]$/.exec(t);
+    if (m) return { tex: m[1], display: true };
+    if ((m = /^\$([\s\S]*)\$$/.exec(t) || /^\\\(([\s\S]*)\\\)$/.exec(t))) return { tex: m[1], display: false };
+    return { tex: t.replace(/\\(begin|end)\{(?:equation|displaymath|math)\*?\}/g, ''), display: true };
+  }
+
+  function renderWritePreview(hit, dom) {
+    var doc = W.doc, key = doc.id + '\n' + hit.kind + '\n' + (hit.tex || hit.name);
+    var cached = PREVIEW.cache.get(key);
+    if (cached) { dom.replaceChildren(cached.cloneNode(true)); return Promise.resolve(); }
+    var keep = function (node) {
+      if (PREVIEW.cache.size >= 60) PREVIEW.cache.delete(PREVIEW.cache.keys().next().value);
+      PREVIEW.cache.set(key, node.cloneNode(true));
+      dom.replaceChildren(node);
+    };
+    var fail = function (e) { dom.textContent = e.message || String(e); };
+    if (hit.kind === 'math' && window.katex) {
+      var src = katexSource(hit.tex), box = document.createElement('div'), drawn = true;
+      try {
+        window.katex.render(src.tex, box, { displayMode: src.display, throwOnError: true,
+          macros: katexMacros([W.editor.getText()].concat(W.otherTexts || [])) });
+      } catch (e) { drawn = false; }  // not something KaTeX draws: the engine renders it below
+      if (drawn) { keep(box); return Promise.resolve(); }
+    }
+    var request = hit.kind === 'math' ?
+      fetch('/api/write/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ doc: doc.id, tex: hit.tex }) }) :
+      fetch('/api/write/figure?doc=' + encodeURIComponent(doc.id) + '&name=' + encodeURIComponent(hit.name));
+    return request.then(function (r) {
+      if (!r.ok) return r.json().then(function (b) { throw new Error(b.error || 'no preview'); });
+      var type = r.headers.get('Content-Type') || '';
+      if (/pdf/.test(type)) return r.arrayBuffer().then(function (data) { return pdfPreviewImage(data); });
+      return r.blob().then(function (blob) {
+        var img = document.createElement('img'); img.src = URL.createObjectURL(blob); img.alt = hit.name || '';
+        return img;
+      });
+    }).then(keep).catch(fail);
+  }
+
+  function pdfPreviewImage(data) {
+    if (!window.pdfjsLib) throw new Error('The PDF viewer is not loaded.');
+    return window.pdfjsLib.getDocument({ data: new Uint8Array(data), isEvalSupported: false }).promise.then(function (pdf) {
+      return pdf.getPage(1);
+    }).then(function (page) {
+      var base = page.getViewport({ scale: 1 }), scale = Math.min(2.5, 680 / base.width);
+      var viewport = page.getViewport({ scale: scale }), canvas = document.createElement('canvas');
+      canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
+      return page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise.then(function () {
+        var img = document.createElement('img');
+        img.src = canvas.toDataURL('image/png'); img.style.width = Math.round(viewport.width / 2) + 'px';
+        return img;
+      });
+    });
+  }
+
+  // The tooltip CodeMirror shows while the pointer rests on math or an \includegraphics.
+  function writeHover(view, pos) {
+    var hit = hoverPreview(view.state.doc.toString(), pos);
+    if (!hit || !W.doc) return null;
+    return { pos: hit.from, end: hit.to, above: true, create: function () {
+      var dom = document.createElement('div');
+      dom.className = 'write-preview'; dom.textContent = 'Rendering…';
+      renderWritePreview(hit, dom);
+      return { dom: dom };
+    } };
+  }
+
+  /* Notes: the user's own remarks on lines, stored by LitForge (never in the .tex file). A note keeps the text of
+     its line, so it finds the line again after edits made elsewhere. */
+  var NOTES = { list: [], editing: null, token: null };
+
+  function writeNotes() { return NOTES.list; }
+
+  function loadWriteNotes() {
+    var doc = W.doc, file = W.file, token = {};
+    NOTES.token = token; NOTES.list = [];
+    return api('/api/write/notes?doc=' + encodeURIComponent(doc.id) + '&file=' + encodeURIComponent(file))
+      .then(function (res) {
+        if (NOTES.token !== token || W.doc !== doc || W.file !== file) return;
+        NOTES.list = res.notes || [];
+        showWriteNotes();
+      }).catch(function () {});
+  }
+
+  function showWriteNotes() {
+    if (W.editor && W.editor.setNotes) W.editor.setNotes(NOTES.list);
+    refreshWriteStats();
+  }
+
+  // Where each note is now: the editor moves the marks with the text; the plain text area cannot.
+  function currentNoteLines() {
+    if (W.editor && W.editor.noteLines) {
+      var lines = {};
+      W.editor.noteLines().forEach(function (n) { lines[n.id] = n.line; });
+      return NOTES.list.map(function (n) { return { note: n, line: lines[n.id] || n.line }; });
+    }
+    return NOTES.list.map(function (n) { return { note: n, line: n.line }; });
+  }
+
+  function lineText(line) {
+    var r = W.editor.lineRange(line);
+    return W.editor.getText().slice(r.from, r.to).trim().slice(0, 200);
+  }
+
+  function openWriteNote(line) {
+    if (!W.editor) return;
+    var found = currentNoteLines().filter(function (n) { return n.line === line; })[0];
+    NOTES.editing = { line: line, id: found ? found.note.id : null };
+    $('write-note-title').textContent = 'Note · line ' + line;
+    $('write-note-text').value = found ? found.note.body : '';
+    $('write-note-delete').hidden = !found;
+    $('write-note').hidden = false;
+    placeWriteSuggestion({ to: W.editor.lineRange(line).from }, $('write-note'));
+    if ($('write-note-text').focus) $('write-note-text').focus();
+  }
+
+  function closeWriteNote() { NOTES.editing = null; $('write-note').hidden = true; }
+
+  function saveWriteNote() {
+    var editing = NOTES.editing, doc = W.doc, file = W.file;
+    if (!editing) return Promise.resolve();
+    var body = $('write-note-text').value.trim();
+    if (!body) { toast('Write a note, or delete it.'); return Promise.resolve(); }
+    var req = { doc: doc.id, file: file, line: editing.line, anchor: lineText(editing.line), body: body };
+    if (editing.id) req.id = editing.id;
+    return post('/api/write/note', req).then(function (note) {
+      if (W.doc !== doc || W.file !== file) return;
+      NOTES.list = NOTES.list.filter(function (n) { return n.id !== note.id; }).concat([note]);
+      closeWriteNote();
+      showWriteNotes();
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function deleteWriteNote() {
+    var editing = NOTES.editing, doc = W.doc;
+    if (!editing || !editing.id) { closeWriteNote(); return Promise.resolve(); }
+    return post('/api/write/note/delete', { doc: doc.id, id: editing.id }).then(function () {
+      NOTES.list = NOTES.list.filter(function (n) { return n.id !== editing.id; });
+      closeWriteNote();
+      showWriteNotes();
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // After a save: store the lines notes moved to with the text, so they open there next time.
+  function syncWriteNotes() {
+    if (!W.doc || !W.editor || !NOTES.list.length) return Promise.resolve();
+    var moved = currentNoteLines().filter(function (n) { return n.line !== n.note.line; }).map(function (n) {
+      n.note.line = n.line; n.note.anchor = lineText(n.line);
+      return { id: n.note.id, line: n.line, anchor: n.note.anchor };
+    });
+    if (!moved.length) return Promise.resolve();
+    return post('/api/write/notes/move', { doc: W.doc.id, file: W.file, notes: moved }).catch(function () {});
+  }
+
   /* ---- outline, word count, compile settings ---- */
 
   var OUTLINE_LEVELS = { part: 0, chapter: 1, section: 2, subsection: 3, subsubsection: 4, paragraph: 5 };
@@ -2863,6 +3168,19 @@
       }
       return li;
     });
+    var notes = currentNoteLines().sort(function (a, b) { return a.line - b.line; });
+    if (notes.length) {
+      var head = document.createElement('li');
+      head.className = 'ol-head'; head.textContent = 'Notes';
+      rows.push(head);
+      notes.forEach(function (n) {
+        var li = document.createElement('li');
+        li.className = 'note'; li.title = n.note.body; li.dir = 'auto';
+        li.textContent = n.line + ' · ' + (n.note.body.length > 60 ? n.note.body.slice(0, 59) + '…' : n.note.body);
+        li.onclick = function () { W.editor.gotoLine(n.line); openWriteNote(n.line); };
+        rows.push(li);
+      });
+    }
     $('write-outline-list').replaceChildren.apply($('write-outline-list'), rows);
   }
 
@@ -3701,6 +4019,21 @@
     setWriteSplit(store.get('write-split', 50));
     setWriteOutline(store.get('write-outline', false));
     $('write-outline-btn').onclick = function () { setWriteOutline($('write-outline').hidden); };
+    $('write-symbols-btn').onclick = function () { if ($('write-symbols').hidden) openWriteSymbols(); else closeWriteSymbols(); };
+    $('write-symbols-close').onclick = closeWriteSymbols;
+    $('write-symbols-q').addEventListener('input', renderWriteSymbols);
+    $('write-symbols-q').addEventListener('keydown', function (e) {
+      var first = $('write-symbols-grid').children[0];
+      if (e.key === 'Enter' && first) { e.preventDefault(); first.onclick(); }
+      if (e.key === 'Escape') { closeWriteSymbols(); if (W.editor && W.editor.view) W.editor.view.focus(); }
+    });
+    $('write-note-close').onclick = closeWriteNote;
+    $('write-note-save').onclick = saveWriteNote;
+    $('write-note-delete').onclick = deleteWriteNote;
+    $('write-note-text').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveWriteNote(); }
+      if (e.key === 'Escape') closeWriteNote();
+    });
     $('write-main').onchange = function () { changeWriteSettings({ main_file: $('write-main').value }); };
     $('write-engine-pick').onchange = function () { changeWriteSettings({ engine: $('write-engine-pick').value }); };
     $('write-draft').onchange = function () { changeWriteSettings({ draft: $('write-draft').checked }); };

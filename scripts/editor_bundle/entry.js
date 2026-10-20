@@ -1,7 +1,7 @@
 // LitForge editor bundle: the CodeMirror 6 pieces the Write view uses, exposed as window.LitForgeCM.
-import { EditorState, Compartment, StateEffect, StateField } from "@codemirror/state";
+import { EditorState, Compartment, StateEffect, StateField, RangeSet, RangeSetBuilder } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection,
-  Decoration, placeholder } from "@codemirror/view";
+  Decoration, placeholder, gutter, GutterMarker, hoverTooltip } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches, openSearchPanel } from "@codemirror/search";
 import { StreamLanguage, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter,
@@ -14,4 +14,5 @@ window.LitForgeCM = { EditorState, Compartment, StateEffect, StateField, EditorV
   highlightActiveLine, highlightActiveLineGutter, drawSelection, Decoration, placeholder, defaultKeymap, history,
   historyKeymap, indentWithTab, undo, redo, searchKeymap, highlightSelectionMatches, openSearchPanel,
   StreamLanguage, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter, indentOnInput, stex,
-  autocompletion, closeBrackets, acceptCompletion, startCompletion, classHighlighter };
+  autocompletion, closeBrackets, acceptCompletion, startCompletion, classHighlighter, RangeSet, RangeSetBuilder,
+  gutter, GutterMarker, hoverTooltip };

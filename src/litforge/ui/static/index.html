@@ -468,6 +468,7 @@
         <div class="pill" role="group" aria-label="Document actions">
           <button type="button" id="write-outline-btn" aria-pressed="false" title="Sections of this file">Outline</button>
           <button type="button" id="write-cite" title="Cite a paper from the project (\cite{)">Cite</button>
+          <button type="button" id="write-symbols-btn" title="Math symbols: search and insert at the cursor">Symbols</button>
           <select id="write-ai" aria-label="AI actions" title="Model actions on the selection; nothing changes until you accept">
             <option value="">AI…</option><option value="fix">Fix this error</option>
             <option value="clearer">Rewrite: clearer</option><option value="shorter">Rewrite: shorter</option>
@@ -536,6 +537,19 @@
               <button type="button" class="sg-x" id="write-image-close" title="Close" aria-label="Close">×</button></div>
             <div class="img-drop" id="write-image-drop" tabindex="0">Paste an image here (Ctrl+V), or
               <label class="img-pick">choose a file<input type="file" id="write-image-file" accept="image/png,image/jpeg,image/gif,image/webp" hidden></label></div>
+          </div>
+          <div id="write-symbols" class="write-suggestion write-symbols" role="dialog" aria-label="Math symbols" hidden>
+            <div class="sg-head"><input id="write-symbols-q" type="search" placeholder="Search: alpha, leq, arrow, sum…"
+              aria-label="Search symbols" autocomplete="off">
+              <button type="button" class="sg-x" id="write-symbols-close" title="Close" aria-label="Close">×</button></div>
+            <div id="write-symbols-grid" class="sym-grid"></div>
+          </div>
+          <div id="write-note" class="write-suggestion write-note" role="dialog" aria-labelledby="write-note-title" hidden>
+            <div class="sg-head"><b id="write-note-title">Note</b><span class="sg-meta">only for you; never compiled</span>
+              <button type="button" class="sg-x" id="write-note-close" title="Close" aria-label="Close">×</button></div>
+            <textarea id="write-note-text" rows="3" dir="auto" maxlength="2000" aria-label="Note"></textarea>
+            <div class="sg-actions"><button type="button" id="write-note-delete">Delete</button>
+              <button type="button" class="sg-apply" id="write-note-save">Save</button></div>
           </div>
           <div id="write-suggestion" class="write-suggestion" role="dialog" aria-labelledby="write-suggestion-title" hidden>
             <div class="sg-head"><b id="write-suggestion-title">Suggestion</b>
@@ -781,6 +795,7 @@
   window.dispatchEvent(new Event('pdfjs-ready'));
 </script>
 <script src="/static/latex_words.js"></script>
+<script src="/static/latex_symbols.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

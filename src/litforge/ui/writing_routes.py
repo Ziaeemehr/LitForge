@@ -12,6 +12,8 @@ from litforge.writing import chat as wchat
 from litforge.writing import cite as wcite
 from litforge.writing import compile as wc
 from litforge.writing import documents as wd
+from litforge.writing import notes as wn
+from litforge.writing import preview as wp
 from litforge.writing import synctex as wsync
 
 if TYPE_CHECKING:
@@ -62,6 +64,10 @@ def synctex_lookup(doc: wd.Document, query: dict[str, str]) -> dict[str, Any] | 
 
 def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) -> Any:
     """JSON payload, or bytes, content type and optional disposition for downloads."""
+    if path == "/api/write/figure":
+        return wp.figure(_doc(conn, app, query), query.get("name", ""))
+    if path == "/api/write/notes":
+        return {"notes": wn.list_notes(conn, _doc(conn, app, query), query.get("file", ""))}
     if path == "/api/write/docs":
         return {"documents": [d.as_dict() for d in wd.list_documents(conn, app.paths, query.get("project", ""))],
                 "templates": wd.TEMPLATES, "engines": wc.engine_status(app.paths)}
@@ -108,6 +114,22 @@ def post(app: App, conn: sqlite3.Connection, path: str, body: dict[str, Any]) ->
                                  str(body.get("template") or "article"))
         return doc.as_dict()
     doc = _doc(conn, app, body)
+    if path == "/api/write/preview":
+        return wp.preview_math(doc, app.paths, str(body.get("tex") or "")), "application/pdf", "inline"
+    if path == "/api/write/note":
+        args = (str(body.get("file") or ""), body.get("line"), str(body.get("anchor") or ""),
+                str(body.get("body") or ""))
+        if body.get("id"):
+            return wn.update(conn, doc, str(body["id"]), *args)
+        return wn.add(conn, doc, *args)
+    if path == "/api/write/note/delete":
+        wn.delete(conn, doc, str(body.get("id") or ""))
+        return {"ok": True}
+    if path == "/api/write/notes/move":
+        notes = body.get("notes")
+        if not isinstance(notes, list) or not all(isinstance(n, dict) for n in notes):
+            raise ValueError("notes must be a list of positions")
+        return {"moved": wn.move(conn, doc, str(body.get("file") or ""), notes)}
     if path == "/api/write/save":
         try:
             digest = wd.save_file(conn, doc, str(body.get("name") or "main.tex"), str(body.get("text") or ""),

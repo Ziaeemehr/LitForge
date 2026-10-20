@@ -1575,7 +1575,11 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
         def _write_post(self, path: str, body: dict[str, Any]) -> None:
             conn = app.db()
             try:
-                return self._json(writing_routes.post(app, conn, path, body))
+                result = writing_routes.post(app, conn, path, body)
+                if isinstance(result, tuple):
+                    disposition = result[2] if len(result) > 2 else "inline"
+                    return self._send(200, result[0], result[1], {"Content-Disposition": disposition})
+                return self._json(result)
             except writing_routes.Conflict as exc:
                 return self._json(exc.payload, HTTPStatus.CONFLICT)
             finally:

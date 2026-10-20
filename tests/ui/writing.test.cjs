@@ -16,6 +16,7 @@ class Element {
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
   appendChild(node) { this.children.push(node); return node; }
+  cloneNode() { const c = new Element(this.tagName); c.textContent = this.textContent; c.children = this.children.slice(); return c; }
   replaceChildren(...nodes) { this.children = nodes; }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
   fire(type) { (this.listeners[type] || []).forEach(fn => fn({})); }
@@ -35,7 +36,8 @@ function setup(routes = {}) {
     store: { get: (k, d) => (k in saved ? saved[k] : d), set: (k, v) => { saved[k] = v; } },
     document: { createElement: tag => new Element(tag), querySelectorAll: sel => (sel === '.seg [data-layout]' ? segButtons : []) },
     window: { confirm: () => true, prompt: () => 'Renamed', addEventListener() {},
-      LitForgeWords: require('../../src/litforge/ui/static/latex_words.js') },
+      LitForgeWords: require('../../src/litforge/ui/static/latex_words.js'),
+      LitForgeSymbols: require('../../src/litforge/ui/static/latex_symbols.js') },
     projectName: () => 'demo', state: { projects: [{ name: 'demo' }] }, toast: msg => calls.push(['toast', msg]),
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: () => {},
     fetch: async () => ({ ok: true, json: async () => ({ name: 'figures/plot.png' }) }),
@@ -1559,4 +1561,154 @@ test('settings requests run one after another, and a late failure leaves another
   await failing;
   assert.equal($('write-engine-pick').value, 'xelatex');  // d2's controls are untouched
   assert.ok(calls.some(c => c[0] === 'toast' && c[1] === 'boom'));
+});
+
+/* ---- writing aids: symbols, hover previews, notes ---- */
+
+test('mathSpanAt finds inline, display and environment math, and skips escaped dollars and comments', () => {
+  const { ctx } = setup();
+  const t = 'Cost \\$5, $a+b$ and \\[ c \\] then \\begin{align*} d \\end{align*} % $x$\n\\(e\\) $$f$$';
+  const at = s => { const r = ctx.mathSpanAt(t, t.indexOf(s)); return r && t.slice(r.from, r.to); };
+  assert.equal(at('a+b'), '$a+b$');
+  assert.equal(at(' c '), '\\[ c \\]');
+  assert.equal(at(' d '), '\\begin{align*} d \\end{align*}');
+  assert.equal(at('e\\)'), '\\(e\\)');
+  assert.equal(at('f$$'), '$$f$$');
+  assert.equal(at('5,'), null);  // after an escaped dollar
+  assert.equal(at('x$'), null);  // in a comment
+  assert.equal(at('then'), null);
+});
+
+test('figureAt finds the \\includegraphics under the pointer', () => {
+  const { ctx } = setup();
+  const t = 'See \\includegraphics[width=3cm]{figures/plot} here';
+  assert.deepEqual({ ...ctx.figureAt(t, t.indexOf('plot')) }, { from: 4, to: t.indexOf(' here'), name: 'figures/plot' });
+  assert.deepEqual({ ...ctx.figureAt(t, t.indexOf('includegraphics')) }, { ...ctx.figureAt(t, t.indexOf('plot')) });
+  assert.equal(ctx.figureAt(t, t.indexOf('here')), null);
+  assert.equal(ctx.figureAt('% \\includegraphics{a}', 5), null);
+});
+
+test('symbolInsert wraps in $...$ outside math and puts the cursor in the first argument', () => {
+  const { ctx } = setup();
+  assert.deepEqual({ ...ctx.symbolInsert('\\alpha', true) }, { text: '\\alpha', cursor: 6 });
+  assert.deepEqual({ ...ctx.symbolInsert('\\alpha', false) }, { text: '$\\alpha$', cursor: 8 });
+  assert.deepEqual({ ...ctx.symbolInsert('\\frac{}{}', false) }, { text: '$\\frac{}{}$', cursor: 7 });
+  assert.deepEqual({ ...ctx.symbolInsert('\\mathbb{R}', true) }, { text: '\\mathbb{R}', cursor: 10 });
+});
+
+test('the symbol palette filters, and a click inserts at the cursor (in math as a command)', async () => {
+  const { ctx, $ } = setup();
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'We set $x = $ here.'; area.setSelectionRange(12, 12);
+  ctx.openWriteSymbols();
+  assert.equal($('write-symbols').hidden, false);
+  $('write-symbols-q').value = 'alpha'; ctx.renderWriteSymbols();
+  const first = $('write-symbols-grid').children[0];
+  assert.equal(first.textContent, 'α'); assert.equal(first.title, '\\alpha');
+  first.onclick();
+  assert.equal(area.value, 'We set $x = \\alpha$ here.');
+  assert.equal($('write-symbols').hidden, true);
+  area.setSelectionRange(0, 0);
+  ctx.openWriteSymbols(); $('write-symbols-q').value = 'sum'; ctx.renderWriteSymbols();
+  $('write-symbols-grid').children[0].onclick();
+  assert.equal(area.value.slice(0, 6), '$\\sum$');
+});
+
+test('hoverPreview tells math from figures', () => {
+  const { ctx } = setup();
+  const t = 'A $x^2$ and \\includegraphics{fig}.';
+  assert.deepEqual({ ...ctx.hoverPreview(t, 4) }, { kind: 'math', from: 2, to: 7, tex: '$x^2$' });
+  assert.equal(ctx.hoverPreview(t, t.indexOf('fig')).kind, 'figure');
+  assert.equal(ctx.hoverPreview(t, 0), null);
+  assert.equal(ctx.hoverPreview('$' + 'x'.repeat(5000) + '$', 3), null);  // too long to preview
+});
+
+function notesSetup(extra = {}) {
+  const notes = [{ id: 'n1', file: 'main.tex', line: 2, anchor: 'Second line', body: 'Check this claim', moved: false, orphan: false }];
+  const env = setup({
+    get: url => url.startsWith('/api/write/notes?') ? { notes } : null,
+    post: (url, body) => {
+      if (url === '/api/write/note') return { id: body.id || 'n2', file: body.file, line: body.line, anchor: body.anchor, body: body.body };
+      if (url === '/api/write/note/delete') return { ok: true };
+      if (url === '/api/write/notes/move') return { moved: body.notes.length };
+      return extra.post ? extra.post(url, body) : null;
+    }
+  });
+  env.files['main.tex'] = { text: 'First line\nSecond line\nThird line\n', hash: 'h0' };
+  return env;
+}
+
+test('notes load with the file, show in the outline panel and open by line', async () => {
+  const { ctx, $, calls } = notesSetup();
+  await ctx.openWriteDoc('d1');
+  await ctx.loadWriteNotes();
+  assert.ok(calls.some(c => c[0] === 'GET' && c[1] === '/api/write/notes?doc=d1&file=main.tex'));
+  ctx.setWriteOutline(true);
+  const rows = [...$('write-outline-list').children];
+  const note = rows.find(r => r.className === 'note');
+  assert.equal(note.textContent, '2 · Check this claim');
+  note.onclick();
+  assert.equal($('write-note').hidden, false);
+  assert.equal($('write-note-text').value, 'Check this claim');
+  assert.match($('write-note-title').textContent, /line 2/);
+});
+
+test('a note is added on a line, edited and deleted', async () => {
+  const { ctx, $, calls } = notesSetup();
+  await ctx.openWriteDoc('d1');
+  await ctx.loadWriteNotes();
+  ctx.openWriteNote(3);
+  assert.equal($('write-note-text').value, '');
+  $('write-note-text').value = '  Add a citation  ';
+  await ctx.saveWriteNote();
+  const added = calls.find(c => c[0] === '/api/write/note')[1];
+  assert.deepEqual({ ...added }, { doc: 'd1', file: 'main.tex', line: 3, anchor: 'Third line', body: 'Add a citation' });
+  assert.equal($('write-note').hidden, true);
+  assert.equal(ctx.writeNotes().length, 2);
+  ctx.openWriteNote(2);
+  await ctx.deleteWriteNote();
+  assert.ok(calls.some(c => c[0] === '/api/write/note/delete' && c[1].id === 'n1'));
+  assert.deepEqual(ctx.writeNotes().map(n => n.id), ['n2']);
+  ctx.openWriteNote(1); $('write-note-text').value = '   ';
+  await ctx.saveWriteNote();
+  assert.ok(calls.some(c => c[0] === 'toast' && /Write a note/.test(c[1])));
+});
+
+test('after a save, notes that moved with the text are stored at their new lines', async () => {
+  const { ctx, $, calls } = notesSetup();
+  await ctx.openWriteDoc('d1');
+  await ctx.loadWriteNotes();
+  ctx.W.editor.noteLines = () => [{ id: 'n1', line: 4 }];
+  $('write-cm').children[0].value = 'New\nFirst line\nX\nSecond line\nThird line\n';
+  await ctx.syncWriteNotes();
+  const move = calls.find(c => c[0] === '/api/write/notes/move')[1];
+  assert.deepEqual(JSON.parse(JSON.stringify(move)), { doc: 'd1', file: 'main.tex', notes: [{ id: 'n1', line: 4, anchor: 'Second line' }] });
+  calls.length = 0;
+  await ctx.syncWriteNotes();  // nothing moved since
+  assert.ok(!calls.some(c => c[0] === '/api/write/notes/move'));
+});
+
+test('katexSource strips delimiters, labels and references; katexMacros reads the document\'s definitions', () => {
+  const { ctx } = setup();
+  assert.deepEqual({ ...ctx.katexSource('$x$') }, { tex: 'x', display: false });
+  assert.deepEqual({ ...ctx.katexSource('\\[ y \\]') }, { tex: ' y ', display: true });
+  assert.deepEqual({ ...ctx.katexSource('\\begin{equation}\\label{eq:a} z = \\eqref{b}\\end{equation}') },
+    { tex: ' z = ??', display: true });
+  assert.equal(ctx.katexSource('\\begin{align} a &= b \\nonumber \\end{align}').tex, '\\begin{align} a &= b  \\end{align}');
+  const m = ctx.katexMacros(['\\newcommand{\\R}{\\mathbb{R}}\n\\renewcommand\\vec[1]{\\mathbf{#1}}\n' +
+    '% \\newcommand{\\hidden}{x}\n\\DeclareMathOperator*{\\argmax}{arg\\,max}']);
+  assert.deepEqual({ ...m }, { '\\R': '\\mathbb{R}', '\\vec': '\\mathbf{#1}', '\\argmax': '\\operatorname*{arg\\,max}' });
+});
+
+test('a math preview is drawn by KaTeX when it can, without asking the server', async () => {
+  const { ctx, calls } = setup();
+  await ctx.openWriteDoc('d1');
+  const rendered = [];
+  ctx.window.katex = { render: (tex, el, opts) => { rendered.push([tex, opts.displayMode, Object.keys(opts.macros)]); el.textContent = 'K'; } };
+  const dom = new (ctx.document.createElement('div').constructor)('div');
+  await ctx.renderWritePreview({ kind: 'math', tex: '$x^2$' }, dom);
+  assert.deepEqual(rendered[0].slice(0, 2), ['x^2', false]);
+  assert.equal(dom.children[0].textContent, 'K');
+  assert.ok(!calls.some(c => c[0] === '/api/write/preview'));
 });

@@ -541,3 +541,89 @@ def test_settings_wait_for_a_running_compile(server) -> None:
     finally:
         app.jobs.pop("busy")
     assert call(base, "/api/write/settings", {"doc": doc["id"], "draft": True})[0] == 200
+
+
+def test_writing_aids_handler_without_socket(tmp_path, monkeypatch):
+    import io
+    import json
+    from types import SimpleNamespace
+    from urllib.parse import urlencode
+
+    from tests.unit.test_writing_compile import ERROR_LOG, FAKE
+
+    app = App(Paths(tmp_path / 'data', exports_root=tmp_path / 'exports'), load_config())
+    conn = app.db()
+    create_project(conn, app.paths, 'demo')
+    conn.close()
+    engine = app.paths.root / 'tools' / 'tectonic' / 'tectonic'
+    engine.parent.mkdir(parents=True)
+    engine.write_text(FAKE.format(python=sys.executable, record=str(tmp_path / 'record'),
+                                  mode=str(tmp_path / 'mode'), log=ERROR_LOG))
+    engine.chmod(0o755)
+    monkeypatch.setattr(wc, 'sandbox_kind', lambda: 'scan')
+
+    class Request:
+        def __init__(self, raw):
+            self.input, self.output = io.BytesIO(raw), bytearray()
+
+        def makefile(self, *args):
+            return self.input
+
+        def sendall(self, data):
+            self.output.extend(data)
+
+    def request(method, path, body=None):
+        data = json.dumps(body).encode() if body is not None else b''
+        raw = (f'{method} {path} HTTP/1.0\r\nHost: localhost\r\nContent-Type: application/json\r\n'
+               f'Content-Length: {len(data)}\r\n\r\n').encode() + data
+        req = Request(raw)
+        make_handler(app)(req, ('127.0.0.1', 1234), SimpleNamespace(server_address=('127.0.0.1', 1234)))
+        head, payload = bytes(req.output).split(b'\r\n\r\n', 1)
+        return int(head.split()[1]), head, payload
+
+    status, _, payload = request('POST', '/api/write/create', {'project': 'demo', 'name': 'Draft'})
+    assert status == 200
+    doc = json.loads(payload)
+    folder = app.paths.project_dir('demo') / 'writing' / doc['slug']
+    body = {'doc': doc['id']}
+    status, head, pdf = request('POST', '/api/write/preview', {**body, 'tex': '$x$'})
+    assert status == 200 and pdf.startswith(b'%PDF')
+    assert b'Content-Type: application/pdf' in head and b'Content-Disposition: inline' in head
+    assert request('POST', '/api/write/preview', {**body, 'tex': r'$\input{x}$'})[0] == 400
+    for name, content_type in [('x.pdf', 'application/pdf'), ('x.png', 'image/png'),
+                               ('x.jpg', 'image/jpeg'), ('x.jpeg', 'image/jpeg')]:
+        (folder / name).write_bytes(name.encode())
+        status, head, data = request('GET', '/api/write/figure?' + urlencode({**body, 'name': name}))
+        assert status == 200 and data == name.encode() and content_type.encode() in head
+        assert b'Content-Disposition: inline' in head
+    assert request('GET', '/api/write/figure?' + urlencode({**body, 'name': 'x'}))[2] == b'x.pdf'
+    (folder / 'x.pdf').unlink()
+    assert request('GET', '/api/write/figure?' + urlencode({**body, 'name': 'x'}))[2] == b'x.png'
+    (folder / '.hidden.png').write_bytes(b'x')
+    (folder / 'x.svg').write_bytes(b'<svg/>')
+    (folder / 'link.png').symlink_to(tmp_path / 'outside.png')
+    for name, expected in [('../x.png', 400), ('.hidden.png', 400), ('x.svg', 400),
+                           ('link.png', 400), ('missing.png', 404), ('missing', 404)]:
+        assert request('GET', '/api/write/figure?' + urlencode({**body, 'name': name}))[0] == expected
+    with (folder / 'big.png').open('wb') as stream:
+        stream.truncate(25 * 1024 * 1024 + 1)
+    assert request('GET', '/api/write/figure?' + urlencode({**body, 'name': 'big.png'}))[0] == 400
+    (folder / 'main.tex').write_text('one\ntwo\nthree')
+    status, _, payload = request('POST', '/api/write/note', {**body, 'file': 'main.tex', 'line': 2,
+                                                          'anchor': 'two', 'body': ' note '})
+    assert status == 200
+    note = json.loads(payload)
+    assert note['body'] == 'note'
+    (folder / 'main.tex').write_text('two\none\nthree')
+    query = urlencode({**body, 'file': 'main.tex'})
+    listing = json.loads(request('GET', '/api/write/notes?' + query)[2])['notes']
+    assert listing[0]['line'] == 1 and listing[0]['moved']
+    status, _, payload = request('POST', '/api/write/note', {**body, **note, 'line': 3, 'anchor': 'three',
+                                                          'body': 'edited'})
+    assert status == 200 and json.loads(payload)['body'] == 'edited'
+    moved = request('POST', '/api/write/notes/move', {**body, 'file': 'main.tex',
+                                                    'notes': [{'id': note['id'], 'line': 2, 'anchor': 'one'}]})
+    assert moved[0] == 200 and json.loads(moved[2]) == {'moved': 1}
+    assert request('POST', '/api/write/note', {**body, 'file': 'main.tex', 'line': 1, 'body': ''})[0] == 400
+    assert request('POST', '/api/write/note/delete', {**body, 'id': note['id']})[0] == 200
+    assert request('POST', '/api/write/note/delete', {**body, 'id': note['id']})[0] == 404
