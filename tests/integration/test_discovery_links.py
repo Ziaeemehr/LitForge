@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 from discovery_fakes import FakeTransport, default_routes
-from test_ui_server import call, server, wait_job  # noqa: F401 (server is a fixture)
 
 from litforge.config import Paths
 from litforge.discovery.http import HttpClient
@@ -30,6 +29,10 @@ PAGE = b"""<html><head><title>The frontier</title>
     ("https://link.springer.com/article/10.1007/s10827-020-00745-5", "10.1007/s10827-020-00745-5"),
     ("https://www.pnas.org/doi/full/10.1073/pnas.1912789117?utm=x", "10.1073/pnas.1912789117"),
     ("https://www.nature.com/articles/s41586-020-2649-2", None),  # the page has to be read
+    # file and version suffixes are not part of the DOI (review: they made OpenAlex answer 404)
+    ("https://link.springer.com/content/pdf/10.1007/s00422-020-00825-5.pdf", "10.1007/s00422-020-00825-5"),
+    ("https://www.biorxiv.org/content/10.1101/2020.05.01.072751v2.full.pdf", "10.1101/2020.05.01.072751"),
+    ("https://www.biorxiv.org/content/10.1101/2020.05.01.072751v2", "10.1101/2020.05.01.072751"),
 ])
 def test_identifier_from_url(url: str, expected: str | None) -> None:
     assert identifier_from_url(url) == expected
@@ -77,14 +80,27 @@ def test_a_direct_pdf_link_is_downloaded_for_reading(conn: sqlite3.Connection, p
     assert report.errors == []
 
 
-def test_links_route_adds_the_paper_and_reports_bad_links(server: str) -> None:
-    status, job = call(server, "/api/links", {"project": "web", "links": [
-        "https://doi.org/10.1073/pnas.1912789117", "nope"]})
-    assert status == 200
-    job = wait_job(server, job["id"])
-    assert job["status"] == "done", job
-    assert any("nope" in m and m.startswith("warning") for m in job["messages"])
-    assert job["messages"][-1].startswith("done: 1 papers from links")
-    _, run = call(server, f"/api/runs/{job['run_id']}")
-    assert [p["title"] for p in run["papers"]] == ["The frontier of simulation-based inference"]
-    assert call(server, "/api/links", {"project": "web", "links": []})[0] == 400
+
+def test_a_pdf_link_read_twice_is_not_corrupted_by_the_response_cache(conn: sqlite3.Connection, paths: Paths,
+                                                                      pid: str) -> None:
+    pdf = b"%PDF-1.4\n" + bytes(range(256)) * 4  # binary: a text cache would mangle it
+    routes = [("files.example/paper.pdf", (200, {"Content-Type": "application/pdf"}, pdf))]
+    transport = FakeTransport(routes)
+    sources = Sources(HttpClient(cache_dir=paths.http_cache, transport=transport, sleep=lambda s: None,
+                                 min_interval={}))
+    for _ in range(2):
+        report, pdfs = run_links(conn, sources, paths, pid, ["https://files.example/paper.pdf"])
+        assert Path(pdfs[0]).read_bytes() == pdf
+        assert report.status == "done"  # PDF links alone are a successful run, also in the database
+        assert conn.execute("SELECT status FROM discovery_runs WHERE id=?", (report.run_id,)).fetchone()[0] == "done"
+    assert len(transport.calls) == 2 and pdfs[0] != run_links(conn, sources, paths, pid,
+                                                              ["https://files.example/paper.pdf"])[1][0]
+
+
+def test_a_doi_not_in_openalex_falls_back_to_reading_the_link(conn: sqlite3.Connection, paths: Paths,
+                                                              pid: str) -> None:
+    pdf = b"%PDF-1.4\nunlisted\n"
+    routes = [("files.example/10.5555/unlisted.1", (200, {"Content-Type": "application/pdf"}, pdf))]
+    sources = Sources(HttpClient(transport=FakeTransport(routes), sleep=lambda s: None, min_interval={}))
+    report, pdfs = run_links(conn, sources, paths, pid, ["https://files.example/10.5555/unlisted.1"])
+    assert len(pdfs) == 1 and report.errors == []

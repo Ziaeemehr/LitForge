@@ -591,3 +591,17 @@ def test_export_with_math_high_and_no_ollama_says_why(tmp_path: Path) -> None:
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+
+def test_links_route_adds_the_paper_and_reports_bad_links(server: str) -> None:
+    status, job = call(server, "/api/links", {"project": "web", "links": [
+        "https://doi.org/10.1073/pnas.1912789117", "nope"]})
+    assert status == 200
+    job = wait_job(server, job["id"])
+    assert job["status"] == "done", job
+    assert any("nope" in m and m.startswith("warning") for m in job["messages"])
+    assert job["messages"][-1].startswith("done: 1 papers from links")
+    _, run = call(server, f"/api/runs/{job['run_id']}")
+    assert [p["title"] for p in run["papers"]] == ["The frontier of simulation-based inference"]
+    assert call(server, "/api/links", {"project": "web", "links": []})[0] == 400
