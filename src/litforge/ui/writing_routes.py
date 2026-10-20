@@ -238,6 +238,9 @@ def _compile_job(app: App, doc: wd.Document) -> Job:
 
     def work(job: Job) -> None:
         job.messages.append(f"Compiling with {doc.engine}…")
+        if wc.first_tectonic_run(app.paths, doc.engine):
+            job.messages.append("First compile: downloading the LaTeX packages (~50 MB), this takes a few minutes "
+                                "once; later compiles take seconds.")
         conn = app.db()
         try:
             wcite.sync_bib(conn, doc)  # entries for every library key the text cites

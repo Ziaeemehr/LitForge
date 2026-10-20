@@ -327,6 +327,12 @@ def _command(doc: Document, paths: Paths, engine: str, main: str, draft: bool = 
     raise CompileError(f"unknown engine {engine}")
 
 
+def first_tectonic_run(paths: Paths, engine: str) -> bool:
+    """True when this compile is Tectonic's first: it downloads its LaTeX packages and takes a few minutes."""
+    cache = tectonic_cache(paths)
+    return engine == "tectonic" and not (cache.is_dir() and any(cache.iterdir()))
+
+
 def compile_document(doc: Document, paths: Paths, engine: str | None = None, *, main: str | None = None,
                      timeout_s: float | None = None) -> CompileResult:
     engine = engine or doc.engine
@@ -349,9 +355,7 @@ def compile_document(doc: Document, paths: Paths, engine: str | None = None, *, 
     argv, env, readable = _command(doc, paths, engine, main, doc.draft, out_dir)
     writable = [build, *[p for p in readable if p.name == "tectonic-cache"]]
     if timeout_s is None:
-        cache = tectonic_cache(paths)
-        first = engine == "tectonic" and not (cache.is_dir() and any(cache.iterdir()))
-        timeout_s = FIRST_COMPILE_TIMEOUT_S if first else COMPILE_TIMEOUT_S
+        timeout_s = FIRST_COMPILE_TIMEOUT_S if first_tectonic_run(paths, engine) else COMPILE_TIMEOUT_S
     if engine == "xelatex":
         writable = [build]
     with tempfile.TemporaryDirectory(prefix="litforge-compile-") as scratch:

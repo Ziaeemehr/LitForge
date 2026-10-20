@@ -304,3 +304,14 @@ def test_mains_with_the_same_name_in_different_folders_keep_their_own_outputs(en
     assert not (doc.folder / b.output_dir / "main.pdf").exists()  # a's PDF is not shown as b's
     assert wd.get_document(conn, paths, doc.id).output_dir == ".build/b"
     assert wd.set_settings(conn, paths, doc.id, main_file="main.tex").output_dir == ".build"
+
+
+def test_first_tectonic_run_until_the_package_cache_has_files(tmp_path: Path) -> None:
+    paths = Paths(tmp_path / "data")
+    assert wc.first_tectonic_run(paths, "tectonic")
+    assert not wc.first_tectonic_run(paths, "xelatex")
+    cache = wc.tectonic_cache(paths)
+    cache.mkdir(parents=True)
+    assert wc.first_tectonic_run(paths, "tectonic")  # an empty cache: still the first run
+    (cache / "bundle").write_text("x")
+    assert not wc.first_tectonic_run(paths, "tectonic")

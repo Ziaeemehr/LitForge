@@ -2705,6 +2705,8 @@
   function pollWriteJob(job, doc) {
     return api('/api/jobs/' + encodeURIComponent(job.id)).then(function (j) {
       if (j.status === 'running') {
+        var said = j.messages || [];
+        if (W.doc === doc && said.length) $('write-compile-state').textContent = said[said.length - 1];
         return new Promise(function (resolve) { setTimeout(resolve, 700); }).then(function () { return pollWriteJob(job, doc); });
       }
       W.job = null;

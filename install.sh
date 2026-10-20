@@ -83,6 +83,9 @@ ask_optional() {
   esac
 }
 
+say "Installing Tectonic, the LaTeX engine of the Writing Studio (~22 MB)"
+install_optional tectonic
+
 ask_optional mineru "Install MinerU for accurate PDF reading (~4 GB)? [y/N]"
 ask_optional pix2text "Install Pix2Text for better math in exports (~2 GB)? [y/N]"
 

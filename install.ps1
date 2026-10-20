@@ -93,6 +93,12 @@ try {
         Fail 'could not add the LitForge icon'
     }
 
+    Say 'Installing Tectonic, the LaTeX engine of the Writing Studio (~22 MB)'
+    Native { uv run litforge tools install tectonic --yes }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Tectonic installation failed; retry with: cd '$dir'; uv run litforge tools install tectonic"
+    }
+
     $extras = @()
     if ($env:LITFORGE_EXTRAS) {
         $extras = @($env:LITFORGE_EXTRAS.Split(',') | ForEach-Object { $_.Trim().ToLowerInvariant() })

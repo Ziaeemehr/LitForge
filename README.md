@@ -58,7 +58,8 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Zia
 ```
 
 Then open LitForge from its icon. Closing its page stops it after about two minutes; **⏻ Quit** stops it at once.
-At the end the installer offers optional tools (large downloads); **No** is the default, and you can add them later
+The installer also adds Tectonic (~22 MB), the LaTeX engine of the Writing Studio.
+At the end it offers optional tools (large downloads); **No** is the default, and you can add them later
 in Settings → Optional tools.
 
 ### Update

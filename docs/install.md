@@ -25,6 +25,9 @@ the page. To stop LitForge, press **⏻ Quit** at the bottom of the sidebar.
 The data lives in the `data/` folder of the install folder. Without the icon:
 `uv run litforge ui` in that folder.
 
+Tectonic (~22 MB), the LaTeX engine of the Writing Studio, is installed too. Its first compile downloads
+about 50 MB of LaTeX packages and takes a few minutes; later compiles take seconds.
+
 ## Optional extras
 
 | For | Install |
