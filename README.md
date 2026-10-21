@@ -8,8 +8,8 @@
 ![LitForge results: ranked papers with scores, charts and filters](docs/images/results.png)
 
 LitForge turns a paper, a few keywords or a reference list into a ranked reading list, helps you
-decide what to keep, and writes Markdown notes with the full text for Obsidian or a language model.
-It runs in your browser, but everything stays on your machine.
+decide what to keep, answers questions from the papers with verified quotes, and lets you write your
+own paper in LaTeX next to them. It runs in your browser, but everything stays on your machine.
 
 ## Main purpose
 
@@ -35,12 +35,21 @@ Each hit names its paper, section, page and a short quote. For the Markdown note
   result says why it was found.
 - **Mark ✓ / ✗** with the keyboard, in ranges or in bulk; "More like my ✓ papers" searches again.
 - **AI screening** (optional): a local model checks titles and abstracts against your criteria.
-- **PDFs**: downloads open-access copies, matches your own PDFs to their papers, lists the missing ones.
+- **Sources**: downloads open-access PDFs, adds papers from links, and reads your own PDFs and Word,
+  PowerPoint, Excel, HTML, EPUB and Markdown files.
+- **Ask** the project: answers cite the page, and every quote is checked against the paper.
+- **Writing Studio**: a LaTeX editor with live PDF preview, citations from your library (BibTeX kept in
+  sync), spell check, versions and git sync (Overleaf, GitHub). AI actions fix errors, rewrite, translate
+  (English ↔ Persian), suggest citations, a title or an abstract, and turn an image into an equation or a
+  table; nothing changes until you accept. An assistant beside the editor answers from your papers.
+- **Models, one choice**: Local (free, nothing leaves your computer), Cloud, Hybrid or Manual.
 - **Markdown export** with full text, figures and equations as LaTeX.
 - Light and dark themes, a quick guide (press `?`), and a command line for everything.
 
-| Paper details | Dark theme |
+| Writing Studio | Assistant with verified quotes |
 |---|---|
+| ![LaTeX editor with PDF preview](docs/images/write.png) | ![Assistant answering from the project's papers](docs/images/assistant.png) |
+| **Paper details** | **Dark theme** |
 | ![Paper details with score breakdown and abstract](docs/images/paper.png) | ![Result list in the dark theme](docs/images/dark.png) |
 
 ## Start
@@ -106,7 +115,10 @@ litforge search "graph neural networks" --json
 - **مرتب‌سازی بر اساس اولویت مرور**: ترکیب ارتباط با موضوع و اهمیت در حوزه، همراه با دلیل یافته‌شدن هر مقاله.
 - **علامت‌گذاری ✓ و ✗** با صفحه‌کلید، به‌صورت بازه‌ای یا گروهی، و جستجوی دوباره از مقاله‌های ✓.
 - **غربالگری با هوش مصنوعی** (اختیاری): یک مدل محلی عنوان و چکیده را با معیارهای شما می‌سنجد.
-- **مدیریت PDF**: دریافت نسخه‌های دسترسی آزاد، تطبیق PDFهای خودتان و فهرست PDFهای ناموجود.
+- **منابع**: دریافت PDFهای دسترسی آزاد، افزودن مقاله از لینک، و خواندن PDF و فایل‌های Word، PowerPoint، Excel، HTML، EPUB و Markdown خودتان.
+- **پرسش از پروژه**: پاسخ‌ها صفحه‌ی منبع را می‌آورند و هر نقل‌قول با متن مقاله بررسی می‌شود.
+- **استودیوی نوشتن**: ویرایشگر LaTeX با پیش‌نمایش زنده‌ی PDF، ارجاع از کتابخانه، غلط‌یاب، نسخه‌ها و همگام‌سازی با git (Overleaf، GitHub). کارهای هوش مصنوعی: رفع خطا، بازنویسی، ترجمه‌ی انگلیسی و فارسی، پیشنهاد ارجاع، عنوان و چکیده، و تبدیل تصویر به معادله یا جدول؛ تا تأیید نکنید چیزی تغییر نمی‌کند. دستیار کنار ویرایشگر از روی مقاله‌هایتان پاسخ می‌دهد.
+- **مدل‌ها با یک انتخاب**: محلی (رایگان، بدون خروج داده)، ابری، ترکیبی یا دستی.
 - **خروجی Markdown** با متن کامل، شکل‌ها و معادله‌ها به LaTeX.
 - پوسته‌ی روشن و تاریک، راهنمای سریع (کلید `?`) و خط فرمان برای همه‌ی کارها.
 
