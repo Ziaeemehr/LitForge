@@ -143,6 +143,8 @@ LitForge را ببندید و همان خط نصب را دوباره اجرا ک
 
 </div>
 
-## License note
+## License
 
-PyMuPDF is AGPL-licensed. Review this before distributing LitForge or derived work.
+LitForge is free software under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0). You may use, change and share it; if you distribute it, or offer a changed version to others over a network, you must make its source available under the same license. It depends on PyMuPDF, which is AGPL-licensed too.
+
+If LitForge is useful to you, you can support its development through [GitHub Sponsors](https://github.com/sponsors/Ziaeemehr).
