@@ -819,3 +819,10 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
   #models-profiles > .models-profile { grid-template-columns: 1fr 1fr 1fr; }
   #models-profiles > .models-profile > span:first-child, .models-card .models-test { grid-column: 1 / -1; text-align: left; }
 }
+/* Model modes: four cards, one line each. */
+.mode-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin: 6px 0 10px; }
+.mode-card { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: start; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
+.mode-card input { grid-row: span 2; margin-top: 3px; }
+.mode-card span { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.mode-card:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }

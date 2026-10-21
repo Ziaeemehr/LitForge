@@ -30,8 +30,21 @@ uv run litforge export
 
 Open **⚙ Settings** in the sidebar footer, use **`,`** outside a text field, or bookmark `#settings`.
 This full-width page has cards for Updates, Models, API keys, Add API model, Cloud & budget, and Library & export.
-Models includes hardware, the recommended setup, local-server status, profile Test/Remove controls and task
-assignments. Model configuration writes show the exact diff and ask for confirmation. YAML comments are
+Settings has four tabs: General, Models, Tools, and Cloud & keys.
+
+**Models → Mode** is one choice for which model does what:
+
+| Mode | What runs where |
+|---|---|
+| Local | every task on this computer, with the local models of its tier; nothing is sent anywhere |
+| Cloud | every task on cloud models: a cheap one for screening, extraction, figures and Better math (high), a strong one (optional) for questions, analysis and writing |
+| Hybrid | screening and extraction (and Better math) on this computer; questions, analysis and writing on a cloud model |
+| Manual | your own model for each task (**Assign tasks**); assigning a task by hand switches to Manual |
+
+Cloud and Hybrid still need the one-time **Enable cloud** consent, keep the dollar limits, and always ask before
+sending your own drafts. In Cloud, the Export menu's **Math: high** says it runs on the cloud and what a page costs.
+The local tier (large / medium / small) is under **Advanced**. Model configuration writes show the exact diff and
+ask for confirmation. YAML comments are
 not preserved; the previous config is copied to `config.yaml.bak` as described below.
 
 **Library & export** contains the contact e-mail used for OpenAlex, Crossref and Unpaywall, and the default

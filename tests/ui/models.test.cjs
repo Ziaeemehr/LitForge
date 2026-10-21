@@ -11,10 +11,14 @@ function setup(confirmed = true) {
     appendChild(e) { this.children.push(e); return e; }
     replaceChildren(...e) { this.children = e; }
     set innerHTML(value) { throw Error('Unsafe innerHTML'); }
+    querySelector() { return null; }
   }
   const elements = {}, calls = [];
   const $ = id => elements[id] ||= new Element();
-  const ctx = vm.createContext({ $, document: { createElement: () => new Element() },
+  const radios = ['local', 'cloud', 'hybrid', 'manual'].map(value => ({ value, checked: false }));
+  const ctx = vm.createContext({ $, radios, document: { createElement: () => new Element(),
+      querySelector: sel => (sel.includes(':checked') ? radios.find(r => r.checked) || null : null),
+      querySelectorAll: sel => (sel.includes('models-mode') ? radios : []) },
     window: { confirm: () => confirmed }, setTimeout, toast() {}, refreshModelChoices() {},
     api: async () => ({ hardware: { os: 'Fake', ram_gb: 24 }, tier: 'large', profiles: [
       { name: '<script>bad</script>', model: 'model', provider: 'api', remote: true }],
@@ -23,7 +27,7 @@ function setup(confirmed = true) {
     post: async (path, body) => { calls.push({ path, body }); return { token: 'reviewed', diff: 'Exact file diff', notice: 'Evidence leaves machine' }; }
   });
   vm.runInContext(source, ctx);
-  return { ctx, $, calls };
+  return { ctx, $, calls, radios };
 }
 const flush = async () => { for (let i = 0; i < 8; i++) await new Promise(setImmediate); };
 
@@ -111,13 +115,14 @@ test('Hardware uses the explicit build in semantic version output', async () => 
   assert.match($('models-hardware').textContent, /llama.cpp build 11429/);
 });
 
-test('Models tab: cloud choices only for Cloud-light, readable task names', async () => {
-  const { ctx, $ } = setup();
+test('Models tab: cloud choices only for the Cloud and Hybrid modes, readable task names', async () => {
+  const { ctx, $, radios } = setup();
   await ctx.loadModels(); await flush();
-  $('models-tier').value = 'large'; ctx.showCloudPickers();
-  assert.equal($('cloud-pickers').hidden, true);
-  $('models-tier').value = 'cloud'; ctx.showCloudPickers();
-  assert.equal($('cloud-pickers').hidden, false);
+  const pick = mode => { radios.forEach(r => { r.checked = r.value === mode; }); ctx.showCloudPickers(); };
+  pick('local'); assert.equal($('cloud-pickers').hidden, true);
+  pick('manual'); assert.equal($('cloud-pickers').hidden, true);
+  pick('cloud'); assert.equal($('cloud-pickers').hidden, false);
+  pick('hybrid'); assert.equal($('cloud-pickers').hidden, false);
   assert.equal(ctx.taskLabel('write_cite'), 'Write: suggest citations');
   assert.equal(ctx.taskLabel('some_new_task'), 'some new task');
 });
@@ -127,4 +132,32 @@ test('a model test reads as one short line next to the model', () => {
   assert.equal(ctx.testResult({ status: 'done', report: { reachable: true, valid: true, latency_ms: 840 } }), '✓ Works · 0.8 s');
   assert.match(ctx.testResult({ status: 'done', report: { reachable: true, valid: false, latency_ms: 100 } }), /^⚠ Answers, but not/);
   assert.equal(ctx.testResult({ status: 'failed', error: 'connection refused\ntrace…' }), '✗ connection refused');
+});
+
+test('Models tab: the saved mode is selected, an older setup reads as its mode, Apply sends the mode', async () => {
+  const { ctx, $, calls, radios } = setup();
+  await ctx.loadModels(); await new Promise(setImmediate);
+  assert.equal(radios.find(r => r.checked).value, 'local');  // tier "large" from before modes existed
+  assert.match($('models-current').textContent, /^Now: Local \(set up before modes existed\)/);
+  radios.forEach(r => { r.checked = r.value === 'hybrid'; });
+  ctx.showCloudPickers();
+  assert.equal($('cloud-pickers').hidden, false);
+  assert.match($('cloud-strong-label').textContent, /questions, analysis and writing$/);
+  ctx.initModels();
+  $('cloud-strong').value = 'fixture/strong';
+  $('models-apply').onclick();
+  await new Promise(setImmediate);
+  const sent = calls.find(c => c.path === '/api/models/preview').body;
+  assert.equal(sent.mode, 'hybrid'); assert.equal(sent.strong, 'fixture/strong');
+});
+
+test('Math: high names its cloud cost', () => {
+  const { ctx, $ } = setup();
+  const high = { value: 'high', textContent: 'Math: high (best)', title: '' };
+  $('export-math').querySelector = () => high;
+  ctx.showMathCost({ model: 'vendor/vision', usd_per_page: 0.0123 });
+  assert.equal(high.textContent, 'Math: high (cloud, ~$0.0123/page)');
+  assert.match(high.title, /vendor\/vision/);
+  ctx.showMathCost(null);
+  assert.equal(high.textContent, 'Math: high (best)');
 });

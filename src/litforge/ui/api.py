@@ -47,6 +47,7 @@ from litforge.llm.model_setup import (
     api_model_patch,
     cloud_change,
     config_change,
+    math_high_cloud,
     remove_model_change,
     setup_proposal,
 )
@@ -727,6 +728,7 @@ def living_panel(conn: sqlite3.Connection, project_id: str) -> dict[str, Any]:
 class ModelsChangeRequest(BaseModel):
     action: Literal["setup", "add", "remove", "cloud", "budget", "library", "assign"]
     tier: Literal["large", "medium", "small", "cloud"] | None = None
+    mode: Literal["local", "cloud", "hybrid", "manual"] | None = None
     cheap: str | None = None
     strong: str | None = None
     policy: Literal["local_only", "ask_before_cloud", "hybrid"] | None = None
@@ -769,6 +771,7 @@ class ModelsPanel:
         proposal = setup_proposal(self.paths.root, self._detect())
         cfg = self.config.models.servers.get("llamacpp")
         return {"hardware": self._detect().model_dump(), "tier": self.config.models.setup_tier,
+                "mode": self.config.models.mode, "math_high_cloud": math_high_cloud(self.config),
                 "profiles": [{**p, "vision": self.config.models.profiles.get(p["name"],
                                self.config.models.local).vision} for p in model_profiles(self.config)],
                 "proposal": proposal.as_dict(), "providers": list(PROVIDERS), "task_names": list(TASK_NAMES),
@@ -789,9 +792,11 @@ class ModelsPanel:
             tier = body.get("tier")
             if tier is not None and tier not in {"large", "medium", "small", "cloud"}:
                 raise ValueError("unknown tier")
+            mode = body.get("mode")
+            wants_catalogue = body.get("cheap") or (mode == "hybrid" and body.get("strong"))
             proposal = setup_proposal(self.paths.root, self._detect(), tier, cheap=body.get("cheap"),
-                                      strong=body.get("strong"), catalogue=self.catalogue.catalogue()
-                                      if body.get("cheap") else None)
+                                      strong=body.get("strong"), mode=mode,
+                                      catalogue=self.catalogue.catalogue() if wants_catalogue else None)
             if not proposal.available:
                 raise ValueError(proposal.notes)
             change, notice = proposal.change, proposal.notes
@@ -829,8 +834,9 @@ class ModelsPanel:
             tasks = body.get("tasks") or []
             owned = self.config.models.setup_owned.model_dump()
             owned["tasks"] = [t for t in owned["tasks"] if t not in tasks]
+            # A task assigned by hand is the user's own choice: the mode becomes Manual, so no mode overwrites it.
             change = config_change(self.paths.root, {"models": {"tasks": {t: {"profile": name} for t in tasks},
-                                                               "setup_owned": owned}})
+                                                               "setup_owned": owned, "mode": "manual"}})
         elif action == "library":
             mailto = (body.get("mailto") or "").strip() or None
             if mailto and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", mailto):

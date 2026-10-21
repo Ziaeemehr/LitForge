@@ -141,10 +141,29 @@ def choose_tier(hw: Hardware) -> Tier:
     return "small"
 
 
+Mode = Literal["local", "cloud", "hybrid", "manual"]
+# Many calls on many papers: on this computer in Hybrid. Every other task (questions, analysis, writing) is the
+# quality work a strong cloud model does better.
+BULK_TASKS = frozenset({"screen", "screen_fulltext", "matrix_extract", "claim_extract", "asset_analyze",
+                        "equation_compare", "page_rewrite"})
+
+
 def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap: str | None = None,
-                   strong: str | None = None, catalogue: list[dict[str, Any]] | None = None) -> SetupProposal:
+                   strong: str | None = None, catalogue: list[dict[str, Any]] | None = None,
+                   mode: Mode | None = None) -> SetupProposal:
+    """Without `mode`: the tier as chosen. With a mode: Local (the hardware's tier, local only), Cloud (every
+    task on cloud models), Hybrid (bulk work local, quality work on the strong cloud model) or Manual (only the
+    choice is recorded; the user's assignments stay)."""
     hardware_tier = choose_tier(hw)
     recommended: Tier = "cloud" if hardware_tier == "small" else hardware_tier
+    if mode == "manual":
+        change = config_change(root, {"models": {"mode": "manual"}})
+        return SetupProposal(hw, recommended, tier or recommended, True,
+                             "Manual: your own task assignments are kept as they are.", 0.0, 0.0, "", change)
+    if mode in ("local", "hybrid"):
+        tier = tier if tier in ("large", "medium", "small") else hardware_tier
+    elif mode == "cloud":
+        tier = "cloud"
     chosen = tier or recommended
     notes = "Downloads happen on first use, after confirmation; nothing is installed by setup."
     if chosen == "large" and not hw.llama_server:
@@ -157,10 +176,13 @@ def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap:
         notes += " Ollama missing: brew install ollama (macOS), or https://ollama.com/download."
     patch: dict[str, Any] = {"models": {"setup_tier": chosen}}
     models = patch["models"]
+    if mode is not None:
+        models["mode"] = mode
     preset = ""
     if chosen == "cloud":
-        patch["privacy"] = {"allow_cloud": False}
-        models["policy"] = "ask_before_cloud"
+        if mode is None:  # the tier path asks before every call; a mode keeps the consent the user gave
+            patch["privacy"] = {"allow_cloud": False}
+        models["policy"] = "ask_before_cloud" if mode is None else "hybrid"
         models["local"] = {"provider": "ollama", "model": "qwen3:4b", "remote": False,
                            "server": None, "base_url": None, "vision": False}
         models["profiles"], models["tasks"] = {}, {}
@@ -176,15 +198,10 @@ def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap:
                 raise ValueError("Choose a catalogued cheap model that accepts images")
             if strong and strong not in entries:
                 raise ValueError("Choose a catalogued strong model")
-            for alias, model_id in [("cloud_cheap", cheap), *(([("cloud_strong", strong)]) if strong else [])]:
-                entry = entries[model_id]
-                profile = api_model_patch("openrouter", model_id, name=alias,
-                    price_in=entry["input_per_million_usd"], price_out=entry["output_per_million_usd"],
-                    vision="image" in entry["input_modalities"])["models"]["profiles"][alias]
-                profile["context_tokens"] = entry["context_length"]
-                models["profiles"][alias] = profile
+            models["profiles"].update(_cloud_profiles(entries, cheap, strong))
             extraction = {"matrix_extract", "claim_extract", "asset_analyze", "equation_compare", "page_rewrite"}
-            models["tasks"] = {task: {"profile": "local" if hw.ollama and task in {"screen", "screen_fulltext"}
+            local_screening = hw.ollama and mode is None  # Cloud mode: light work goes to the cloud too
+            models["tasks"] = {task: {"profile": "local" if local_screening and task in {"screen", "screen_fulltext"}
                 else "cloud_cheap" if task in extraction or task in {"screen", "screen_fulltext"}
                 else "cloud_strong" if strong else "cloud_cheap"} for task in TASK_NAMES}
             estimate = cloud_estimate(entries[cheap])
@@ -225,6 +242,23 @@ def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap:
         patch["vision"] = {"model": "qwen2.5vl:7b" if chosen == "medium" else None}
         patch["screening"] = {"model": "qwen3:4b"}
         sizes = (8.0, 12.0) if chosen == "medium" else (3.0, 4.0)
+    if mode == "local":
+        models["policy"] = "local_only"
+        patch["privacy"] = {"allow_cloud": False}
+    if mode == "hybrid":
+        # The local tier above does the bulk work; questions, analysis and writing go to a cloud model.
+        cloud_model = strong or cheap
+        if not cloud_model:
+            available = False
+            notes = "Hybrid needs a cloud model for questions, analysis and writing: choose one from the catalogue."
+        else:
+            entries = {m["id"]: m for m in catalogue or []}
+            if cloud_model not in entries:
+                raise ValueError("Choose a catalogued cloud model")
+            alias = "cloud_strong" if strong else "cloud_cheap"
+            models.setdefault("profiles", {}).update(_cloud_profiles(entries, None if strong else cheap, strong))
+            models["tasks"].update({task: {"profile": alias} for task in TASK_NAMES if task not in BULK_TASKS})
+            models["policy"] = "hybrid"
     if hw.free_disk_gb and hw.free_disk_gb < sizes[0]:
         notes += " Free disk space is below the approximate download size."
     previous = yaml.safe_load(_read(root / "config.yaml") or "") or {}
@@ -256,6 +290,22 @@ def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap:
     change = config_change(root, patch, preset=preset or None, remove=remove)
     change.stop_server = stop_server
     return SetupProposal(hw, recommended, chosen, available, notes, *sizes, preset, change)
+
+
+def _cloud_profiles(entries: dict[str, dict[str, Any]], cheap: str | None,
+                    strong: str | None) -> dict[str, dict[str, Any]]:
+    """OpenRouter profiles for the chosen catalogue models: cloud_cheap and / or cloud_strong."""
+    profiles = {}
+    for alias, model_id in (("cloud_cheap", cheap), ("cloud_strong", strong)):
+        if not model_id:
+            continue
+        entry = entries[model_id]
+        profile = api_model_patch("openrouter", model_id, name=alias,
+            price_in=entry["input_per_million_usd"], price_out=entry["output_per_million_usd"],
+            vision="image" in entry["input_modalities"])["models"]["profiles"][alias]
+        profile["context_tokens"] = entry["context_length"]
+        profiles[alias] = profile
+    return profiles
 
 
 def api_model_patch(provider: str, model: str, *, name: str | None = None, price_in: float | None = None,
@@ -347,6 +397,19 @@ def api_model_change(root: Path, patch: dict[str, Any]) -> ConfigChange:
             "tasks": [task for task in owned.get("tasks", []) if task not in patch["models"].get("tasks", {})]}
     return config_change(root, patch, remove=[("models", "profiles", name)
                                              for name in patch["models"]["profiles"]])
+
+
+def math_high_cloud(config: Config) -> dict[str, Any] | None:
+    """When Better math (high) runs on a cloud model: its name and the estimated cost of one page (a page image
+    in, the page's text out), so the choice can say so before anything is sent. None when it runs locally."""
+    task = config.models.tasks.get("page_rewrite")
+    name = task.profile if task else config.models.vision_profile
+    profile = config.models.profiles.get(name or "") if name not in (None, "local") else None
+    if profile is None or not profile.remote:
+        return None
+    price = profile.pricing
+    usd = (1024 * price.input_per_million_usd + 4000 * price.output_per_million_usd) / 1_000_000 if price else None
+    return {"model": profile.model, "usd_per_page": usd}
 
 
 def cloud_estimate(model: dict[str, Any], *, papers: int = 20, columns: int = 10,

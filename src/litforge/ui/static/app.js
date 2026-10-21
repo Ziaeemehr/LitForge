@@ -4547,10 +4547,43 @@
   };
   function taskLabel(task) { return modelTaskLabels[task] || task.replace(/_/g, ' '); }
 
-  // The cloud model choices matter only for the Cloud-light tier (chosen, or recommended and nothing chosen).
+  // The mode chosen in the cards (Local, Cloud, Hybrid, Manual).
+  function selectedMode() {
+    var on = document.querySelector('input[name="models-mode"]:checked');
+    return on ? on.value : '';
+  }
+
+  // The mode saved in the settings; older setups have only a tier.
+  function currentMode(info) {
+    if (info.mode) return info.mode;
+    if (info.tier === 'cloud') return 'cloud';
+    if (info.tier) return 'local';
+    return info.proposal && info.proposal.recommended_tier === 'cloud' ? 'cloud' : 'local';
+  }
+
+  // Cloud models are chosen for Cloud (a cheap image model, a strong one optional) and Hybrid (the model that
+  // answers and writes; the cheap one is optional there).
   function showCloudPickers() {
-    var tier = $('models-tier').value || (modelsInfo && modelsInfo.proposal && modelsInfo.proposal.recommended_tier);
-    $('cloud-pickers').hidden = tier !== 'cloud';
+    var mode = selectedMode(), tier = $('models-tier').value;
+    $('cloud-pickers').hidden = !(mode === 'cloud' || mode === 'hybrid' || (!mode && tier === 'cloud'));
+    $('cloud-cheap-label').textContent = mode === 'hybrid' ?
+      'Cheap model (optional; used when no strong model is chosen)' :
+      'Cheap model for screening, extraction and images — must accept images';
+    $('cloud-strong-label').textContent = mode === 'hybrid' ?
+      'Model for questions, analysis and writing' : 'Strong model for questions, analysis and writing (optional)';
+    var none = $('cloud-strong').options && $('cloud-strong').options[0];
+    if (none && !none.value) none.textContent = mode === 'hybrid' ? 'Use the cheap model above' : 'Use the cheap model for analysis too';
+  }
+
+  // "Math: high" says when its pages go to a cloud model, and what a page costs.
+  function showMathCost(cloud) {
+    var high = $('export-math').querySelector('option[value="high"]');
+    if (!high) return;
+    high.textContent = cloud ? 'Math: high (cloud' + (cloud.usd_per_page != null ?
+      ', ~$' + cloud.usd_per_page.toFixed(4) + '/page' : '') + ')' : 'Math: high (best)';
+    high.title = cloud ? 'Each rewritten page is sent as an image to ' + cloud.model + ' and paid per page; ' +
+      '"as extracted" and "medium" stay on this computer.' :
+      'A local vision model rewrites whole pages: formulas, tables and text, also in scanned papers.';
   }
 
   function updateProviderModelsLink() {
@@ -4575,8 +4608,6 @@
       $('models-hardware').textContent = hw.os + ' · ' + (hw.arch || '') + ' · RAM ' + hw.ram_gb + ' GB' +
         (hw.gpu_name ? ' · ' + hw.gpu_name + ' (' + hw.gpu_vram_gb + ' GB VRAM)' : '') +
         (build ? ' · llama.cpp build ' + build[1] : '') + ' · Free disk ' + (hw.free_disk_gb || 0).toFixed(1) + ' GB';
-      $('models-current').textContent = 'Current setup: ' + (info.tier || 'original defaults') +
-        ' · Cloud ' + (info.cloud_enabled ? 'enabled (approval required)' : 'off');
       $('models-recommendation').textContent = 'Recommended: ' + proposal.tier + ' · About ' + proposal.download_gb +
         ' GB download / ' + proposal.memory_gb + ' GB memory. ' + proposal.notes;
       $('models-vision').textContent = info.vision_enabled ? 'Image features enabled.' :
@@ -4597,7 +4628,13 @@
         who.textContent = (t && (t.profile || (t.profiles || []).join(', '))) || '—';
         row.appendChild(what); row.appendChild(who); $('models-tasks').appendChild(row);
       });
+      var mode = currentMode(info);
+      document.querySelectorAll('input[name="models-mode"]').forEach(function (r) { r.checked = r.value === mode; });
+      $('models-current').textContent = 'Now: ' + { local: 'Local', cloud: 'Cloud', hybrid: 'Hybrid',
+        manual: 'Manual' }[mode] + (info.mode ? '' : ' (set up before modes existed)') +
+        ' · Cloud ' + (info.cloud_enabled ? 'enabled' : 'off');
       showCloudPickers();
+      showMathCost(info.math_high_cloud);
       $('models-profiles').replaceChildren();
       info.profiles.forEach(function (p) {
         var row = document.createElement('div'), label = document.createElement('span');
@@ -4701,8 +4738,19 @@
       showCloudPickers();
       if (this.value === 'cloud' && typeof searchCatalogue === 'function') searchCatalogue();
     };
-    $('models-apply').onclick = function () { reviewModelsChange({ action: 'setup', tier: $('models-tier').value || null,
-      cheap: $('cloud-cheap').value || null, strong: $('cloud-strong').value || null }); };
+    document.querySelectorAll('input[name="models-mode"]').forEach(function (r) {
+      r.onchange = function () {
+        showCloudPickers();
+        if ((r.value === 'cloud' || r.value === 'hybrid') && typeof searchCatalogue === 'function' &&
+            $('cloud-cheap').options.length < 2) searchCatalogue();
+      };
+    });
+    $('models-apply').onclick = function () {
+      var mode = selectedMode(), tier = $('models-tier').value || null;
+      var cheap = $('cloud-cheap').value || null, strong = $('cloud-strong').value || null;
+      reviewModelsChange(mode ? { action: 'setup', mode: mode, tier: mode === 'cloud' ? null : tier,
+        cheap: cheap, strong: strong } : { action: 'setup', tier: tier, cheap: cheap, strong: strong });
+    };
     $('models-cloud').onclick = function () { reviewModelsChange({ action: 'cloud', enabled: !modelsInfo.cloud_enabled }); };
     $('models-add').onsubmit = function (e) {
       e.preventDefault();
@@ -6184,6 +6232,7 @@
     api('/api/info').then(function (info) {
       state.exportsRoot = info.exports_root;
       var medium = $('export-math').querySelector('option[value="medium"]');
+      if (info.math) showMathCost(info.math.high_cloud);  // cloud pages are paid: say so in the menu
       if (info.math && !info.math.medium) {  // Pix2Text is an optional install
         medium.disabled = true;
         medium.textContent = 'Math: medium (install in Settings → Optional tools)';

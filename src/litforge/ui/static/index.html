@@ -97,31 +97,44 @@
       <h3>Your models</h3>
       <div id="models-profiles"></div>
       <details><summary>Which model does which task</summary><div id="models-tasks" class="models-tasks"></div></details>
-      <h3>Setup</h3>
-      <p id="models-current"></p>
-      <div class="row2">
-        <select id="models-tier" aria-label="Setup tier">
-          <option value="">Recommended tier</option><option value="large">Large</option>
-          <option value="medium">Medium</option><option value="small">Small (local)</option><option value="cloud">Cloud-light</option>
-        </select>
-        <button class="btn accent" id="models-apply">Apply setup…</button>
-        <button class="btn" id="models-refresh">Refresh status</button>
+      <h3>Mode</h3>
+      <p id="models-current" class="hint"></p>
+      <div class="mode-cards" role="radiogroup" aria-label="Model mode">
+        <label class="mode-card"><input type="radio" name="models-mode" value="local"><b>Local</b>
+          <span>Everything on this computer: free, and nothing leaves it.</span></label>
+        <label class="mode-card"><input type="radio" name="models-mode" value="cloud"><b>Cloud</b>
+          <span>Everything on cloud models: best quality, paid per use. Needs an API key.</span></label>
+        <label class="mode-card"><input type="radio" name="models-mode" value="hybrid"><b>Hybrid</b>
+          <span>Screening and extraction here; questions, analysis and writing in the cloud.</span></label>
+        <label class="mode-card"><input type="radio" name="models-mode" value="manual"><b>Manual</b>
+          <span>You choose a model for each task (Assign tasks above).</span></label>
       </div>
-      <p id="models-recommendation" class="hint"></p>
-      <p id="models-vision" class="hint"></p>
       <div id="cloud-pickers" hidden>
-        <h3>Cloud-light model choices</h3>
+        <h3>Cloud models</h3>
         <form id="catalogue-search" class="row2">
           <input id="catalogue-query" type="search" placeholder="Search live catalogue" aria-label="Search cloud models">
           <input id="catalogue-max" type="number" min="0" step="any" placeholder="Max input $/million" aria-label="Maximum input price">
           <button class="btn" type="submit">Search catalogue</button>
         </form>
-        <label class="f" for="cloud-cheap">Cheap model for extraction and images — must accept images</label>
+        <label class="f" for="cloud-cheap" id="cloud-cheap-label">Cheap model for screening, extraction and images — must accept images</label>
         <select id="cloud-cheap"><option value="">Choose an image-capable model</option></select>
-        <label class="f" for="cloud-strong">Strong model for analysis</label>
+        <label class="f" for="cloud-strong" id="cloud-strong-label">Strong model for questions, analysis and writing</label>
         <select id="cloud-strong"><option value="">Use the cheap model for analysis too</option></select>
         <p class="hint">Prices per million tokens; estimates appear in the setup preview. Cloud stays off until you enable it.</p>
       </div>
+      <div class="row2">
+        <button class="btn accent" id="models-apply">Apply mode…</button>
+        <button class="btn" id="models-refresh">Refresh status</button>
+      </div>
+      <p id="models-recommendation" class="hint"></p>
+      <p id="models-vision" class="hint"></p>
+      <details class="models-more"><summary>Advanced: which local models (tier)</summary>
+        <select id="models-tier" aria-label="Local tier">
+          <option value="">Chosen for this computer</option><option value="large">Large</option>
+          <option value="medium">Medium</option><option value="small">Small</option><option value="cloud">Cloud-light (older setup)</option>
+        </select>
+        <p class="hint">Local and Hybrid use the local models of this tier; Cloud ignores it.</p>
+      </details>
       <details class="models-more"><summary>This computer and the model server</summary>
         <p id="models-hardware" class="hint"></p>
         <p class="hint">The managed server starts when needed and stops when LitForge quits. Models load on first use.

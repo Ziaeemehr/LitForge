@@ -445,7 +445,8 @@ def test_export_with_math_medium_uses_the_formula_engine(server: str, corpus: Pa
     note = next(Path(job["report"]["export_dir"], "markdown", "knowledge_base").glob("*.md")).read_text()
     assert "\\frac{c}{d}" in note
     _, info = call(server, "/api/info")
-    assert set(info["math"]) == {"medium", "high"}
+    assert set(info["math"]) == {"medium", "high", "high_cloud"}
+    assert info["math"]["high_cloud"] is None  # the default setup keeps Better math on this computer
 
 
 def test_startup_creates_the_library_and_marks_unfinished_runs_interrupted(tmp_path: Path) -> None:

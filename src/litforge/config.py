@@ -205,6 +205,7 @@ class ModelsConfig(BaseModel):
     tasks: dict[str, TaskModelConfig] = Field(default_factory=dict)
     servers: dict[Literal["llamacpp"], LlamaCppServerConfig] = Field(default_factory=dict)
     setup_tier: Literal["large", "medium", "small", "cloud"] | None = None
+    mode: Literal["local", "cloud", "hybrid", "manual"] | None = None  # one choice for tier, policy and tasks
 
     @model_validator(mode="after")
     def linked_servers(self) -> ModelsConfig:

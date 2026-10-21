@@ -65,6 +65,7 @@ from litforge.export.markdown import default_export_dir, export_markdown
 from litforge.ingest import IngestResult
 from litforge.jobs import JobCancelled, JobControl, check_cancelled, job_scope
 from litforge.llm.local_models import fit_check, ollama_change, ollama_pull
+from litforge.llm.model_setup import math_high_cloud
 from litforge.llm.secrets import KeyStore
 from litforge.observability import EventLog
 from litforge.parsing.formulas import FormulaEngine, Pix2TextEngine, formulas_available
@@ -1110,7 +1111,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(api.model_profiles(app.config))
                 if path == "/api/info":
                     return self._json({"exports_root": str(app.paths.exports_root),
-                                       "math": {"medium": formulas_available(), "high": app.config.vision.model}})
+                                       "math": {"medium": formulas_available(), "high": app.config.vision.model,
+                                                "high_cloud": math_high_cloud(app.config)}})
                 if path == "/api/math-setup":
                     return self._json(app.math_setup_status())
                 if path == "/api/projects":
