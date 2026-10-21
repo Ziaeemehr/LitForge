@@ -834,6 +834,9 @@ class ModelsPanel:
             tasks = body.get("tasks") or []
             owned = self.config.models.setup_owned.model_dump()
             owned["tasks"] = [t for t in owned["tasks"] if t not in tasks]
+            # A profile a mode created that now has a hand-assigned task is the user's too: a later mode switch
+            # must not delete it from under that task.
+            owned["profiles"] = [p for p in owned["profiles"] if p != name or not tasks]
             # A task assigned by hand is the user's own choice: the mode becomes Manual, so no mode overwrites it.
             change = config_change(self.paths.root, {"models": {"tasks": {t: {"profile": name} for t in tasks},
                                                                "setup_owned": owned, "mode": "manual"}})

@@ -146,6 +146,7 @@ Mode = Literal["local", "cloud", "hybrid", "manual"]
 # quality work a strong cloud model does better.
 BULK_TASKS = frozenset({"screen", "screen_fulltext", "matrix_extract", "claim_extract", "asset_analyze",
                         "equation_compare", "page_rewrite"})
+IMAGE_TASKS = frozenset({"write_image"})  # quality work that sends an image: only to a model that reads images
 
 
 def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap: str | None = None,
@@ -160,8 +161,9 @@ def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap:
         change = config_change(root, {"models": {"mode": "manual"}})
         return SetupProposal(hw, recommended, tier or recommended, True,
                              "Manual: your own task assignments are kept as they are.", 0.0, 0.0, "", change)
-    if mode in ("local", "hybrid"):
-        tier = tier if tier in ("large", "medium", "small") else hardware_tier
+    if mode in ("local", "hybrid"):  # the tier the user chose under Advanced, else the hardware's (below)
+        tier = tier if tier in ("large", "medium", "small") else None
+        recommended = hardware_tier
     elif mode == "cloud":
         tier = "cloud"
     chosen = tier or recommended
@@ -172,6 +174,8 @@ def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap:
             chosen = "medium"
             notes += " Offering installed Ollama instead."
     available = bool(hw.llama_server if chosen == "large" else True if chosen == "cloud" else hw.ollama)
+    if mode == "local":  # Local can always be applied, if only to turn the cloud off; the notes say what to install
+        available = True
     if chosen not in {"large", "cloud"} and not hw.ollama:
         notes += " Ollama missing: brew install ollama (macOS), or https://ollama.com/download."
     patch: dict[str, Any] = {"models": {"setup_tier": chosen}}
@@ -201,8 +205,10 @@ def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap:
             models["profiles"].update(_cloud_profiles(entries, cheap, strong))
             extraction = {"matrix_extract", "claim_extract", "asset_analyze", "equation_compare", "page_rewrite"}
             local_screening = hw.ollama and mode is None  # Cloud mode: light work goes to the cloud too
+            strong_reads_images = bool(strong and "image" in entries[strong]["input_modalities"])
             models["tasks"] = {task: {"profile": "local" if local_screening and task in {"screen", "screen_fulltext"}
                 else "cloud_cheap" if task in extraction or task in {"screen", "screen_fulltext"}
+                else "cloud_cheap" if task in IMAGE_TASKS and not strong_reads_images  # LaTeX from an image
                 else "cloud_strong" if strong else "cloud_cheap"} for task in TASK_NAMES}
             estimate = cloud_estimate(entries[cheap])
             notes = (f"Typical matrix (20 papers × 10 columns, 1000 input + 100 output tokens/cell): "
@@ -257,7 +263,11 @@ def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap:
                 raise ValueError("Choose a catalogued cloud model")
             alias = "cloud_strong" if strong else "cloud_cheap"
             models.setdefault("profiles", {}).update(_cloud_profiles(entries, None if strong else cheap, strong))
-            models["tasks"].update({task: {"profile": alias} for task in TASK_NAMES if task not in BULK_TASKS})
+            reads_images = "image" in entries[cloud_model]["input_modalities"]
+            models["tasks"].update({task: {"profile": alias} for task in TASK_NAMES if task not in BULK_TASKS
+                                    and (reads_images or task not in IMAGE_TASKS)})  # else the local vision model
+            notes += (" Once cloud is enabled, questions, analysis and writing run on the cloud without asking each"
+                      " time; your own drafts still ask, and the dollar limits apply.")
             models["policy"] = "hybrid"
     if hw.free_disk_gb and hw.free_disk_gb < sizes[0]:
         notes += " Free disk space is below the approximate download size."
@@ -279,7 +289,7 @@ def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap:
     models["setup_owned"] = {"profiles": list(models.get("profiles", {})),
                              "tasks": list(models["tasks"]),
                              "server": "llamacpp" if server_owned else None}
-    remove = [("models", "local"),
+    remove = [("models", "local"), *([("models", "mode")] if mode is None else []),
               *(("models", "profiles", name) for name in owned.get("profiles", [])),
               *(("models", "tasks", name) for name in owned.get("tasks", []))]
     stop_server = None
@@ -329,7 +339,10 @@ def api_model_patch(provider: str, model: str, *, name: str | None = None, price
     if provider == "openrouter":
         profile.update(pricing_source="openrouter", headers={"X-Title": "LitForge"},
                        extra_body={"provider": {"data_collection": "deny", "require_parameters": True}})
-    patch = {"models": {"profiles": {name: profile}, "tasks": {task: {"profile": name} for task in tasks or []}}}
+    patch: dict[str, Any] = {"models": {"profiles": {name: profile},
+                                        "tasks": {task: {"profile": name} for task in tasks or []}}}
+    if tasks:  # tasks given to the new model by hand: no mode overwrites them
+        patch["models"]["mode"] = "manual"
     Config.model_validate(patch)
     return patch
 
@@ -377,8 +390,16 @@ def remove_model_change(root: Path, name: str, config: Config, *, delete_files: 
 
 
 def cloud_change(root: Path, enabled: bool) -> ConfigChange:
-    return config_change(root, {"privacy": {"allow_cloud": enabled},
-                               "models": {"policy": "ask_before_cloud" if enabled else "local_only"}})
+    """The cloud consent. In Cloud and Hybrid the mode owns the policy and only the consent changes; enabling the
+    cloud in Local leaves Local (it would no longer be true), so the mode becomes Manual."""
+    current = yaml.safe_load(_read(root / "config.yaml") or "") or {}
+    mode = (current.get("models") or {}).get("mode")
+    if mode in ("cloud", "hybrid"):
+        return config_change(root, {"privacy": {"allow_cloud": enabled}})
+    models: dict[str, Any] = {"policy": "ask_before_cloud" if enabled else "local_only"}
+    if enabled and mode == "local":
+        models["mode"] = "manual"
+    return config_change(root, {"privacy": {"allow_cloud": enabled}, "models": models})
 
 
 CLOUD_NOTICE = ("Cloud models send selected evidence text and, for image actions, page/asset images to the provider. "
@@ -409,7 +430,7 @@ def math_high_cloud(config: Config) -> dict[str, Any] | None:
         return None
     price = profile.pricing
     usd = (1024 * price.input_per_million_usd + 4000 * price.output_per_million_usd) / 1_000_000 if price else None
-    return {"model": profile.model, "usd_per_page": usd}
+    return {"model": profile.model, "usd_per_page": usd, "enabled": config.privacy.allow_cloud}
 
 
 def cloud_estimate(model: dict[str, Any], *, papers: int = 20, columns: int = 10,

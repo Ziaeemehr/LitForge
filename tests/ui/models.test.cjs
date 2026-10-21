@@ -158,6 +158,8 @@ test('Math: high names its cloud cost', () => {
   ctx.showMathCost({ model: 'vendor/vision', usd_per_page: 0.0123 });
   assert.equal(high.textContent, 'Math: high (cloud, ~$0.0123/page)');
   assert.match(high.title, /vendor\/vision/);
+  ctx.showMathCost({ model: 'vendor/vision', usd_per_page: 0.0123, enabled: false });
+  assert.equal(high.textContent, 'Math: high (cloud, ~$0.0123/page, enable cloud first)');
   ctx.showMathCost(null);
   assert.equal(high.textContent, 'Math: high (best)');
 });

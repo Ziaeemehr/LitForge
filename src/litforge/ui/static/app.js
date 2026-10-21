@@ -4580,7 +4580,8 @@
     var high = $('export-math').querySelector('option[value="high"]');
     if (!high) return;
     high.textContent = cloud ? 'Math: high (cloud' + (cloud.usd_per_page != null ?
-      ', ~$' + cloud.usd_per_page.toFixed(4) + '/page' : '') + ')' : 'Math: high (best)';
+      ', ~$' + cloud.usd_per_page.toFixed(4) + '/page' : '') + (cloud.enabled === false ? ', enable cloud first' : '') +
+      ')' : 'Math: high (best)';
     high.title = cloud ? 'Each rewritten page is sent as an image to ' + cloud.model + ' and paid per page; ' +
       '"as extracted" and "medium" stay on this computer.' :
       'A local vision model rewrites whole pages: formulas, tables and text, also in scanned papers.';
@@ -4631,7 +4632,7 @@
       var mode = currentMode(info);
       document.querySelectorAll('input[name="models-mode"]').forEach(function (r) { r.checked = r.value === mode; });
       $('models-current').textContent = 'Now: ' + { local: 'Local', cloud: 'Cloud', hybrid: 'Hybrid',
-        manual: 'Manual' }[mode] + (info.mode ? '' : ' (set up before modes existed)') +
+        manual: 'Manual' }[mode] + (!info.mode && info.tier ? ' (set up before modes existed)' : '') +
         ' · Cloud ' + (info.cloud_enabled ? 'enabled' : 'off');
       showCloudPickers();
       showMathCost(info.math_high_cloud);
@@ -4927,12 +4928,19 @@
       .then(function (results) {
         if (generation !== catalogueGeneration) return;
         renderCatalogue('cloud-cheap', results[0]); renderCatalogue('cloud-strong', results[1]);
+        // The models a saved Cloud or Hybrid mode uses are chosen again, so Apply keeps them.
+        (modelsInfo && modelsInfo.profiles || []).forEach(function (p) {
+          if (p.name === 'cloud_cheap') $('cloud-cheap').value = p.model;
+          if (p.name === 'cloud_strong') $('cloud-strong').value = p.model;
+        });
         if (!results[0].length) $('models-status').textContent = 'No image-capable catalogue models matched. Try another search.';
       }).catch(settingsError);
   }
   function loadSettings() {
     return Promise.all([loadModels(), loadKeys(), loadOptionalTools()]).then(function () {
-      if (modelsInfo && modelsInfo.proposal && modelsInfo.proposal.recommended_tier === 'cloud' && !$('cloud-cheap').value) return searchCatalogue();
+      if (!modelsInfo || $('cloud-cheap').value) return;
+      var mode = currentMode(modelsInfo);  // a saved Cloud or Hybrid mode shows its cloud models at once
+      if (mode === 'cloud' || mode === 'hybrid') return searchCatalogue();
     });
   }
 
