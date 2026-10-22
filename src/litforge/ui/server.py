@@ -64,12 +64,22 @@ from litforge.export.markdown import default_export_dir, export_markdown
 from litforge.ingest import IngestResult
 from litforge.jobs import JobCancelled, JobControl, check_cancelled, job_scope
 from litforge.llm.local_models import fit_check, ollama_change, ollama_pull
+from litforge.llm.model_setup import config_change
 from litforge.llm.secrets import KeyStore
 from litforge.observability import EventLog
+from litforge.parsing import nemotron
 from litforge.parsing.formulas import FormulaEngine, Pix2TextEngine, formulas_available
 from litforge.parsing.mineru_parser import find_command, install_mineru, mineru_status
 from litforge.parsing.run import ParseResult, parse_artifact
-from litforge.parsing.vision import GatewayVision, OllamaVision, Vision, enhance_project, plan_project
+from litforge.parsing.vision import (
+    GatewayVision,
+    OllamaVision,
+    RoutedVision,
+    Vision,
+    enhance_project,
+    page_engine,
+    plan_project,
+)
 from litforge.parsing.vision_setup import OllamaSetup
 from litforge.pipeline import add_pdfs
 from litforge.projects import MARK_SCOPES, ProjectNotFound, create_project, delete_project, get_project_id, set_active
@@ -80,7 +90,13 @@ from litforge.screening.run import screen_run
 from litforge.storage.cache import sha256_file
 from litforge.storage.db import open_db, transaction
 from litforge.storage.recovery import repair_abandoned_runs
-from litforge.tools import install_pix2text, install_timeout_s, pix2text_install_status
+from litforge.tools import (
+    install_nemotron,
+    install_pix2text,
+    install_timeout_s,
+    nemotron_install_status,
+    pix2text_install_status,
+)
 from litforge.ui import api, writing_routes
 from litforge.updates import UpdateChecker, automatic_enabled
 from litforge.writing.compile import engine_status
@@ -191,14 +207,61 @@ class App:
 
         return self.start_job("pix2text-install", "", work)
 
+    def nemotron_install_job(self, body: dict[str, Any]) -> Job:
+        if body.get("confirmed") is not True:
+            raise ValueError("Confirm the Nemotron Parse download size first")
+        status = nemotron_install_status(self.paths)
+        if not status["offerable"]:
+            raise ValueError("Nemotron Parse cannot be set up here: " + (status["reason"] or "it is already set up"))
+        if any(j.kind in ("nemotron-install", "setup") and j.status == "running" for j in self.jobs.values()):
+            raise ValueError("Nemotron Parse is already being set up")
+
+        def work(job: Job) -> None:
+            job.report = install_nemotron(self.paths, self._job_progress(job))
+            job.messages.append("Nemotron Parse is ready for Math: high and broken PDFs.")
+
+        return self.start_job("nemotron-install", "", work)
+
+    @staticmethod
+    def _job_progress(job: Job) -> Callable[[str], None]:
+        def progress(message: str) -> None:
+            if len(job.messages) < 200:
+                job.messages.append(message[:500])
+            elif len(job.messages) == 200:
+                job.messages.append("Further installer output is omitted.")
+
+        return progress
+
+    def save_engines(self, body: dict[str, Any]) -> dict[str, str]:
+        """Save the manual engine choices (Settings) to <data>/config.yaml and use them from now on."""
+        parse = body.get("parse", self.config.parsing.complex_fallback)
+        page = body.get("page", self.config.vision.engine)
+        if parse not in ("auto", "nemotron", "mineru", "docling", "none"):
+            raise ValueError("parse must be auto, nemotron, mineru, docling or none")
+        if page not in ("auto", "nemotron", "vision_model"):
+            raise ValueError("page must be auto, nemotron or vision_model")
+        config_change(self.paths.root, {"parsing": {"complex_fallback": parse}, "vision": {"engine": page}}).apply()
+        self.config.parsing.complex_fallback, self.config.vision.engine = parse, page
+        return {"parse": parse, "page": page}
+
+    def _nemotron_serves(self) -> bool:
+        """Will Math: high use Nemotron Parse (so a missing vision model does not stop it)?"""
+        mode = self.config.vision.engine
+        return (mode != "vision_model" and nemotron.available(self.paths)
+                and (mode == "nemotron" or nemotron.gpu_ready()))
+
     def optional_tools_status(self) -> dict[str, Any]:
         mineru = mineru_status(self.paths, self.config.parsing)
         pix2text = pix2text_install_status()
         pix2text.pop("root", None)
+        nemo = nemotron_install_status(self.paths)
+        nemo.pop("root", None)
         vision = self.math_setup_status()
         return {
             "mineru": {**mineru, "size": "~4 GB", "available": True},
             "pix2text": pix2text,
+            "nemotron": nemo,
+            "engines": {"parse": self.config.parsing.complex_fallback, "page": self.config.vision.engine},
             "tectonic": engine_status(self.paths),
             "vision": {**vision, "legacy": not self._uses_model_settings(), "size": "model-dependent"},
         }
@@ -826,14 +889,18 @@ class App:
         if level == "medium" and self._make_formulas is Pix2TextEngine and not formulas_available():
             raise ValueError("better math (medium) needs Pix2Text: run `uv sync --extra formulas-gpu` "
                              "(NVIDIA GPU) or `uv sync --extra formulas` (CPU), then restart `litforge ui`")
-        engine: Vision | FormulaEngine | None = self.make_vision() if level == "high" and self.make_vision else None
+        if level == "high" and self.config.vision.engine == "nemotron" and not nemotron.available(self.paths):
+            raise ValueError("better math (high): Nemotron Parse is not set up; set it up in Settings")
+        nemotron_serves = level == "high" and self._nemotron_serves()
+        engine: Vision | FormulaEngine | None = (self.make_vision() if level == "high" and self.make_vision
+                                                 and not nemotron_serves else None)
         if isinstance(engine, OllamaVision):
             try:
                 engine.check()  # fail now, on the page, if Ollama or the model is missing
             except (RuntimeError, ValueError) as exc:
                 raise ValueError(f"better math (high): {exc}") from exc
 
-        if level == "high" and self.make_vision is None:
+        if level == "high" and self.make_vision is None and not nemotron_serves:
             probe_conn = self.db()
             try:
                 GatewayVision(self.make_gateway(probe_conn), body.get("profile"),
@@ -851,11 +918,24 @@ class App:
                 if fetch:
                     self._fetch(c, job, pid, only, paper_ids)
                 if level != "off":
-                    tool = (engine if engine is not None else
-                            GatewayVision(self.make_gateway(c), body.get("profile"), body.get("approved") is True)
+                    def model() -> Vision:
+                        made = self.make_vision() if self.make_vision else GatewayVision(
+                            self.make_gateway(c), body.get("profile"), body.get("approved") is True)
+                        if isinstance(made, GatewayVision):
+                            made.check()
+                        return made
+
+                    tool = (engine if engine is not None else page_engine(self.paths, self.config, model)
                             if level == "high" else self.formulas())
-                    vis = enhance_project(c, self.paths, self.config, pid, tool, only, paper_ids, self.log,
-                                          progress=job.messages.append)
+                    if isinstance(tool, RoutedVision):
+                        job.messages.append("Nemotron Parse rewrites English pages; " + (
+                            f"{tool.model.name} the Persian ones" if tool.model else
+                            "Persian pages keep their text (no vision model)"))
+                    try:
+                        vis = enhance_project(c, self.paths, self.config, pid, tool, only, paper_ids, self.log,
+                                              progress=job.messages.append)
+                    finally:
+                        nemotron.release()
                     job.report["vision"] = {**dataclasses.asdict(vis), "level": level}
                     job.messages.append(f"better math ({level}): {vis.pages_improved} pages rewritten in "
                                         f"{vis.papers} papers" + (f", {vis.pages_rejected} kept as extracted"
@@ -876,6 +956,19 @@ class App:
                     self.config.vision.model is None)
 
     def math_setup_status(self) -> dict[str, Any]:
+        """The vision model's readiness, with Nemotron Parse's: when Nemotron serves Math: high, a missing vision
+        model only costs the Persian pages, so the status counts as ready and says so."""
+        status = self._model_setup_status()
+        nemo = nemotron_install_status(self.paths)
+        nemo.pop("root", None)
+        status["nemotron"] = {**nemo, "serves": self._nemotron_serves()}
+        if status["nemotron"]["serves"] and not status.get("ready"):
+            status.update(ready=True, disabled=False, partial=True,
+                          message="Nemotron Parse rewrites English pages; Persian pages need the vision model "
+                                  "and keep their extracted text until it is set up")
+        return status
+
+    def _model_setup_status(self) -> dict[str, Any]:
         if not self._uses_model_settings():
             return self.vision_setup.status().as_dict()
         conn = self.db()
@@ -894,13 +987,24 @@ class App:
 
     def setup_job(self, body: dict[str, Any]) -> Job:
         """Get better math (high) ready: install and start Ollama, pull the vision model (the user agreed)."""
-        if self._uses_model_settings():
+        nemo = nemotron_install_status(self.paths)
+        if self._uses_model_settings() and not nemo["offerable"]:
             raise ValueError("Use Settings for this setup; no tools are installed here.")
-        if any(j.kind == "setup" and j.status == "running" for j in self.jobs.values()):
+        if any(j.kind in ("setup", "nemotron-install") and j.status == "running" for j in self.jobs.values()):
             raise ValueError("the vision model is already being set up")
 
         def work(job: Job) -> str | None:
-            self.vision_setup.run(job.messages.append)
+            # On an NVIDIA GPU, Nemotron Parse first: it is the smaller download and serves English pages.
+            if nemo["offerable"]:
+                install_nemotron(self.paths, self._job_progress(job))
+            if not self._uses_model_settings():
+                try:
+                    self.vision_setup.run(job.messages.append)
+                except RuntimeError as exc:
+                    if not nemotron.available(self.paths):
+                        raise
+                    job.messages.append(f"The image model is not set up ({exc}); Nemotron Parse rewrites English "
+                                        "pages, Persian pages keep their extracted text.")
             return None
 
         return self.start_job("setup", str(body.get("project") or "default"), work)
@@ -1131,6 +1235,10 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(app.mineru_install_job(body).__dict__)
                 if url.path == "/api/tools/pix2text/install":
                     return self._json(app.pix2text_install_job(body).__dict__)
+                if url.path == "/api/tools/nemotron/install":
+                    return self._json(app.nemotron_install_job(body).__dict__)
+                if url.path == "/api/tools/engines":
+                    return self._json(app.save_engines(body))
                 if m := re.fullmatch(r"/api/papers/([\w-]+)/parse-mineru", url.path):
                     return self._json(app.mineru_parse_job(m[1]).__dict__)
                 if url.path == "/api/library/remove":
@@ -1190,8 +1298,11 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     conn = app.db()
                     try:
                         engine = GatewayVision(app.make_gateway(conn), body.get("profile"))
-                        pages = plan_project(conn, app.paths, get_project_id(conn, str(body["project"])),
-                                             engine, str(body.get("only", "all")), body.get("paper_ids"))
+                        chosen = page_engine(app.paths, app.config, lambda: engine)
+                        pages = [] if isinstance(chosen, nemotron.NemotronEngine) else plan_project(
+                            conn, app.paths, get_project_id(conn, str(body["project"])), engine,
+                            str(body.get("only", "all")), body.get("paper_ids"),
+                            routed=chosen if isinstance(chosen, RoutedVision) else None)
                         return self._json({"page_images": len(pages),
                             "image_description": f"{len(pages)} page images will be sent",
                             "blocked_reasons": list(dict.fromkeys(p.blocked_reason for p in pages if p.blocked_reason)),

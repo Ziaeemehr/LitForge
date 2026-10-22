@@ -188,3 +188,16 @@ class EmptyCredentials:
         raise AssertionError("Tests must inject a fake credential layer")
     def delete(self, name: str) -> None:
         raise AssertionError("Tests must inject a fake credential layer")
+
+
+@pytest.fixture(autouse=True)
+def no_real_nemotron(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never see the developer's GPU or start a real Nemotron Parse install or download; tests that need
+    Nemotron patch these back on and inject a fake engine."""
+    from litforge import tools
+    from litforge.parsing import nemotron
+
+    monkeypatch.setattr(tools, "_has_nvidia_gpu", lambda root: False)
+    monkeypatch.setattr(nemotron, "gpu_free_gb", lambda: None)
+    monkeypatch.setattr(nemotron, "download_model", lambda paths, progress=None: (_ for _ in ()).throw(
+        RuntimeError("tests must not download Nemotron Parse")))

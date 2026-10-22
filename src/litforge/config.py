@@ -35,7 +35,8 @@ class MinerUConfig(BaseModel):
 
 class ParsingConfig(BaseModel):
     fast_path: str = "pymupdf"
-    complex_fallback: Literal["auto", "mineru", "docling", "none"] = "auto"
+    # auto: Nemotron Parse on a GPU for non-Persian documents, else MinerU, else Docling (whichever is installed).
+    complex_fallback: Literal["auto", "nemotron", "mineru", "docling", "none"] = "auto"
     mineru: MinerUConfig = Field(default_factory=MinerUConfig)
     ocr: str = "selective"
     keep_originals: bool = True
@@ -82,6 +83,10 @@ class VisionConfig(BaseModel):
     dpi: int = 150  # page image resolution sent to the model
     formula_dpi: int = 150  # page image resolution for Pix2Text (medium level)
     timeout_s: float = 300
+    # Which engine rewrites pages for Math: high. auto: Nemotron Parse for non-Persian pages when it is set up and
+    # a GPU has room, the vision model above for Persian pages (and for everything otherwise); nemotron or
+    # vision_model use that one engine for every page.
+    engine: Literal["auto", "nemotron", "vision_model"] = "auto"
 
 
 class PrivacyConfig(BaseModel):

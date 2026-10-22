@@ -331,6 +331,7 @@ def add(
 class ParserChoice(StrEnum):
     auto = "auto"
     pymupdf = "pymupdf"
+    nemotron = "nemotron"
     mineru = "mineru"
     docling = "docling"
 
@@ -370,15 +371,21 @@ def tools_status_command(ctx: typer.Context) -> None:
         return
     from litforge.ui.server import App
 
-    status = App(_state(ctx).paths, _state(ctx).config).optional_tools_status()
+    st_config = _state(ctx).config
+    status = App(_state(ctx).paths, st_config).optional_tools_status()
     mineru = status["mineru"]
     pix2text = status["pix2text"]
     vision = status["vision"]
     tectonic = status.get("tectonic", {}).get("tectonic", {})
     vision_name = vision.get("model") or vision.get("message") or "Not configured"
     vision_state = f"{'Ready' if vision.get('ready') else 'Not ready'} · {vision_name}"
+    nemo = status.get("nemotron") or {"installed": False, "offerable": False, "reason": "unknown", "size": ""}
+    engines = status.get("engines") or {"parse": st_config.parsing.complex_fallback,
+                                        "page": st_config.vision.engine}
     rows = (
         ("MinerU", f"Installed · {mineru['version']}" if mineru["installed"] else "Not installed", "~4 GB"),
+        ("Nemotron", "Set up" if nemo["installed"] else "Not set up" if nemo["offerable"] else
+         f"Not available: {nemo['reason']}", nemo["size"]),
         ("Pix2Text", f"Installed · {pix2text['version']}" if pix2text["installed"] else
          "Not installed" if pix2text["available"] else "Not available on this install", pix2text["size"]),
         ("Image model", str(vision_state),
@@ -391,6 +398,8 @@ def tools_status_command(ctx: typer.Context) -> None:
         typer.echo(f"{name:<14} {state:<42} {size}")
     if not pix2text["installed"] and not pix2text["offerable"]:
         typer.echo(f"Pix2Text command: {pix2text['command']}")
+    typer.echo(f"Engines: broken PDFs {engines['parse']}, Math: high pages {engines['page']} "
+               "(parsing.complex_fallback and vision.engine in config.yaml)")
 
 
 @tools_install_app.command("pix2text")
@@ -506,6 +515,32 @@ def write_compile(
         raise typer.Exit(1)
     typer.echo(f"{doc.folder / str(result.pdf)} ({result.elapsed_ms / 1000:.1f} s, {result.engine}, "
                f"sandbox: {result.sandbox})")
+
+
+@tools_install_app.command("nemotron")
+def install_nemotron_command(
+    ctx: typer.Context,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask for confirmation")] = False,
+) -> None:
+    """Set up Nemotron Parse on an NVIDIA GPU: two small packages and the model (~2.5 GB)."""
+    from litforge.tools import NEMOTRON_SIZE, install_nemotron, nemotron_install_status
+
+    st = _state(ctx)
+    status = nemotron_install_status(st.paths)
+    if status["installed"]:
+        typer.echo("Nemotron Parse is already set up")
+        return
+    if not status["offerable"]:
+        typer.secho(f"Nemotron Parse cannot be set up here: {status['reason']}", fg="red", err=True)
+        raise typer.Exit(1)
+    if not yes and not typer.confirm(f"Download Nemotron Parse ({NEMOTRON_SIZE})?"):
+        raise typer.Exit(1)
+    try:
+        install_nemotron(st.paths, typer.echo)
+    except (RuntimeError, ValueError) as exc:
+        typer.secho(str(exc), fg="red", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo("done: Nemotron Parse is ready for Math: high and broken PDFs")
 
 
 @tools_install_app.command("mineru")
@@ -1169,7 +1204,15 @@ def enhance(
 ) -> None:
     """Better math: rewrite pages with equations, tables or broken text (the next export uses them)."""
     from litforge.parsing.formulas import FormulaEngine, Pix2TextEngine
-    from litforge.parsing.vision import GatewayVision, Vision, enhance_project, plan_project
+    from litforge.parsing.nemotron import NemotronEngine
+    from litforge.parsing.vision import (
+        GatewayVision,
+        RoutedVision,
+        Vision,
+        enhance_project,
+        page_engine,
+        plan_project,
+    )
 
     st = _state(ctx)
     conn = st.db()
@@ -1187,13 +1230,25 @@ def enhance(
             engine = Pix2TextEngine()
             typer.echo(f"Pix2Text on the {engine.device.upper()}")
         else:
-            engine = GatewayVision(ModelGateway(conn, st.config), profile, approve)
+            gateway = GatewayVision(ModelGateway(conn, st.config), profile, approve)
             if preview:
-                calls = plan_project(conn, st.paths, pid, engine, only)
+                chosen = page_engine(st.paths, st.config, lambda: gateway)
+                calls = [] if isinstance(chosen, NemotronEngine) else plan_project(
+                    conn, st.paths, pid, gateway, only, routed=chosen if isinstance(chosen, RoutedVision) else None)
                 typer.echo(json.dumps({"image_description": f"{len(calls)} page images",
                                        "calls": [call.model_dump() for call in calls]}, indent=1))
                 return
-            engine.check()
+
+            def model() -> Vision:
+                gateway.check()
+                return gateway
+
+            engine = page_engine(st.paths, st.config, model)
+            if isinstance(engine, RoutedVision):
+                typer.echo(f"Nemotron Parse for English pages, {engine.model.name if engine.model else 'no model'}"
+                           " for Persian pages")
+            elif isinstance(engine, NemotronEngine):
+                typer.echo("Nemotron Parse for every page")
         report = enhance_project(conn, st.paths, st.config, pid, engine, only, log=st.log, progress=typer.echo)
     except (ValueError, RuntimeError) as exc:
         typer.secho(str(exc), fg="red", err=True)

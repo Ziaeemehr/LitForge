@@ -20,9 +20,12 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from litforge.config import Paths
 from litforge.jobs import check_cancelled, track_process
 
 PIX2TEXT_SIZE = "~2 GB"
+NEMOTRON_SIZE = "~2.5 GB model (plus CUDA PyTorch, shared with Pix2Text)"
+NEMOTRON_COMMAND = "uv sync --extra formulas-gpu --extra nemotron --inexact"
 PIX2TEXT_INSTALL_TIMEOUT_S = 45 * 60
 _MAX_PROGRESS_LINE = 500
 
@@ -138,15 +141,69 @@ def install_pix2text(progress: Callable[[str], None] = lambda _: None, *,
     if not status["offerable"]:
         raise ValueError("Pix2Text cannot be installed here; run `" + status["command"] +
                          "` in the LitForge source root")
-    root = Path(status["root"])
+    _uv_sync(Path(status["root"]), [status["extra"]], progress, timeout)
+    return pix2text_install_status()
+
+
+def nemotron_install_status(paths: Paths) -> dict[str, Any]:
+    """Nemotron Parse: offered only on an NVIDIA GPU in a source install, where `uv sync` can add its extra."""
+    from litforge.parsing import nemotron
+
+    root = _install_root()
+    uv = _uv_path()
+    gpu = _has_nvidia_gpu(root or Path.cwd())
+    sync_ok = bool(root and root.is_dir() and uv and _is_source_install(root) and _safe_project_paths(root))
+    packages = nemotron.packages_available()
+    reasons = []
+    if not gpu:
+        reasons.append("needs an NVIDIA GPU (on the processor it takes about 2 minutes per page)")
+    if not packages and not sync_ok:
+        reasons.append("LitForge is not a source install where uv can add packages")
+    model = nemotron.model_ready(paths)
+    return {
+        "installed": packages and model,
+        "packages": packages,
+        "model": model,
+        "gpu": gpu,
+        "offerable": gpu and not (packages and model) and (packages or sync_ok),
+        "reason": "; ".join(reasons),
+        "command": NEMOTRON_COMMAND,
+        "size": NEMOTRON_SIZE,
+        "root": str(root) if root else None,
+    }
+
+
+def install_nemotron(paths: Paths, progress: Callable[[str], None] = lambda _: None, *,
+                     timeout_s: float | None = None) -> dict[str, Any]:
+    """Add the `nemotron` extra (with the CUDA PyTorch of formulas-gpu) and download the pinned model."""
+    from litforge.parsing import nemotron
+
+    timeout = install_timeout_s() if timeout_s is None else timeout_s
+    status = nemotron_install_status(paths)
+    if status["installed"]:
+        progress("Nemotron Parse is already set up")
+        return status
+    if not status["offerable"]:
+        raise ValueError("Nemotron Parse cannot be set up here: " + (status["reason"] or "unknown reason"))
+    if not status["packages"]:
+        _uv_sync(Path(status["root"]), ["formulas-gpu", "nemotron"], progress, timeout)
+        if not nemotron.packages_available():
+            raise RuntimeError("the packages were installed; restart LitForge, then set up Math: high again")
+    check_cancelled()
+    nemotron.download_model(paths, progress)
+    return nemotron_install_status(paths)
+
+
+def _uv_sync(root: Path, extras: list[str], progress: Callable[[str], None], timeout: float) -> None:
+    """`uv sync --extra ... --inexact` in the source checkout, streaming its output; cancellable."""
     uv = _uv_path()
     if uv is None:
         raise ValueError("uv is no longer available")
-    argv = [uv, "sync", "--extra", status["extra"], "--inexact"]
+    argv = [uv, "sync", *[a for extra in extras for a in ("--extra", extra)], "--inexact"]
     env = dict(os.environ)
     env["UV_CACHE_DIR"] = str(root / ".litforge-uv-cache")
     env["UV_PROJECT_ENVIRONMENT"] = str(root / ".venv")
-    progress(f"Running uv sync for {status['extra']} in {root}")
+    progress(f"Running uv sync for {', '.join(extras)} in {root}")
     output: queue.Queue[str] = queue.Queue(maxsize=200)
     recent: deque[str] = deque(maxlen=12)
     process_options: dict[str, Any] = {"start_new_session": True} if os.name != "nt" else {
@@ -221,4 +278,3 @@ def install_pix2text(progress: Callable[[str], None] = lambda _: None, *,
         detail = "\n".join(recent)
         raise RuntimeError(f"uv sync failed with exit code {process.returncode}" + (f": {detail}" if detail else ""))
     importlib.invalidate_caches()
-    return pix2text_install_status()

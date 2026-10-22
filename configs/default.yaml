@@ -2,6 +2,8 @@
 
 parsing:
   fast_path: pymupdf
+  # Structural parser for PDFs whose text layer is broken. auto: Nemotron Parse on a GPU (not for Persian),
+  # else MinerU, else Docling, whichever is installed. Or one of: nemotron, mineru, docling, none.
   complex_fallback: auto
   mineru:
     install_timeout_s: 2700
@@ -54,6 +56,9 @@ vision:
   dpi: 150
   formula_dpi: 150   # medium level (Pix2Text, CPU): formulas only, text from the PDF
   timeout_s: 300
+  # Engine for Math: high. auto: Nemotron Parse (set up by Math: high on an NVIDIA GPU) for non-Persian pages,
+  # the model above for Persian pages; nemotron or vision_model: that engine for every page.
+  engine: auto
 
 privacy:
   allow_cloud: false
