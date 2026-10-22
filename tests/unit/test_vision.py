@@ -92,3 +92,8 @@ def test_fix_headings_drops_invented_ones_and_restores_numbers() -> None:
     caption = "Figure 6: Firing times for a fully connected network of 100 neurons with excitatory coupling"
     assert fix_headings(f"## {caption}", "unrelated page text") == caption
     assert fix_headings("# (STA) $$s(t)=1$$", "unrelated page text") == "(STA) $$s(t)=1$$"
+
+
+def test_fix_headings_keeps_the_headings_of_a_scanned_page() -> None:
+    # A scan has no text layer to check against; this used to fail on zip(strict=True).
+    assert fix_headings("## 2 Methods\n\n\n\nText", "") == "## 2 Methods\n\nText"

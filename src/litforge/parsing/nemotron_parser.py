@@ -117,7 +117,8 @@ class NemotronParser:
                     bbox: BBox | None = (float(box[0]) * page.rect.width, float(box[1]) * page.rect.height,
                                          float(box[2]) * page.rect.width, float(box[3]) * page.rect.height
                                          ) if box is not None else None
-                    text = nemotron.inline_math(content)
+                    text = (nemotron.prose(content) if cls in ('Text', 'List-item', 'Caption', 'Footnote')
+                            else nemotron.inline_math(content))
                     if cls in ('Page-header', 'Page-footer'):
                         if text:
                             furniture.append(text)
@@ -144,9 +145,9 @@ class NemotronParser:
                     if not text:
                         continue
                     paragraph = Paragraph(text=text, page=number, bbox=bbox)
-                    if cls == 'Formula' and (match := nemotron.FORMULA.match(content)):
-                        latex = (match['a'] or match['b'] or match['c']).strip()
-                        tag = f" \\tag{{{match['tag']}}}" if match['tag'] else ''
+                    if cls == 'Formula' and (found := nemotron.formula_latex(content)):
+                        latex, eq_number = found
+                        tag = f' \\tag{{{eq_number}}}' if eq_number else ''
                         paragraph.text = f'$${latex}{tag}$$'
                         paragraph.kind = 'equation'
                         assets.append(Asset(kind='equation', label=None, caption=None, page=number,
