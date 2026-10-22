@@ -267,8 +267,10 @@
     var html = '<h3>What is missing</h3><ul>' +
       has(st.installed, 'Ollama, the free program that runs the model' + (st.local ? '' : ' (at ' + esc(st.url) + ')')) +
       has(st.running, 'Ollama running') +
-      has(st.model_ready, 'The model <code>' + esc(st.model) + '</code> (about ' + req.model_gb + ' GB download)') + '</ul>';
-    if (st.local) {
+      has(st.model_ready, 'The model <code>' + esc(st.model) + '</code> (about ' + req.model_gb + ' GB download)') +
+      (st.nemotron && (st.nemotron.offerable || st.nemotron.installed) ? has(st.nemotron.installed,
+        'Nemotron Parse for English pages on your NVIDIA GPU (about 2.5 GB download)') : '') + '</ul>';
+    if (st.local && !(st.running && st.model_ready)) {  // a ready model skips the hardware checks
       html += '<h3>Needed at least</h3><ul><li>' + req.memory_gb + ' GB of memory and ' + req.disk_gb +
         ' GB of free disk</li><li>A GPU is optional: NVIDIA or Apple Silicon makes it fast (about 12 s per page)</li></ul>' +
         '<h3>This computer</h3><ul>' +
@@ -279,7 +281,7 @@
     }
     st.warnings.forEach(function (w) { html += '<p class="warn">' + esc(w) + '</p>'; });
     st.blockers.forEach(function (b) { html += '<p class="no">' + esc(b) + '</p>'; });
-    var canInstall = !st.blockers.length && (st.installed || !!st.install);
+    var canInstall = (!st.blockers.length && (st.installed || !!st.install)) || !!(st.nemotron && st.nemotron.offerable);
     if (canInstall) {
       html += '<p>LitForge can do this for you' + (st.installed ? '' : ' (Ollama from ollama.com' +
         (st.install === 'brew' ? ', with Homebrew' : '') + ')') + '. The download takes a while; progress shows in the log.</p>';
@@ -289,8 +291,9 @@
     }
     $('mathsetup-report').innerHTML = html;
     $('mathsetup-install').hidden = !canInstall;
-    $('mathsetup-install').textContent = fromSettings ?
-      (st.installed ? 'Download the image model' : 'Install the image model') :
+    var onlyNemotron = st.running && st.model_ready;
+    $('mathsetup-install').textContent = onlyNemotron ? (fromSettings ? 'Set up Nemotron Parse' : 'Set up Nemotron Parse and export') :
+      fromSettings ? (st.installed ? 'Download the image model' : 'Install the image model') :
       (st.installed ? 'Download the model and export' : 'Install and export');
     var medium = $('export-math').querySelector('option[value="medium"]');
     $('mathsetup-medium').hidden = !!fromSettings || medium.disabled;
@@ -4470,6 +4473,17 @@
       $('tool-pix2text-action').textContent = 'Install Pix2Text…';
       $('tool-pix2text-action').onclick = installPix2Text;
 
+      var nemo = tools.nemotron || {};
+      $('tool-nemotron-status').textContent = nemo.installed ? 'Set up' + (nemo.gpu ? '' : ' · no NVIDIA GPU found, so it is only used when chosen below') :
+        nemo.offerable ? 'Not set up · ' + (nemo.size || '~2.5 GB') :
+          'Not available here' + (nemo.reason ? ': ' + nemo.reason : '');
+      $('tool-nemotron-action').hidden = !nemo.offerable;
+      $('tool-nemotron-action').onclick = function () { installNemotron(nemo); };
+      var engines = tools.engines || {};
+      $('engine-parse').value = engines.parse || 'auto';
+      $('engine-page').value = engines.page || 'auto';
+      $('engine-parse').onchange = $('engine-page').onchange = saveEngines;
+
       var tec = (tools.tectonic || {}).tectonic || {};
       $('tool-tectonic-status').textContent = tec.installed ? 'Installed · ' + (tec.version || '') :
         tec.offerable ? 'Not installed · ' + tec.size : 'No Tectonic build for this platform; install TeX Live or MacTeX';
@@ -4502,6 +4516,22 @@
         return watchOptionalToolJob(job, $('tool-pix2text-progress'), loadOptionalTools);
       });
     }).catch(function (e) { $('tool-pix2text-progress').textContent = e.message; });
+  }
+
+  function installNemotron(nemo) {
+    if (!window.confirm('Set up Nemotron Parse (' + (nemo.size || '~2.5 GB') + ')? It adds two small Python packages ' +
+        'and downloads the model from Hugging Face.')) return;
+    $('tool-nemotron-progress').textContent = 'Setting up Nemotron Parse…';
+    return post('/api/tools/nemotron/install', { confirmed: true }).then(function (job) {
+      return watchOptionalToolJob(job, $('tool-nemotron-progress'), loadOptionalTools);
+    }).catch(function (e) { $('tool-nemotron-progress').textContent = e.message; });
+  }
+
+  function saveEngines() {
+    $('engine-status').textContent = 'Saving…';
+    return post('/api/tools/engines', { parse: $('engine-parse').value, page: $('engine-page').value })
+      .then(function () { $('engine-status').textContent = 'Saved'; })
+      .catch(function (e) { $('engine-status').textContent = e.message; });
   }
 
   function installTectonic(tec) {

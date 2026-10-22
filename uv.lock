@@ -4,12 +4,14 @@ requires-python = "==3.12.*"
 resolution-markers = [
     "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 conflicts = [[
     { package = "litforge", extra = "formulas" },
     { package = "litforge", extra = "formulas-gpu" },
+], [
+    { package = "litforge", extra = "formulas" },
+    { package = "litforge", extra = "nemotron" },
 ]]
 
 [[package]]
@@ -23,10 +25,10 @@ dependencies = [
     { name = "psutil" },
     { name = "pyyaml" },
     { name = "safetensors" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f5/b5/1d3ed029ac71d3f2961346829a268da923698e9fd63f218f78841f216bfd/accelerate-1.15.0.tar.gz", hash = "sha256:5654f8c5eaa0d4fa68b33e287a97765da6849bf6d51dcac874e73fbbddfb6134", size = 422615, upload-time = "2026-09-09T13:04:49.078Z" }
 wheels = [
@@ -292,13 +294,15 @@ dependencies = [
     { name = "pillow" },
     { name = "pytorch-lightning" },
     { name = "rapidocr" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "torchmetrics" },
-    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "tqdm" },
     { name = "wandb" },
 ]
@@ -309,8 +313,8 @@ wheels = [
 
 [package.optional-dependencies]
 ort-cpu = [
-    { name = "onnxruntime", version = "1.20.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'win32' and extra == 'extra-8-litforge-formulas') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "onnxruntime", version = "1.31.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'win32' and extra == 'extra-8-litforge-formulas') or (sys_platform != 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "onnxruntime", version = "1.20.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "onnxruntime", version = "1.31.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 
 [[package]]
@@ -333,12 +337,14 @@ dependencies = [
     { name = "scipy" },
     { name = "seaborn" },
     { name = "shapely" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "tqdm" },
     { name = "ultralytics" },
     { name = "unidecode" },
@@ -371,7 +377,7 @@ name = "coloredlogs"
 version = "15.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "humanfriendly", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "humanfriendly", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cc/c7/eed8f27100517e8c0e6b923d5f0845d0cb99763da6fdee00478f91db7325/coloredlogs-15.0.1.tar.gz", hash = "sha256:7c991aa71a4577af2f82600d8f8f3a89f936baeaf9b50a9c197da014e5bf16b0", size = 278520, upload-time = "2021-06-11T10:22:45.202Z" }
 wheels = [
@@ -383,7 +389,7 @@ name = "colorlog"
 version = "6.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/8c/55/ba79756cb90c8d69d599d57785398ac87bba7b19c80e87f4e8a562197c93/colorlog-6.12.0.tar.gz", hash = "sha256:2a7924c1dadf18b22a0eb8b06d1c7b01d5341707ec1641eb6fcc4fde0c3e8e5f", size = 18151, upload-time = "2026-07-23T13:40:40.71Z" }
 wheels = [
@@ -417,10 +423,10 @@ name = "cuda-bindings"
 version = "12.9.9"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "cuda-pathfinder", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'emscripten' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "cuda-pathfinder", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/15/d5/572ced1aecc8c8f3e617c3af58d3b1ed5378ed71531c607c960a3e48b516/cuda_bindings-12.9.9-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:88c41afe5be41acb17e57977dd534e335f86d0c96d284d71457168525f6327c0", size = 7063842, upload-time = "2026-09-23T03:20:45.94Z" },
@@ -433,10 +439,10 @@ name = "cuda-bindings"
 version = "13.4.4"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "cuda-pathfinder", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "cuda-pathfinder", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d7/38/87909f62598d02d9e5c536326aed1755f6bfa190285507b962bb601e0005/cuda_bindings-13.4.4-cp312-cp312-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b346bfe1dda49537537c06cc4727b2210d949d8aee883cb591bca46581629d00", size = 6488222, upload-time = "2026-10-14T12:35:20.703Z" },
@@ -458,7 +464,7 @@ name = "cuda-toolkit"
 version = "12.8.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d4/c8/7dce3a0b15b42a3b58e7d96eb22a687d3bf2c44e01d149a6874629cd9938/cuda_toolkit-12.8.1-py2.py3-none-any.whl", hash = "sha256:adc7906af4ecbf9a352f9dca5734eceb21daec281ccfcf5675e1d2f724fc2cba", size = 2283, upload-time = "2025-08-13T02:03:07.842Z" },
@@ -466,37 +472,37 @@ wheels = [
 
 [package.optional-dependencies]
 cublas = [
-    { name = "nvidia-cublas-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cublas-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cudart = [
-    { name = "nvidia-cuda-runtime-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cuda-runtime-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cufft = [
-    { name = "nvidia-cufft-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cufft-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cufile = [
-    { name = "nvidia-cufile-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cufile-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cupti = [
-    { name = "nvidia-cuda-cupti-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cuda-cupti-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 curand = [
-    { name = "nvidia-curand-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-curand-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cusolver = [
-    { name = "nvidia-cusolver-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cusolver-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cusparse = [
-    { name = "nvidia-cusparse-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cusparse-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 nvjitlink = [
-    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 nvrtc = [
-    { name = "nvidia-cuda-nvrtc-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cuda-nvrtc-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 nvtx = [
-    { name = "nvidia-nvtx-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-nvtx-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 
 [[package]]
@@ -504,7 +510,7 @@ name = "cuda-toolkit"
 version = "13.0.3.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/c7/a79086a62c98befcdb8349656c6f114e2db3b8b2422f6e25c97a7f2a9a3c/cuda_toolkit-13.0.3.0-py2.py3-none-any.whl", hash = "sha256:d693caaa261214ddd7dbb60d68e71cbed884e68c2be7509778f3051da0b91c3f", size = 2512, upload-time = "2026-04-14T00:50:08.173Z" },
@@ -512,43 +518,43 @@ wheels = [
 
 [package.optional-dependencies]
 cublas = [
-    { name = "nvidia-cublas", version = "13.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-cuda-nvrtc", version = "13.0.88", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cublas", version = "13.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-cuda-nvrtc", version = "13.0.88", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cudart = [
-    { name = "nvidia-cuda-runtime", version = "13.0.96", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cuda-runtime", version = "13.0.96", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cufft = [
-    { name = "nvidia-cufft", version = "12.0.0.61", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-nvjitlink", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cufft", version = "12.0.0.61", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cufile = [
-    { name = "nvidia-cufile", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cufile", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cupti = [
-    { name = "nvidia-cuda-cupti", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cuda-cupti", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 curand = [
-    { name = "nvidia-curand", version = "10.4.0.35", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-curand", version = "10.4.0.35", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cusolver = [
-    { name = "nvidia-cublas", version = "13.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-cusolver", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-cusparse", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-nvjitlink", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cublas", version = "13.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-cusolver", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-cusparse", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cusparse = [
-    { name = "nvidia-cusparse", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-nvjitlink", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cusparse", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 nvjitlink = [
-    { name = "nvidia-nvjitlink", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-nvjitlink", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 nvrtc = [
-    { name = "nvidia-cuda-nvrtc", version = "13.0.88", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cuda-nvrtc", version = "13.0.88", source = { registry = "https://pypi.org/simple" }, marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 nvtx = [
-    { name = "nvidia-nvtx", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'aarch64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-nvtx", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (platform_machine == 'AMD64' and sys_platform == 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform != 'linux' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'linux' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 
 [[package]]
@@ -608,12 +614,14 @@ dependencies = [
     { name = "scipy" },
     { name = "seaborn" },
     { name = "thop" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "tqdm" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/87/0c/6cfdf059503ea36fcf56b34f74cab2cc7d20f09838c4cb6e7a70b1d1ef7d/doclayout_yolo-0.0.4.tar.gz", hash = "sha256:80311d10bed03cf884c5bfcc624bfe0fdcff6e784ba76799347b0290d79dcb4d", size = 603077, upload-time = "2025-06-10T09:06:36.514Z" }
@@ -683,14 +691,14 @@ dependencies = [
     { name = "pydantic" },
     { name = "rtree" },
     { name = "safetensors", extra = ["torch"] },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.29.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "tqdm" },
     { name = "transformers" },
 ]
@@ -707,7 +715,7 @@ dependencies = [
     { name = "docling-core" },
     { name = "pillow" },
     { name = "pydantic" },
-    { name = "pywin32", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "pywin32", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d7/ea/f609987314655e8ad0136d68d0961f60a28421d2cd79da5a67d59f4c0c92/docling_parse-7.22.3.tar.gz", hash = "sha256:100e9c320e199343cd7bb03a816956e578109dd53d76cc72ecbd9d9e89954dc6", size = 7050703, upload-time = "2026-10-13T04:24:34.028Z" }
 wheels = [
@@ -763,14 +771,14 @@ standard = [
     { name = "rich" },
     { name = "rtree" },
     { name = "scipy" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.29.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "typer" },
     { name = "websockets" },
 ]
@@ -789,7 +797,7 @@ name = "faker"
 version = "40.43.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "tzdata", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "tzdata", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/33/6c/b8793efc2f00a912ef17cf0b61b717cddf34607499efcb8a32238c119368/faker-40.43.0.tar.gz", hash = "sha256:02fae4327c03a4a6315e1b428a3878f435bfc276c93435ea349b95c0c9372361", size = 2032713, upload-time = "2026-10-09T20:06:29.652Z" }
 wheels = [
@@ -805,8 +813,8 @@ dependencies = [
     { name = "loguru" },
     { name = "mmh3" },
     { name = "numpy" },
-    { name = "onnxruntime", version = "1.20.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "onnxruntime", version = "1.31.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "onnxruntime", version = "1.20.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "onnxruntime", version = "1.31.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "pillow" },
     { name = "py-rust-stemmers" },
     { name = "requests" },
@@ -972,7 +980,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
     { name = "fsspec" },
-    { name = "hf-xet", marker = "platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "hf-xet", marker = "platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "packaging" },
     { name = "pyyaml" },
     { name = "requests" },
@@ -989,7 +997,7 @@ name = "humanfriendly"
 version = "10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyreadline3", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "pyreadline3", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cc/3f/2c29224acb2e2df4d2046e4c73ee2662023c58ff5b113c4c1adac0886c43/humanfriendly-10.0.tar.gz", hash = "sha256:6b0b831ce8f15f7300721aa49829fc4e83921a9a301cc7f606be6686a2288ddc", size = 360702, upload-time = "2021-09-17T21:40:43.31Z" }
 wheels = [
@@ -1170,17 +1178,29 @@ embed = [
 formulas = [
     { name = "pix2text" },
     { name = "rapidocr" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 formulas-gpu = [
-    { name = "onnxruntime-gpu", extra = ["cuda", "cudnn"], marker = "extra == 'extra-8-litforge-formulas-gpu'" },
+    { name = "onnxruntime-gpu", extra = ["cuda", "cudnn"], marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "pix2text" },
     { name = "rapidocr" },
     { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" } },
     { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" } },
+]
+nemotron = [
+    { name = "beautifulsoup4" },
+    { name = "huggingface-hub" },
+    { name = "onnxruntime-gpu", extra = ["cuda", "cudnn"], marker = "extra == 'extra-8-litforge-formulas-gpu' or extra == 'extra-8-litforge-nemotron' or extra != 'extra-8-litforge-formulas'" },
+    { name = "pix2text" },
+    { name = "rapidocr" },
+    { name = "timm" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
 ]
 
 [package.dev-dependencies]
@@ -1193,8 +1213,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "beautifulsoup4", marker = "extra == 'nemotron'", specifier = ">=4.13" },
     { name = "docling", marker = "extra == 'docling'", specifier = ">=2.0" },
     { name = "fastembed", marker = "extra == 'embed'", specifier = ">=0.4" },
+    { name = "huggingface-hub", marker = "extra == 'nemotron'", specifier = ">=0.34" },
+    { name = "litforge", extras = ["formulas-gpu"], marker = "extra == 'nemotron'" },
     { name = "markitdown", extras = ["docx", "pptx", "xlsx"], marker = "extra == 'documents'", specifier = ">=0.1.8" },
     { name = "onnxruntime-gpu", extras = ["cuda", "cudnn"], marker = "extra == 'formulas-gpu'", specifier = ">=1.22" },
     { name = "pix2text", marker = "extra == 'formulas'", specifier = ">=1.1.4" },
@@ -1205,13 +1228,14 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rapidocr", marker = "extra == 'formulas'", specifier = "==3.9.0" },
     { name = "rapidocr", marker = "extra == 'formulas-gpu'", specifier = "==3.9.0" },
+    { name = "timm", marker = "extra == 'nemotron'", specifier = ">=1.0.22" },
     { name = "torch", marker = "extra == 'formulas'", specifier = ">=2.4", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "litforge", extra = "formulas" } },
     { name = "torch", marker = "extra == 'formulas-gpu'", specifier = ">=2.7", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "litforge", extra = "formulas-gpu" } },
     { name = "torchvision", marker = "extra == 'formulas'", specifier = ">=0.19", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "litforge", extra = "formulas" } },
     { name = "torchvision", marker = "extra == 'formulas-gpu'", specifier = ">=0.22", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "litforge", extra = "formulas-gpu" } },
     { name = "typer", specifier = ">=0.12" },
 ]
-provides-extras = ["docling", "embed", "formulas", "formulas-gpu", "documents"]
+provides-extras = ["docling", "embed", "formulas", "formulas-gpu", "documents", "nemotron"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1226,8 +1250,8 @@ name = "loguru"
 version = "0.7.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "win32-setctime", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "win32-setctime", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3a/05/a1dae3dffd1116099471c643b8924f5aa6524411dc6c63fdae648c4f1aca/loguru-0.7.3.tar.gz", hash = "sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6", size = 63559, upload-time = "2024-12-06T11:20:56.608Z" }
 wheels = [
@@ -1267,8 +1291,8 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "numpy" },
-    { name = "onnxruntime", version = "1.20.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "onnxruntime", version = "1.31.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "onnxruntime", version = "1.20.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "onnxruntime", version = "1.31.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "python-dotenv" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a3/f3/3d1dcdd7b9c41d589f5cff252d32ed91cdf86ba84391cfc81d9d8773571d/magika-0.6.3.tar.gz", hash = "sha256:7cc52aa7359af861957043e2bf7265ed4741067251c104532765cd668c0c0cb1", size = 3042784, upload-time = "2025-10-30T15:22:34.499Z" }
@@ -1470,7 +1494,7 @@ version = "2.10.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pygments" },
-    { name = "pywin32", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "pywin32", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "tqdm" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3a/93/80ac75c20ce54c785648b4ed363c88f148bf22637e10c9863db4fbe73e74/mpire-2.10.2.tar.gz", hash = "sha256:f66a321e93fadff34585a4bfa05e95bd946cf714b442f51c529038eb45773d97", size = 271270, upload-time = "2024-05-07T14:00:31.815Z" }
@@ -1542,7 +1566,7 @@ version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ast-serialize" },
-    { name = "librt", marker = "platform_python_implementation != 'PyPy' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "librt", marker = "platform_python_implementation != 'PyPy' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "mypy-extensions" },
     { name = "pathspec" },
     { name = "typing-extensions" },
@@ -1600,10 +1624,12 @@ name = "nvidia-cublas"
 version = "13.1.1.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform == 'darwin'",
+    "sys_platform == 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "nvidia-cuda-nvrtc", version = "13.0.88", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cuda-nvrtc", version = "13.0.88", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/a1/0bd24ee8c8d03adac032fd2909426a00c88f8c57961b1277ded97f91119f/nvidia_cublas-13.1.1.3-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:b7a210458267ac818974c53038fbec2e969d5c99f305ab15c72522fa9f001dd5", size = 542848918, upload-time = "2026-04-08T18:46:22.985Z" },
@@ -1618,11 +1644,10 @@ source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "nvidia-cuda-nvrtc", version = "13.4.92", source = { registry = "https://pypi.org/simple" } },
+    { name = "nvidia-cuda-nvrtc", version = "13.4.92", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/35/ea/54b9b5f0e0317cc1587353324e6821e16212693c3fde021d88919eaeee2f/nvidia_cublas-13.8.1.7-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:803b9974cd7164a481d0b11c25826498d383d0ef0c372573bc6577a344ddf74e", size = 552728945, upload-time = "2026-09-28T19:53:21.046Z" },
@@ -1664,7 +1689,9 @@ name = "nvidia-cuda-nvrtc"
 version = "13.0.88"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform == 'darwin'",
+    "sys_platform == 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c3/68/483a78f5e8f31b08fb1bb671559968c0ca3a065ac7acabfc7cee55214fd6/nvidia_cuda_nvrtc-13.0.88-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:ad9b6d2ead2435f11cbb6868809d2adeeee302e9bb94bcf0539c7a40d80e8575", size = 90215200, upload-time = "2025-09-04T08:28:44.204Z" },
@@ -1679,8 +1706,7 @@ source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/56/9c/1342ebb460ce2afd014ec5a002adc99108e3c53a6b70f399cf64dd1f267d/nvidia_cuda_nvrtc-13.4.92-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl", hash = "sha256:5ce8c97b00b232c4f50c8c4b5a3b68cafee08bdb82ea86f2052ff01d03194f4a", size = 53301733, upload-time = "2026-09-16T20:39:06.686Z" },
@@ -1704,7 +1730,9 @@ name = "nvidia-cuda-runtime"
 version = "13.0.96"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform == 'darwin'",
+    "sys_platform == 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/87/4f/17d7b9b8e285199c58ce28e31b5c5bbaa4d8271af06a89b6405258245de2/nvidia_cuda_runtime-13.0.96-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:ef9bcbe90493a2b9d810e43d249adb3d02e98dd30200d86607d8d02687c43f55", size = 2261060, upload-time = "2025-10-09T08:55:15.78Z" },
@@ -1719,8 +1747,7 @@ source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/3b/2c6e9d88efa7b3585572760bca5e7da83fa9e06098a9386c7b29c81c46b2/nvidia_cuda_runtime-13.4.92-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:bef071788589550ab02846fcbc732a2b88c2b16f2cd8a0f45d98e68e8c5fb0c8", size = 2509438, upload-time = "2026-09-16T20:37:16.36Z" },
@@ -1744,7 +1771,7 @@ name = "nvidia-cudnn-cu12"
 version = "9.19.0.56"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'emscripten' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cublas-cu12", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/09/b8/277c51962ee46fa3e5b203ac5f76107c650f781d6891e681e28e6f3e9fe6/nvidia_cudnn_cu12-9.19.0.56-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:08caaf27fe556aca82a3ee3b5aa49a77e7de0cfcb7ff4e5c29da426387a8267e", size = 656910700, upload-time = "2026-02-03T20:40:25.508Z" },
@@ -1757,10 +1784,12 @@ name = "nvidia-cudnn-cu13"
 version = "9.24.0.43"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform == 'darwin'",
+    "sys_platform == 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "nvidia-cublas", version = "13.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cublas", version = "13.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ca/30/7c257e3d5cb4fecb147b93895c66e29c93f8e76d74b45bb418ff0587c4ec/nvidia_cudnn_cu13-9.24.0.43-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:a6812a554a1ff0413e9c52b84c26c050380649ab9615f9c16bded368ce9f421f", size = 650976863, upload-time = "2026-07-02T16:23:39.248Z" },
@@ -1775,11 +1804,10 @@ source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "nvidia-cublas", version = "13.8.1.7", source = { registry = "https://pypi.org/simple" } },
+    { name = "nvidia-cublas", version = "13.8.1.7", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ff/c4/ecae6a5da85c256f6b378648bf5b7ef561bb4b56e0d2af868ef6c484c34c/nvidia_cudnn_cu13-9.27.0.42-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:41b3aae756032ed13b1fcac39c79330cfc5434059d0c5251914e0f6ce582c7ea", size = 614353993, upload-time = "2026-09-29T23:41:37.033Z" },
@@ -1792,10 +1820,12 @@ name = "nvidia-cufft"
 version = "12.0.0.61"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform == 'darwin'",
+    "sys_platform == 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "nvidia-nvjitlink", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-nvjitlink", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8b/ae/f417a75c0259e85c1d2f83ca4e960289a5f814ed0cea74d18c353d3e989d/nvidia_cufft-12.0.0.61-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:2708c852ef8cd89d1d2068bdbece0aa188813a0c934db3779b9b1faa8442e5f5", size = 214053554, upload-time = "2025-09-04T08:31:38.196Z" },
@@ -1810,11 +1840,10 @@ source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "nvidia-nvjitlink" },
+    { name = "nvidia-nvjitlink", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/41/f1/bb8cc4e1ffee345a51fe4cf656352bc705274431dcbd6c23ed9f00585ec7/nvidia_cufft-12.4.0.43-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:3938644a5b594e06d396e02d6e52bdd84589b3c1f3a8a127a2704211c2abc441", size = 161750525, upload-time = "2026-09-16T20:41:56.892Z" },
@@ -1828,7 +1857,7 @@ name = "nvidia-cufft-cu12"
 version = "11.3.3.83"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'emscripten' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-nvjitlink-cu12", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/60/bc/7771846d3a0272026c416fbb7e5f4c1f146d6d80704534d0b187dd6f4800/nvidia_cufft_cu12-11.3.3.83-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:848ef7224d6305cdb2a4df928759dca7b1201874787083b6e7550dd6765ce69a", size = 193109211, upload-time = "2025-03-07T01:44:56.873Z" },
@@ -1859,7 +1888,9 @@ name = "nvidia-curand"
 version = "10.4.0.35"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform == 'darwin'",
+    "sys_platform == 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/72/7c2ae24fb6b63a32e6ae5d241cc65263ea18d08802aaae087d9f013335a2/nvidia_curand-10.4.0.35-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:133df5a7509c3e292aaa2b477afd0194f06ce4ea24d714d616ff36439cee349a", size = 61962106, upload-time = "2025-08-04T10:21:41.128Z" },
@@ -1874,8 +1905,7 @@ source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e8/9d/42faff77e90e5498eecb9b099894d5deea744b3d6b35e700dafd0381e07a/nvidia_curand-10.4.4.72-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:53bef256d4362eb3d70c9c048a8d31bcf003f9dcade17720c73d3a494a7dcaa3", size = 63771251, upload-time = "2026-09-16T20:42:40.644Z" },
@@ -1899,9 +1929,9 @@ name = "nvidia-cusolver"
 version = "12.0.4.66"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas", version = "13.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-cusparse", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-nvjitlink", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cublas", version = "13.1.1.3", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cusparse", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-nvjitlink", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/c3/b30c9e935fc01e3da443ec0116ed1b2a009bb867f5324d3f2d7e533e776b/nvidia_cusolver-12.0.4.66-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:02c2457eaa9e39de20f880f4bd8820e6a1cfb9f9a34f820eb12a155aa5bc92d2", size = 223467760, upload-time = "2025-09-04T08:33:04.222Z" },
@@ -1914,9 +1944,9 @@ name = "nvidia-cusolver-cu12"
 version = "11.7.3.90"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'emscripten' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-cusparse-cu12", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'emscripten' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'emscripten' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cublas-cu12", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-cusparse-cu12", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-nvjitlink-cu12", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/32/f7cd6ce8a7690544d084ea21c26e910a97e077c9b7f07bf5de623ee19981/nvidia_cusolver_cu12-11.7.3.90-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:db9ed69dbef9715071232caa9b69c52ac7de3a95773c2db65bdba85916e4e5c0", size = 267229841, upload-time = "2025-03-07T01:46:54.356Z" },
@@ -1929,7 +1959,7 @@ name = "nvidia-cusparse"
 version = "12.6.3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-nvjitlink", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f8/94/5c26f33738ae35276672f12615a64bd008ed5be6d1ebcb23579285d960a9/nvidia_cusparse-12.6.3.3-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:80bcc4662f23f1054ee334a15c72b8940402975e0eab63178fc7e670aa59472c", size = 162155568, upload-time = "2025-09-04T08:33:42.864Z" },
@@ -1942,7 +1972,7 @@ name = "nvidia-cusparse-cu12"
 version = "12.5.8.93"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "(sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'emscripten' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-nvjitlink-cu12", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bc/f7/cd777c4109681367721b00a106f491e0d0d15cfa1fd59672ce580ce42a97/nvidia_cusparse_cu12-12.5.8.93-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:9b6c161cb130be1a07a27ea6923df8141f3c295852f4b260c65f18f3e0a091dc", size = 288117129, upload-time = "2025-03-07T01:47:40.407Z" },
@@ -2097,12 +2127,12 @@ resolution-markers = [
     "sys_platform == 'win32'",
 ]
 dependencies = [
-    { name = "coloredlogs", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "flatbuffers", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "numpy", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "packaging", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "protobuf", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "sympy", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "coloredlogs", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "flatbuffers", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "numpy", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "packaging", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "protobuf", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "sympy", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e5/39/9335e0874f68f7d27103cbffc0e235e32e26759202df6085716375c078bb/onnxruntime-1.20.1-cp312-cp312-macosx_13_0_universal2.whl", hash = "sha256:22b0655e2bf4f2161d52706e31f517a0e54939dc393e92577df51808a7edc8c9", size = 31007580, upload-time = "2024-11-21T00:49:07.029Z" },
@@ -2118,14 +2148,13 @@ version = "1.31.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "sys_platform == 'darwin'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "flatbuffers", marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "numpy", marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "packaging", marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "protobuf", marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "flatbuffers", marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "numpy", marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "packaging", marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "protobuf", marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/bd/2ac094311163b803e3626c3937461d6900934bd56cca7601f6150ff860c3/onnxruntime-1.31.0-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:aaab9b3af536b06ca27ab5e35e3d429c97457ce76cf298af103f687e8b9975c0", size = 20882054, upload-time = "2026-10-09T04:18:18.811Z" },
@@ -2153,13 +2182,18 @@ wheels = [
 
 [package.optional-dependencies]
 cuda = [
-    { name = "nvidia-cuda-nvrtc", version = "13.4.92", source = { registry = "https://pypi.org/simple" } },
-    { name = "nvidia-cuda-runtime", version = "13.4.92", source = { registry = "https://pypi.org/simple" } },
-    { name = "nvidia-cufft", version = "12.4.0.43", source = { registry = "https://pypi.org/simple" } },
-    { name = "nvidia-curand", version = "10.4.4.72", source = { registry = "https://pypi.org/simple" } },
+    { name = "nvidia-cuda-nvrtc", version = "13.0.88", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cuda-nvrtc", version = "13.4.92", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-cuda-runtime", version = "13.0.96", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cuda-runtime", version = "13.4.92", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-cufft", version = "12.0.0.61", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cufft", version = "12.4.0.43", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-curand", version = "10.4.0.35", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-curand", version = "10.4.4.72", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 cudnn = [
-    { name = "nvidia-cudnn-cu13", version = "9.27.0.42", source = { registry = "https://pypi.org/simple" } },
+    { name = "nvidia-cudnn-cu13", version = "9.24.0.43", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cudnn-cu13", version = "9.27.0.42", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 
 [[package]]
@@ -2272,7 +2306,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "googleapis-common-protos" },
     { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-http-transport", extra = ["requests"], marker = "extra == 'extra-8-litforge-formulas' or extra == 'extra-8-litforge-formulas-gpu'" },
+    { name = "opentelemetry-exporter-http-transport", extra = ["requests"] },
     { name = "opentelemetry-exporter-otlp-common" },
     { name = "opentelemetry-exporter-otlp-proto-common" },
     { name = "opentelemetry-proto" },
@@ -2332,9 +2366,10 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "numpy" },
     { name = "packaging" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "transformers" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f0/69/e1e9fe4d54f6b1b90cc278d6da74dd90eb4d9fd9228882886d7c275712e2/optimum-2.1.0.tar.gz", hash = "sha256:0a2a13f91500e41d34863ffdb08fcb886b3ce68a84a386e59653e3064a45dd4b", size = 125896, upload-time = "2025-12-19T10:47:18.571Z" }
@@ -2344,7 +2379,7 @@ wheels = [
 
 [package.optional-dependencies]
 onnxruntime = [
-    { name = "optimum-onnx", extra = ["onnxruntime"], marker = "extra == 'extra-8-litforge-formulas' or extra == 'extra-8-litforge-formulas-gpu'" },
+    { name = "optimum-onnx", extra = ["onnxruntime"] },
 ]
 
 [[package]]
@@ -2363,8 +2398,8 @@ wheels = [
 
 [package.optional-dependencies]
 onnxruntime = [
-    { name = "onnxruntime", version = "1.20.1", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'win32' and extra == 'extra-8-litforge-formulas') or (sys_platform == 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "onnxruntime", version = "1.31.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'win32' and extra == 'extra-8-litforge-formulas') or (sys_platform != 'win32' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "onnxruntime", version = "1.20.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "onnxruntime", version = "1.31.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 
 [[package]]
@@ -2383,7 +2418,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "python-dateutil" },
-    { name = "tzdata", marker = "sys_platform == 'emscripten' or sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "tzdata", marker = "sys_platform == 'emscripten' or sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e2/17/d7b106e05bfa642e8694451e7d3d759c6a241c5386a5d962e4f66c047e06/pandas-3.0.6.tar.gz", hash = "sha256:66b07ef7315a31bfe1089cd3d71a7de781c9dca986762d0b4fe7c0ef17465d10", size = 4667686, upload-time = "2026-09-17T23:23:18.345Z" }
 wheels = [
@@ -2430,21 +2465,23 @@ version = "1.1.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
-    { name = "cnocr", extra = ["ort-cpu"], marker = "extra == 'extra-8-litforge-formulas' or extra == 'extra-8-litforge-formulas-gpu'" },
+    { name = "cnocr", extra = ["ort-cpu"] },
     { name = "cnstd" },
     { name = "doclayout-yolo" },
     { name = "numpy" },
     { name = "opencv-python" },
-    { name = "optimum", extra = ["onnxruntime"], marker = "extra == 'extra-8-litforge-formulas' or extra == 'extra-8-litforge-formulas-gpu'" },
+    { name = "optimum", extra = ["onnxruntime"] },
     { name = "pillow" },
     { name = "pymupdf" },
     { name = "pyspellchecker" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "tqdm" },
     { name = "transformers" },
 ]
@@ -2766,7 +2803,7 @@ name = "pytest"
 version = "9.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "iniconfig" },
     { name = "packaging" },
     { name = "pluggy" },
@@ -2831,13 +2868,14 @@ name = "pytorch-lightning"
 version = "2.6.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "fsspec", extra = ["http"], marker = "extra == 'extra-8-litforge-formulas' or extra == 'extra-8-litforge-formulas-gpu'" },
+    { name = "fsspec", extra = ["http"] },
     { name = "lightning-utilities" },
     { name = "packaging" },
     { name = "pyyaml" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "torchmetrics" },
     { name = "tqdm" },
     { name = "typing-extensions" },
@@ -3065,10 +3103,10 @@ wheels = [
 [package.optional-dependencies]
 torch = [
     { name = "numpy" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 
 [[package]]
@@ -3126,8 +3164,7 @@ source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0d/1c/73e719955c59b8e424d015ab450f51c0af856ae46ea2da83eba51cc88de1/setuptools-81.0.0.tar.gz", hash = "sha256:487b53915f52501f0a79ccfd0c02c165ffe06631443a886740b91af4b7a5845a", size = 1198299, upload-time = "2026-02-06T21:10:39.601Z" }
 wheels = [
@@ -3139,10 +3176,9 @@ name = "setuptools"
 version = "84.0.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
+    "sys_platform == 'darwin'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6d/44/f5da03a8ef95d369145c5bb53050e7877c9f3d312e128605fd9504829143/setuptools-84.0.0.tar.gz", hash = "sha256:f4695c21257f0d9b537ec2692c941d02ee143b7cc1276941349a546573b2ef73", size = 1168449, upload-time = "2026-08-08T18:27:58.365Z" }
 wheels = [
@@ -3265,12 +3301,31 @@ name = "thop"
 version = "0.1.1.post2209072238"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bb/0f/72beeab4ff5221dc47127c80f8834b4bcd0cb36f6ba91c0b1d04a1233403/thop-0.1.1.post2209072238-py3-none-any.whl", hash = "sha256:01473c225231927d2ad718351f78ebf7cffe6af3bed464c4f1ba1ef0f7cdda27", size = 15443, upload-time = "2022-09-07T14:38:37.211Z" },
+]
+
+[[package]]
+name = "timm"
+version = "1.0.30"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "huggingface-hub" },
+    { name = "pyyaml" },
+    { name = "safetensors" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0e/ab/49041213990e48edcb6013463b18ef86d8d3c5d6ac5b408802c480443025/timm-1.0.30.tar.gz", hash = "sha256:1444a3af7e17fdba5440ac2bcf6e4b728da96dd62289ed9e1bcba31a545f5935", size = 2534738, upload-time = "2026-09-22T20:46:13.9Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f5/85/b897716d0fa016af23b11e6526f5ef76d2013e8bc36b9c7ce15d9200e456/timm-1.0.30-py3-none-any.whl", hash = "sha256:c8e27adf6801a2fdfb570dbbdd171f2f084756eefc673df8cfaab06bd14864f3", size = 2668917, upload-time = "2026-09-22T20:46:12.11Z" },
 ]
 
 [[package]]
@@ -3306,24 +3361,23 @@ source = { registry = "https://download.pytorch.org/whl/cu128" }
 resolution-markers = [
     "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "cuda-bindings", version = "12.9.9", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "cuda-toolkit", version = "12.8.1", source = { registry = "https://pypi.org/simple" }, extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "filelock", marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "fsspec", marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "jinja2", marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "networkx", marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "nvidia-cudnn-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-cusparselt-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-nccl-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-nvshmem-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "setuptools", version = "81.0.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "sympy", marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "triton", version = "3.6.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "typing-extensions", marker = "extra == 'extra-8-litforge-formulas-gpu'" },
+    { name = "cuda-bindings", version = "12.9.9", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "cuda-toolkit", version = "12.8.1", source = { registry = "https://pypi.org/simple" }, extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "filelock", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "fsspec", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "jinja2", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "networkx", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-cudnn-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-cusparselt-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-nccl-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-nvshmem-cu12", marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "setuptools", version = "81.0.0", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "sympy", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "triton", version = "3.6.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "typing-extensions", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cu128/torch-2.11.0%2Bcu128-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:9c8f38efee365cb9d334de8a83ce52fc7e5fc9e5a7b0853285efa1b69e00b0f2", upload-time = "2026-04-27T17:41:30Z" },
@@ -3339,13 +3393,13 @@ resolution-markers = [
     "sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "filelock", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "fsspec", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "jinja2", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "networkx", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "setuptools", version = "84.0.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "sympy", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "typing-extensions", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "filelock", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "fsspec", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "jinja2", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "networkx", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "setuptools", version = "84.0.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "sympy", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "typing-extensions", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.14.1-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:9cf3082d25560efb1eef921871595227c0cf305abb7761ca45b6b988ef6cdd45", upload-time = "2026-09-30T19:50:32Z" },
@@ -3358,24 +3412,23 @@ source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "cuda-bindings", version = "13.4.4", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "cuda-toolkit", version = "13.0.3.0", source = { registry = "https://pypi.org/simple" }, extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "filelock", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "fsspec", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "jinja2", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "networkx", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-cudnn-cu13", version = "9.24.0.43", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-cusparselt-cu13", marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-nccl-cu13", marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "nvidia-nvshmem-cu13", marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "setuptools", version = "84.0.0", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "sympy", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "triton", version = "3.8.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "typing-extensions", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "cuda-bindings", version = "13.4.4", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "cuda-toolkit", version = "13.0.3.0", source = { registry = "https://pypi.org/simple" }, extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "filelock", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "fsspec", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "jinja2", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "networkx", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "nvidia-cudnn-cu13", version = "9.24.0.43", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-cusparselt-cu13", marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-nccl-cu13", marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "nvidia-nvshmem-cu13", marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "setuptools", version = "84.0.0", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "sympy", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "triton", version = "3.8.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform == 'linux' and extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "typing-extensions", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4b/3c/379349820e9a6e713826de3d0b88f07728541bdcabe2a3afd128871cdc4b/torch-2.14.1-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:420dbf314c180ee4b86e9bc00aee5746a7d6e5bacdd7df925af671ed393f0b2e", size = 127307099, upload-time = "2026-09-30T17:44:10.421Z" },
@@ -3390,17 +3443,16 @@ version = "2.14.1+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "filelock", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "fsspec", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "jinja2", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "networkx", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "setuptools", version = "84.0.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "sympy", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "typing-extensions", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "filelock", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "fsspec", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "jinja2", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "networkx", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "setuptools", version = "84.0.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "sympy", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "typing-extensions", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.14.1%2Bcpu-cp312-cp312-linux_s390x.whl", hash = "sha256:6b06a7f6275c5fdecaf1dbf5546f0820b024a97785575bb99e3d9930d83cd86b", upload-time = "2026-09-30T19:47:30Z" },
@@ -3418,9 +3470,10 @@ dependencies = [
     { name = "lightning-utilities" },
     { name = "numpy" },
     { name = "packaging" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/81/34/39b8b749333db56c0585d7a11fa62a283c087bb1dfc897d69fb8cedbefb1/torchmetrics-1.9.0.tar.gz", hash = "sha256:a488609948600df52d3db4fcdab02e62aab2a85ef34da67037dc3e65b8512faa", size = 581765, upload-time = "2026-03-09T17:41:22.443Z" }
 wheels = [
@@ -3434,13 +3487,12 @@ source = { registry = "https://download.pytorch.org/whl/cu128" }
 resolution-markers = [
     "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "pillow", marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
+    { name = "numpy", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "pillow", marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cu128/torchvision-0.26.0%2Bcu128-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:63e35234aed13b6edda37056f417b5c281249669db631e706811917af36b21d7", upload-time = "2026-04-09T23:21:35Z" },
@@ -3456,9 +3508,9 @@ resolution-markers = [
     "sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "numpy", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "pillow", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "numpy", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "pillow", marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torchvision-0.29.1-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:3b6eb9d2f8fe9b93d9d37637749df361efeed133d96ddd503184a1b5b12bb27f", upload-time = "2026-09-30T15:46:12Z" },
@@ -3471,13 +3523,12 @@ source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "sys_platform == 'darwin'",
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "pillow", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "numpy", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "pillow", marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f3/f8/855c7b326ed17a8dac4a03e8e6fec33ef6728e4baa00d816cf1227bb6681/torchvision-0.29.1-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:3b6eb9d2f8fe9b93d9d37637749df361efeed133d96ddd503184a1b5b12bb27f", size = 1813847, upload-time = "2026-09-30T17:57:01.009Z" },
@@ -3492,13 +3543,12 @@ version = "0.29.1+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
     "sys_platform == 'win32'",
-    "sys_platform == 'emscripten'",
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "pillow", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "numpy", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "pillow", marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torchvision-0.29.1%2Bcpu-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:3058f855e65089330ec987b8cac1ccf5e7a26cd475f8cab20597b5577ddc8767", upload-time = "2026-09-30T15:46:11Z" },
@@ -3511,7 +3561,7 @@ name = "tqdm"
 version = "4.70.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0d/ea/b2a5bd54b28a324dae8211928b2d730b6547500342c7e6c6dea08bd0a485/tqdm-4.70.1.tar.gz", hash = "sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4", size = 171846, upload-time = "2026-09-11T07:25:16.601Z" }
 wheels = [
@@ -3623,7 +3673,7 @@ name = "triton"
 version = "3.6.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/17/5d/08201db32823bdf77a0e2b9039540080b2e5c23a20706ddba942924ebcd6/triton-3.6.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:374f52c11a711fd062b4bfbb201fd9ac0a5febd28a96fb41b4a0f51dde3157f4", size = 176128243, upload-time = "2026-01-20T16:16:07.857Z" },
@@ -3635,7 +3685,7 @@ name = "triton"
 version = "3.8.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/87/07/0f8cd8e8db0472334253efdaaab3d0819fea27aa99bf0e7f1aeea4ceb5ae/triton-3.8.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:a9c404c69ed4a39e8ec632eaf6b9fe058a060bf98979c177f6ef666f06bb8d50", size = 226474486, upload-time = "2026-08-28T16:08:18.29Z" },
@@ -3648,7 +3698,7 @@ version = "0.26.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "rich" },
     { name = "shellingham" },
 ]
@@ -3710,12 +3760,14 @@ dependencies = [
     { name = "psutil" },
     { name = "pyyaml" },
     { name = "requests" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torchvision", version = "0.29.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torchvision", version = "0.29.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
     { name = "ultralytics-platform" },
     { name = "ultralytics-thop" },
 ]
@@ -3742,9 +3794,10 @@ version = "2.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu'" },
-    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
-    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-8-litforge-formulas-gpu' or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra != 'extra-8-litforge-formulas-gpu' and extra == 'extra-8-litforge-nemotron') or (extra != 'extra-8-litforge-formulas' and extra != 'extra-8-litforge-formulas-gpu')" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-8-litforge-formulas') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-formulas-gpu') or (extra == 'extra-8-litforge-formulas' and extra == 'extra-8-litforge-nemotron')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b1/bf/b7b993e3b2411fc9894a26b8679931ca07c0d013f05bb620c63ae1911c5f/ultralytics_thop-2.2.2.tar.gz", hash = "sha256:149a89c26c2be35b709fa25951f4644dea13d63017025569a193159a5908e3ed", size = 39543, upload-time = "2026-10-01T09:34:58.406Z" }
 wheels = [

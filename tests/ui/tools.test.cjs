@@ -71,3 +71,33 @@ test('Legacy vision action opens the existing setup readiness dialog before post
 test('Export medium option guides users to Optional tools settings', () => {
   assert.match(app, /install in Settings → Optional tools/);
 });
+
+test('Nemotron row shows its state and installs after confirmation; engine choices are saved', async () => {
+  assert.match(html, /id="tool-nemotron-status"/);
+  assert.match(html, /id="engine-parse"[\s\S]*value="nemotron"[\s\S]*value="mineru"/);
+  assert.match(html, /id="engine-page"[\s\S]*value="vision_model"/);
+  const s = setup();
+  s.ctx.api = async url => ({
+    mineru: {}, pix2text: {}, vision: {},
+    nemotron: { installed: false, offerable: true, gpu: true, size: '~2.5 GB <model>' },
+    engines: { parse: 'mineru', page: 'auto' }
+  });
+  await s.ctx.loadOptionalTools();
+  assert.match(s.$('tool-nemotron-status').textContent, /Not set up · ~2.5 GB <model>/);
+  assert.equal(s.$('tool-nemotron-action').hidden, false);
+  assert.equal(s.$('engine-parse').value, 'mineru');
+  await s.ctx.installNemotron({ size: '~2.5 GB' });
+  assert.match(s.confirmations[0], /~2.5 GB/);
+  assert.ok(s.calls.some(c => c[0] === '/api/tools/nemotron/install' && c[1].confirmed === true));
+  s.$('engine-page').value = 'vision_model';
+  await s.$('engine-page').onchange();
+  assert.ok(s.calls.some(c => c[0] === '/api/tools/engines' && c[1].page === 'vision_model' && c[1].parse === 'mineru'));
+  assert.equal(s.$('engine-status').textContent, 'Saved');
+  const no = setup(true, false);
+  await no.ctx.installNemotron({});
+  assert.equal(no.calls.some(c => c[0] === '/api/tools/nemotron/install'), false);
+  no.ctx.api = async () => ({ nemotron: { offerable: false, reason: 'needs an NVIDIA GPU' } });
+  await no.ctx.loadOptionalTools();
+  assert.match(no.$('tool-nemotron-status').textContent, /Not available here: needs an NVIDIA GPU/);
+  assert.equal(no.$('tool-nemotron-action').hidden, true);
+});

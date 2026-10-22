@@ -3,20 +3,24 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import time
 from pathlib import Path
 from typing import Literal
 
+import pymupdf
 from pydantic import BaseModel
 
 from litforge.config import Config, Paths
 from litforge.observability import NULL_LOG, EventLog
+from litforge.parsing import nemotron
 from litforge.parsing.base import ParsedDocument, Parser
 from litforge.parsing.canonical import outputs_exist, write_outputs
 from litforge.parsing.docling_parser import DoclingParser, docling_available
 from litforge.parsing.markitdown_parser import MarkItDownParser
 from litforge.parsing.mineru_parser import MinerUParser, find_command
+from litforge.parsing.nemotron_parser import NemotronParser
 from litforge.parsing.pymupdf_parser import PyMuPDFParser
 from litforge.parsing.quality import compute_quality
 from litforge.parsing.router import decide
@@ -108,6 +112,43 @@ def _persist(
     return run_id
 
 
+def persian_pdf(pdf_path: Path, pages: int = 5) -> bool | None:
+    """Is the PDF's text layer mostly Persian (first few pages)? None when it has too little text to tell."""
+    try:
+        with pymupdf.open(pdf_path) as pdf:
+            text = "\n".join(pdf[i].get_text() for i in range(min(pages, len(pdf))))
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return nemotron.is_persian(text)
+
+
+def structural_parsers(paths: Paths, config: Config, pdf_path: Path, status: str) -> list[Parser]:
+    """The structural parsers to try, in order, for a fast-path result with `status`. auto: Nemotron Parse when
+    it is set up, a GPU has room and the document is not Persian; then MinerU, then Docling, if installed.
+    Only Nemotron reads a document without a text layer (needs_ocr)."""
+    fallback = config.parsing.complex_fallback
+    parsers: list[Parser] = []
+    if fallback in ("auto", "nemotron") and nemotron.available(paths) and (
+            fallback == "nemotron" or (nemotron.gpu_ready() and persian_pdf(pdf_path) is not True)):
+        parsers.append(NemotronParser(paths))
+    if status != "needs_docling":
+        return parsers
+    if fallback in ("auto", "mineru") and find_command(paths, config.parsing):
+        parsers.append(MinerUParser(paths, config))
+    if fallback in ("auto", "docling") and docling_available():
+        parsers.append(DoclingParser())
+    return parsers
+
+
+def _resume_pages(base_dir: Path, out_dir: Path) -> None:
+    """Nemotron keeps each page's raw answer (nemotron.json); a new attempt starts from the newest earlier one,
+    so a parse stopped at page 10 does not read pages 1-9 again."""
+    caches = sorted(base_dir.parent.glob(base_dir.name + "-*/nemotron.json"), key=lambda p: p.stat().st_mtime)
+    if caches and not (out_dir / "nemotron.json").exists():
+        out_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(caches[-1], out_dir / "nemotron.json")
+
+
 def _run_parser(
     conn: sqlite3.Connection,
     paths: Paths,
@@ -131,14 +172,19 @@ def _run_parser(
         return cached["id"], "cached", cached["status"], json.loads(cached["route_reasons"]), None
 
     # MinerU attempts retain previous runs and their canonical files, even for the same input.
-    if parser.name == "mineru":
+    base_dir = parse_output_dir(paths, artifact["sha256"], parser.name, parser.version, cfg_hash)
+    if parser.name in ("mineru", "nemotron"):
         cfg_hash += "-" + new_id()
     out_dir = parse_output_dir(paths, artifact["sha256"], parser.name, parser.version, cfg_hash)
+    if parser.name == "nemotron":
+        _resume_pages(base_dir, out_dir)
     pdf_path = paths.root / artifact["pdf_path"]
     start = time.perf_counter()
     try:
         doc = parser.parse(pdf_path, out_dir, config.parsing)
     except Exception as exc:  # noqa: BLE001 - recorded as a failed run, never as empty success
+        if parser.name == "nemotron":
+            nemotron.release()
         elapsed = round((time.perf_counter() - start) * 1000, 1)
         error = f"{type(exc).__name__}: {exc}"
         retry_reasons = list(getattr(parser, "reasons", []))
@@ -147,6 +193,8 @@ def _run_parser(
         log.emit("parse.failed", artifact_id=artifact["id"], parser=parser.name, error=error)
         return run_id, "failed", "failed", [*retry_reasons, error], elapsed
     elapsed = round((time.perf_counter() - start) * 1000, 1)
+    if parser.name == "nemotron":
+        nemotron.release()  # its GPU memory goes back to the vision model and other programs
     quality = compute_quality(doc, config.parsing.router)
     decision = decide(quality, config.parsing.router)
     if parser.name == "markitdown":  # the text comes from the document itself: no page checks apply
@@ -172,18 +220,22 @@ def parse_artifact(
     force: bool = False,
     use_docling: bool = True,
     log: EventLog = NULL_LOG,
-    parser: Literal["auto", "pymupdf", "mineru", "docling"] = "auto",
+    parser: Literal["auto", "pymupdf", "nemotron", "mineru", "docling"] = "auto",
 ) -> ParseResult:
     title_row = conn.execute("SELECT title FROM papers WHERE id=?", (artifact["paper_id"],)).fetchone()
     title = title_row["title"] if title_row else None
     job_id = start_job(conn, "parse", artifact["id"])
-    if parser not in ('auto', 'pymupdf', 'mineru', 'docling'):
+    if parser not in ('auto', 'pymupdf', 'nemotron', 'mineru', 'docling'):
         raise ValueError('Unknown parser: ' + parser)
     selected: Parser
     document = not str(artifact["pdf_path"]).lower().endswith(".pdf")
     if document:  # Word, HTML, Markdown…: MarkItDown, and no PDF fallbacks
         selected = MarkItDownParser()
         use_docling, parser = False, "auto"
+    elif parser == 'nemotron':
+        if not nemotron.available(paths):
+            raise ValueError('Nemotron Parse is not set up; set up Math: high on a computer with an NVIDIA GPU')
+        selected = NemotronParser(paths)
     elif parser == 'mineru':
         selected = MinerUParser(paths, config)
     elif parser == 'docling':
@@ -197,31 +249,31 @@ def parse_artifact(
     message = None
     current_id = run_id
     fallback = config.parsing.complex_fallback if use_docling and parser == 'auto' else 'none'
-    if status == 'needs_docling' and fallback != 'none':
-        structural: Parser | None = None
-        if fallback in ('auto', 'mineru') and find_command(paths, config.parsing):
-            structural = MinerUParser(paths, config)
-        elif fallback in ('auto', 'docling') and docling_available():
-            structural = DoclingParser()
-        if structural:
+    if status in ('needs_docling', 'needs_ocr') and fallback != 'none':
+        structural = structural_parsers(paths, config, paths.root / artifact['pdf_path'], status)
+        failures: list[str] = []
+        for candidate in structural:
             d_run, d_outcome, d_status, d_reasons, d_elapsed = _run_parser(
-                conn, paths, config, artifact, structural, title, force, log
+                conn, paths, config, artifact, candidate, title, force, log
             )
             if d_status not in ('failed', 'needs_review', 'needs_ocr'):
-                current_id, parser_name, status, outcome = d_run, structural.name, d_status, d_outcome
+                current_id, parser_name, status, outcome = d_run, candidate.name, d_status, d_outcome
                 reasons += d_reasons
                 elapsed = (elapsed or 0) + (d_elapsed or 0)
-            else:
-                message = f"{structural.name} fallback failed: {'; '.join(d_reasons)}"
-        else:
+                failures = []
+                break
+            failures.append(f"{candidate.name} fallback failed: {'; '.join(d_reasons)}")
+        if failures:  # none of them worked: say why each failed
+            message = '; '.join(failures)
+        if not structural and status == 'needs_docling':
             message = ('Structural parser not installed; kept PyMuPDF output; '
                        'install with `litforge parse install-mineru`')
     with transaction(conn):
-        if status != 'failed' and (parser != 'mineru' or status == 'ok'):
+        if status != 'failed' and (parser not in ('mineru', 'nemotron') or status == 'ok'):
             _set_current(conn, artifact['id'], current_id)
         finish_job(conn, job_id, 'failed' if status == 'failed' else 'done',
                    {'outcome': outcome, 'status': status, 'parser': parser_name})
-    if parser == 'mineru' and status not in ('failed', 'needs_review', 'needs_ocr'):
+    if parser in ('mineru', 'nemotron') and status not in ('failed', 'needs_review', 'needs_ocr'):
         from litforge.indexing.fts import index_run
         current = conn.execute(
             'SELECT r.*, a.paper_id, a.sha256 FROM parse_runs r JOIN artifacts a ON a.id=r.artifact_id WHERE r.id=?',

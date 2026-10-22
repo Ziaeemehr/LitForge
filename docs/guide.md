@@ -556,9 +556,29 @@ sample). MinerU needs substantial memory. LitForge stops its own managed llama-s
 slots report it is idle; a GPU memory failure triggers one CPU retry. The model server loads again
 on the next model call.
 
-The default `parsing.complex_fallback: auto` uses MinerU when installed, otherwise Docling
-(`uv sync --extra docling`). You can choose `mineru`, `docling` or `none` in config.
-`litforge parse --parser mineru --paper ID` re-reads a selected paper; repeat `--paper` for more.
+The default `parsing.complex_fallback: auto` picks the structural parser like this:
+
+| Situation | Parser |
+|---|---|
+| Nemotron Parse is set up, an NVIDIA GPU has 3 GB free, the document is not Persian | Nemotron Parse (also reads scans without a text layer) |
+| No GPU, or a Persian document | MinerU, if installed |
+| Neither | Docling (`uv sync --extra docling`), if installed; otherwise the fast text is kept |
+
+If one fails (Nemotron also gives up on a document it reads as Persian), the next is tried. You can
+choose `nemotron`, `mineru`, `docling` or `none` in config or in Settings → Optional tools → **Which
+engine reads what**; `nemotron` chosen by hand also runs without a GPU, at about two minutes per page.
+
+[Nemotron Parse](https://huggingface.co/nvidia/Nemotron-3.5-Parse) (NVIDIA, 0.6B parameters) reads a page
+image into headings, text, LaTeX equations, tables (merged cells kept) and figure regions. On an RTX 5070
+it took about 5 s and 2 GB of GPU memory per page, and read tables better than MinerU and the vision
+model in our comparison; it mixes up Persian text with Latin words and numbers, so Persian pages and
+documents never go to it automatically. Setting up Math: high on a computer with an NVIDIA GPU sets it
+up too, or use Settings → Optional tools or `litforge tools install nemotron`: two small packages
+(`uv sync --extra formulas-gpu --extra nemotron --inexact`, sharing Pix2Text's CUDA PyTorch) and the
+model from one pinned revision (about 2.5 GB under `<data>/models/nemotron-parse`). Its model code
+runs locally from that download; pages never leave the computer.
+`litforge parse --parser mineru --paper ID` (or `--parser nemotron`) re-reads a selected paper; repeat
+`--paper` for more.
 The paper drawer's **Re-read accurately (MinerU)** button runs in the background with a time
 estimate ("about N min", based on successful MinerU runs in this library, initially 20 seconds per page)
 and status. Successful forced MinerU runs become current and re-index the paper;
@@ -582,7 +602,11 @@ fragment lines) can be rewritten at two levels, before exporting (**Math** menu 
 | Level | How | Speed | Needs |
 |---|---|---|---|
 | medium | [Pix2Text](https://github.com/breezedeus/Pix2Text) finds every formula (inline and displayed) and reads it as LaTeX; the text stays as extracted | ~1.5 s/page on a GPU, ~5 s on a CPU | ~2 GB; Settings → Optional tools or `litforge tools install pix2text`; otherwise `uv sync --extra formulas-gpu --inexact` (NVIDIA) or `uv sync --extra formulas --inexact` (CPU) |
-| high | a local vision model (Ollama, `qwen2.5vl:7b`) rewrites whole pages: formulas, tables and text, also in scanned papers; a transcription that does not match the page's text is rejected | ~12 s/page on a GPU, about a minute without | `ollama pull qwen2.5vl:7b` (8 GB of memory); the page offers to install Ollama and the model |
+| high | whole pages are rewritten: formulas, tables and text, also in scanned papers; a transcription that does not match the page's text is rejected. On an NVIDIA GPU, Nemotron Parse rewrites pages that are not Persian; the local vision model (Ollama, `qwen2.5vl:7b`) rewrites Persian pages, and every page on a computer without a GPU | Nemotron ~5 s/page; the vision model ~12 s/page on a GPU, about a minute without | `ollama pull qwen2.5vl:7b` (8 GB of memory); the page offers to install Ollama and the model, and Nemotron Parse on an NVIDIA GPU |
+
+`vision.engine` (Settings → Optional tools → **Which engine reads what**) changes the high level:
+`auto` as above, `nemotron` for every page, or `vision_model` for every page. With Nemotron set up but
+no vision model, `auto` still rewrites the English pages and Persian pages keep their extracted text.
 
 Results are kept per page, so a later export or a higher level only processes what is new. Each
 note's front matter says how its equations were produced (`math: raw | medium | high`), so a
@@ -602,6 +626,7 @@ The final installer hint and Settings → Optional tools list the same options.
 | Tool | Approximate size | What it improves | Install |
 |---|---:|---|---|
 | MinerU | ~4 GB | More accurate local PDF reading of equations and tables | Settings → Optional tools; `litforge tools install mineru` (alias: `litforge parse install-mineru`); installer prompt or `LITFORGE_EXTRAS=mineru` |
+| Nemotron Parse (NVIDIA GPU) | ~2.5 GB model, plus Pix2Text's CUDA PyTorch | Fast, accurate reading of English pages and tables, for Math: high and broken PDFs | Set up with Math: high on an NVIDIA GPU; Settings → Optional tools; `litforge tools install nemotron` |
 | Pix2Text (Math: medium) | ~2 GB | Reads detected formulas as LaTeX in exported notes | Settings → Optional tools; `litforge tools install pix2text`; installer prompt or `LITFORGE_EXTRAS=pix2text`. Chooses the NVIDIA extra when a GPU is detected. |
 | Tectonic (Write) | ~22 MB, plus ~50 MB of LaTeX packages on the first compile | Compiles Write documents to PDF, English and Persian | Settings → Optional tools; `litforge tools install tectonic`. A system TeX Live/MacTeX (`latexmk` + `xelatex`) also works. |
 | Image/vision model (Math: high) | Depends on selected model | Rewrites whole pages, including formulas, tables and scanned text | Settings → Models (or the legacy setup action); the installer does not download models. `litforge tools` shows the resolved model status. |

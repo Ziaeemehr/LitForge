@@ -54,7 +54,7 @@
     <select id="export-math" title="Better math: how the pages with equations, tables or broken text are rewritten before exporting. Results are kept, so raising the level later only processes what is new.">
       <option value="off" title="The text extracted from the PDF; equations often come out garbled">Math: as extracted</option>
       <option value="medium" title="Pix2Text reads every formula as LaTeX; the text stays as extracted from the PDF. About 1-5 s per page">Math: medium (fast)</option>
-      <option value="high" title="A local vision model (Ollama) rewrites whole pages: formulas, tables and text, also in scanned papers. About 12 s per page on the GPU">Math: high (best)</option>
+      <option value="high" title="Whole pages are rewritten: formulas, tables and text, also in scanned papers. On an NVIDIA GPU Nemotron Parse reads English pages (about 5 s each); a local vision model (Ollama) reads Persian pages (about 12 s on the GPU)">Math: high (best)</option>
     </select>
     <button class="btn accent" id="btn-export" title="Write Markdown notes to the project's output folder">Export Markdown</button>
   </div>
@@ -173,6 +173,28 @@
         <button class="btn" id="mineru-install">Install MinerU…</button>
       </div>
       <pre id="mineru-progress" role="status" aria-live="polite"></pre>
+      <div class="tool-row">
+        <div><h3>Nemotron Parse · NVIDIA GPU</h3><p>Fast, accurate reading of English pages and tables (Math: high and broken PDFs); Persian pages stay with the image model · ~2.5 GB</p>
+          <p id="tool-nemotron-status" role="status"></p></div>
+        <button class="btn" id="tool-nemotron-action" hidden>Set up Nemotron Parse…</button>
+      </div>
+      <pre id="tool-nemotron-progress" role="status" aria-live="polite"></pre>
+      <div class="tool-row engines">
+        <div><h3>Which engine reads what</h3><p>Automatic is recommended: Nemotron on a GPU for English, MinerU without a GPU or for Persian documents, the image model for Persian pages.</p></div>
+        <div class="engine-choices">
+          <label class="f" for="engine-parse">Broken PDFs</label>
+          <select id="engine-parse">
+            <option value="auto">Automatic</option><option value="nemotron">Nemotron Parse</option>
+            <option value="mineru">MinerU</option><option value="docling">Docling</option><option value="none">Keep the fast text</option>
+          </select>
+          <label class="f" for="engine-page">Math: high pages</label>
+          <select id="engine-page">
+            <option value="auto">Automatic</option><option value="nemotron">Nemotron Parse, every page</option>
+            <option value="vision_model">Image model, every page</option>
+          </select>
+          <p id="engine-status" class="hint" role="status"></p>
+        </div>
+      </div>
       <div class="tool-row">
         <div><h3>Pix2Text · Math: medium</h3><p>Reads formulas as LaTeX in exported notes · ~2 GB</p>
           <p id="tool-pix2text-status" role="status"></p></div>

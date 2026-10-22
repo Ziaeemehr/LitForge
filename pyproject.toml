@@ -25,6 +25,9 @@ formulas-gpu = ["pix2text>=1.1.4", "rapidocr==3.9.0", "torch>=2.7", "torchvision
 documents = [
     "markitdown[docx,pptx,xlsx]>=0.1.8",
 ]
+# Nemotron Parse on an NVIDIA GPU (Math: high for English pages, and the structural parser): two small packages
+# on top of formulas-gpu, whose CUDA PyTorch it shares; the model itself is downloaded by the Math: high setup.
+nemotron = ["litforge[formulas-gpu]", "timm>=1.0.22", "beautifulsoup4>=4.13", "huggingface-hub>=0.34"]
 
 [project.scripts]
 litforge = "litforge.cli:app"
@@ -49,7 +52,7 @@ url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.uv]
-conflicts = [[{ extra = "formulas" }, { extra = "formulas-gpu" }]]
+conflicts = [[{ extra = "formulas" }, { extra = "formulas-gpu" }], [{ extra = "formulas" }, { extra = "nemotron" }]]
 
 [dependency-groups]
 dev = [

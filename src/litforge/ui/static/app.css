@@ -500,6 +500,12 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 #view-settings .tool-row h3, #view-settings .tool-row p { margin: 0 0 4px; }
 #view-settings .tool-row p:last-child { margin-bottom: 0; }
 #view-settings .tool-row button { flex: 0 0 auto; }
+#view-settings .tool-row.engines { align-items: flex-start; }
+#view-settings .engine-choices { display: grid; grid-template-columns: auto minmax(12em, 1fr); gap: 6px 10px;
+  align-items: center; flex: 0 1 26em; }
+#view-settings .engine-choices .hint { grid-column: 1 / -1; min-height: 1.2em; }
+@media (max-width: 640px) { #view-settings .tool-row.engines { flex-direction: column; }
+  #view-settings .engine-choices { flex-basis: auto; width: 100%; } }
 #view-settings input:not([type=checkbox]), #view-settings select { width: 100%; min-width: 0; box-sizing: border-box; }
 #view-settings input:not([type=checkbox]) { padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
 #view-settings select { white-space: normal; overflow-wrap: anywhere; }

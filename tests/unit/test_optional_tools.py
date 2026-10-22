@@ -186,7 +186,7 @@ def test_tools_cli_prints_status_for_all_tools(tmp_path: Path, monkeypatch: Any)
     assert result.exit_code == 0, result.output
     assert "MinerU" in result.output
     assert "Pix2Text" in result.output
-    assert "Image model" in result.output
+    assert "Image model" in result.output and "Nemotron" in result.output
     assert "Not available on this install" in result.output
     assert "uv sync --extra formulas --inexact" in result.output
 

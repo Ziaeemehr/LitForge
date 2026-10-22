@@ -92,3 +92,25 @@ def test_fix_headings_drops_invented_ones_and_restores_numbers() -> None:
     caption = "Figure 6: Firing times for a fully connected network of 100 neurons with excitatory coupling"
     assert fix_headings(f"## {caption}", "unrelated page text") == caption
     assert fix_headings("# (STA) $$s(t)=1$$", "unrelated page text") == "(STA) $$s(t)=1$$"
+
+
+def test_fix_headings_keeps_the_headings_of_a_scanned_page() -> None:
+    # A scan has no text layer to check against; this used to fail on zip(strict=True).
+    assert fix_headings("## 2 Methods\n\n\n\nText", "") == "## 2 Methods\n\nText"
+
+
+def test_scanned_pages_without_text_are_suspicious() -> None:
+    scan = PageInfo(index=1, label=None, width=595, height=842, char_count=0, image_count=1)
+    blank = PageInfo(index=2, label=None, width=595, height=842, char_count=0, image_count=0)
+    doc = ParsedDocument(parser="pymupdf", parser_version="1", page_count=2, pages=[scan, blank], sections=[])
+    assert suspicious_pages(doc) == [1]
+
+
+def test_to_markdown_puts_rewritten_scanned_pages_in_page_order() -> None:
+    pages = [PageInfo(index=i, label=None, width=595, height=842, char_count=0 if i != 2 else 50, image_count=1)
+             for i in (1, 2, 3)]
+    doc = ParsedDocument(parser="pymupdf", parser_version="1", page_count=3, pages=pages, sections=[
+        Section(heading=None, kind="body", paragraphs=[Paragraph(text="Middle page text.", page=2)])])
+    md = to_markdown(doc, page_md={1: "First scanned page.", 3: "Last scanned page."})
+    assert md.index("First scanned") < md.index("Middle page") < md.index("Last scanned")
+    assert "<!-- page 1 -->" in md and "<!-- page 3 -->" in md

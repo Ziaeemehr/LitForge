@@ -331,6 +331,14 @@ Install MinerU for accurate PDF parsing (~4 GB).
 |---|---|
 | `--yes`, `-y` | Don't ask for confirmation |
 
+#### `litforge tools install nemotron`
+
+Set up Nemotron Parse on an NVIDIA GPU: two small packages and the model (~2.5 GB).
+
+| Option | Meaning |
+|---|---|
+| `--yes`, `-y` | Don't ask for confirmation |
+
 #### `litforge tools install pix2text`
 
 Install Pix2Text for Math: medium (~2 GB).
