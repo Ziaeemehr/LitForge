@@ -15,6 +15,8 @@ from litforge.config import ParsingConfig, Paths
 from litforge.parsing import nemotron
 from litforge.parsing.base import Asset, BBox, PageInfo, Paragraph, ParsedDocument, Section, section_kind
 
+PERSIAN = 'a Persian document: Nemotron Parse mixes up Persian text, so another parser reads it'
+
 
 class PersianDocument(RuntimeError):
     """Nemotron's output is Persian and needs another parser."""
@@ -186,7 +188,7 @@ class NemotronParser:
                     asset.path = f'assets/{name}'
                 if number == 2 and nemotron.is_persian(
                         '\n'.join(p.text for s in sections for p in s.paragraphs)) is True:
-                    raise PersianDocument('Nemotron returned Persian text')  # stop before reading the rest
+                    raise PersianDocument(PERSIAN)  # stop before reading the rest
                 pages.append(PageInfo(index=number, label=page.get_label() or None,
                                       width=page.rect.width, height=page.rect.height,
                                       char_count=0, image_count=len(figures), column_count=1))
@@ -199,5 +201,5 @@ class NemotronParser:
         if not text.strip():
             raise ValueError('Nemotron returned no body text')
         if nemotron.is_persian(text) is True:
-            raise PersianDocument('Nemotron returned Persian text')
+            raise PersianDocument(PERSIAN)
         return result

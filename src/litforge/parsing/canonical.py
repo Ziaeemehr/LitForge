@@ -23,6 +23,16 @@ def to_markdown(doc: ParsedDocument, title: str | None = None, asset_prefix: str
         out.append(f"# {title}\n")
     figures_by_caption = {a.caption: a for a in doc.assets if a.caption and a.path}
     current_page = 0
+    # Rewritten pages the parser found no text on (scans) go in by page order.
+    with_text = {p.page for s in doc.sections for p in s.paragraphs}
+    textless = sorted(n for n in page_md if n not in with_text)
+
+    def textless_before(page: int) -> None:
+        while textless and textless[0] < page:
+            n = textless.pop(0)
+            out.append(f"<!-- page {n} -->\n")
+            out.append(_page_block(doc, n, page_md[n], asset_prefix))
+
     for section in doc.sections:
         heading = section.heading
         start = section.page_start
@@ -32,6 +42,7 @@ def to_markdown(doc: ParsedDocument, title: str | None = None, asset_prefix: str
             out.append(f"{'#' * min(section.level + 1, 6)} {heading}\n")
             heading = None
         for para in section.paragraphs:
+            textless_before(para.page)
             if para.page in page_md:
                 if para.page != current_page:
                     current_page = para.page
@@ -58,6 +69,7 @@ def to_markdown(doc: ParsedDocument, title: str | None = None, asset_prefix: str
                 out.append(f"```text\n{para.text}\n```\n")
             else:
                 out.append(f"{para.text}\n")
+    textless_before(doc.page_count + 1 + max(page_md, default=0))
     return "\n".join(out)
 
 

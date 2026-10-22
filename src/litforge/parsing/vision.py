@@ -194,7 +194,8 @@ class FakeVision:
 
 
 def suspicious_pages(doc: ParsedDocument) -> list[int]:
-    """Pages the text layer is likely to have garbled: equations, tables, fragment lines, broken characters."""
+    """Pages the text layer is likely to have garbled: equations, tables, fragment lines, broken characters,
+    and scanned pages with no text at all."""
     pages: set[int] = set()
     for asset in doc.assets:
         if asset.kind in ("equation", "table"):
@@ -211,6 +212,8 @@ def suspicious_pages(doc: ParsedDocument) -> list[int]:
             fragments[para.page] = fragments.get(para.page, 0) + sum(1 for line in lines if 0 < len(line) <= 2)
             math[para.page] = math.get(para.page, 0) + sum(ch in _MATH_CHARS for ch in para.text)
     for page in doc.pages:
+        if page.char_count == 0 and page.image_count:
+            pages.add(page.index)  # a scanned page: only an image model can read it
         if page.replacement_chars or (page.line_count >= 10 and page.short_line_count / page.line_count >= 0.4):
             pages.add(page.index)
         if fragments.get(page.index, 0) >= 5 or math.get(page.index, 0) >= 8:

@@ -270,7 +270,7 @@
       has(st.model_ready, 'The model <code>' + esc(st.model) + '</code> (about ' + req.model_gb + ' GB download)') +
       (st.nemotron && (st.nemotron.offerable || st.nemotron.installed) ? has(st.nemotron.installed,
         'Nemotron Parse for English pages on your NVIDIA GPU (about 2.5 GB download)') : '') + '</ul>';
-    if (st.local) {
+    if (st.local && !(st.running && st.model_ready)) {  // a ready model skips the hardware checks
       html += '<h3>Needed at least</h3><ul><li>' + req.memory_gb + ' GB of memory and ' + req.disk_gb +
         ' GB of free disk</li><li>A GPU is optional: NVIDIA or Apple Silicon makes it fast (about 12 s per page)</li></ul>' +
         '<h3>This computer</h3><ul>' +
@@ -291,8 +291,9 @@
     }
     $('mathsetup-report').innerHTML = html;
     $('mathsetup-install').hidden = !canInstall;
-    $('mathsetup-install').textContent = fromSettings ?
-      (st.installed ? 'Download the image model' : 'Install the image model') :
+    var onlyNemotron = st.running && st.model_ready;
+    $('mathsetup-install').textContent = onlyNemotron ? (fromSettings ? 'Set up Nemotron Parse' : 'Set up Nemotron Parse and export') :
+      fromSettings ? (st.installed ? 'Download the image model' : 'Install the image model') :
       (st.installed ? 'Download the model and export' : 'Install and export');
     var medium = $('export-math').querySelector('option[value="medium"]');
     $('mathsetup-medium').hidden = !!fromSettings || medium.disabled;
