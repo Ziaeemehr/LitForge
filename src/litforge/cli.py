@@ -1230,18 +1230,24 @@ def enhance(
             engine = Pix2TextEngine()
             typer.echo(f"Pix2Text on the {engine.device.upper()}")
         else:
-            gateway = GatewayVision(ModelGateway(conn, st.config), profile, approve)
+            # Made only when a page needs it: Nemotron alone must not require a vision-model profile.
+            def gateway() -> GatewayVision:
+                return GatewayVision(ModelGateway(conn, st.config), profile, approve)
+
             if preview:
-                chosen = page_engine(st.paths, st.config, lambda: gateway)
-                calls = [] if isinstance(chosen, NemotronEngine) else plan_project(
-                    conn, st.paths, pid, gateway, only, routed=chosen if isinstance(chosen, RoutedVision) else None)
+                chosen = page_engine(st.paths, st.config, gateway)
+                model_engine = chosen.model if isinstance(chosen, RoutedVision) else chosen
+                calls = plan_project(conn, st.paths, pid, model_engine, only,
+                                     routed=chosen if isinstance(chosen, RoutedVision) else None
+                                     ) if isinstance(model_engine, GatewayVision) else []
                 typer.echo(json.dumps({"image_description": f"{len(calls)} page images",
                                        "calls": [call.model_dump() for call in calls]}, indent=1))
                 return
 
             def model() -> Vision:
-                gateway.check()
-                return gateway
+                made = gateway()
+                made.check()
+                return made
 
             engine = page_engine(st.paths, st.config, model)
             if isinstance(engine, RoutedVision):

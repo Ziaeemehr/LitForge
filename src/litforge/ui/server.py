@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+import yaml
 from pydantic import ValidationError
 
 from litforge.analysis import ask as answers
@@ -240,6 +241,13 @@ class App:
             raise ValueError("parse must be auto, nemotron, mineru, docling or none")
         if page not in ("auto", "nemotron", "vision_model"):
             raise ValueError("page must be auto, nemotron or vision_model")
+        if self.config.config_path is not None:  # an explicit --config/LITFORGE_CONFIG file wins over Settings
+            override = yaml.safe_load(Path(self.config.config_path).read_text(encoding="utf-8")) or {}
+            pinned = [f"{a}.{b}" for a, b in (("parsing", "complex_fallback"), ("vision", "engine"))
+                      if b in (override.get(a) or {})]
+            if pinned:
+                raise ValueError(f"{', '.join(pinned)} is set in {self.config.config_path}, which overrides "
+                                 "Settings; change it there")
         config_change(self.paths.root, {"parsing": {"complex_fallback": parse}, "vision": {"engine": page}}).apply()
         self.config.parsing.complex_fallback, self.config.vision.engine = parse, page
         return {"parse": parse, "page": page}
@@ -1297,12 +1305,14 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 if url.path == "/api/export-preview":
                     conn = app.db()
                     try:
-                        engine = GatewayVision(app.make_gateway(conn), body.get("profile"))
-                        chosen = page_engine(app.paths, app.config, lambda: engine)
-                        pages = [] if isinstance(chosen, nemotron.NemotronEngine) else plan_project(
+                        chosen = page_engine(app.paths, app.config,
+                                             lambda: GatewayVision(app.make_gateway(conn), body.get("profile")))
+                        engine = chosen.model if isinstance(chosen, RoutedVision) else chosen
+                        pages = plan_project(
                             conn, app.paths, get_project_id(conn, str(body["project"])), engine,
                             str(body.get("only", "all")), body.get("paper_ids"),
-                            routed=chosen if isinstance(chosen, RoutedVision) else None)
+                            routed=chosen if isinstance(chosen, RoutedVision) else None,
+                        ) if isinstance(engine, GatewayVision) else []
                         return self._json({"page_images": len(pages),
                             "image_description": f"{len(pages)} page images will be sent",
                             "blocked_reasons": list(dict.fromkeys(p.blocked_reason for p in pages if p.blocked_reason)),

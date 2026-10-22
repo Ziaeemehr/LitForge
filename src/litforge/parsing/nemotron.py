@@ -236,8 +236,11 @@ _loaded: dict[str, Any] = {}
 def _helpers(folder: Path) -> ModuleType:
     """The repository's own output helpers (`nemotron_parse`), imported from the pinned download."""
     name = "litforge_nemotron_parse"
-    if name in sys.modules:
-        return sys.modules[name]
+    with _lock:  # another job must not see the module half-imported
+        return sys.modules.get(name) or _import_helpers(name, folder)
+
+
+def _import_helpers(name: str, folder: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, folder / "nemotron_parse" / "__init__.py",
                                                   submodule_search_locations=[str(folder / "nemotron_parse")])
     if spec is None or spec.loader is None:
@@ -339,6 +342,9 @@ class NemotronEngine:
 
     def transcribe(self, png: bytes, page_text: str) -> str:
         return self.read(png)[0]
+
+    def release(self) -> None:
+        release()
 
     def render(self, raw: str) -> str:
         return blocks_markdown(self.blocks(raw))

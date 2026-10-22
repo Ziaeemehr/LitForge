@@ -136,12 +136,26 @@ class RoutedVision:
 
     def transcribe(self, png: bytes, page_text: str) -> str:
         if not self.for_model(page_text):
-            raw = self.reader.transcribe(png, page_text)
-            if nemotron.is_persian(render(self.reader, raw)) is not True:
-                self.last = self.reader
-                return raw
+            try:
+                raw = self.reader.transcribe(png, page_text)
+                if nemotron.is_persian(render(self.reader, raw)) is not True:
+                    self.last = self.reader
+                    return raw
+            except Exception:  # noqa: BLE001 - e.g. out of GPU memory: the vision model reads the page instead
+                if self.model is None:
+                    raise
         self.last = self.model
-        return self.model.transcribe(png, page_text) if self.model else ""
+        if self.model is None:
+            return ""
+        free = getattr(self.reader, "release", None)
+        if callable(free):
+            free()  # the local vision model needs the GPU memory Nemotron holds
+        return self.model.transcribe(png, page_text)
+
+
+def _local(vision: Vision) -> bool:
+    """Is Nemotron reading pages here (its failures are per page; a vision model's are the job's)?"""
+    return isinstance(vision, RoutedVision | nemotron.NemotronEngine)
 
 
 def render(vision: Vision | None, raw: str) -> str:
@@ -371,8 +385,8 @@ def enhance_document(pdf: Path, out_dir: Path, vision: Vision, dpi: int,
     with pymupdf.open(pdf) as pdf_doc:
         for i, n in enumerate(pages, 1):
             entry = done.get(str(n))
-            if entry and entry.get("post_version") == POST_VERSION:
-                continue
+            if entry and entry.get("post_version") == POST_VERSION and entry.get("raw") is not None:
+                continue  # a page that failed has no answer: it is tried again
             page = pdf_doc[n - 1]
             page_text = page.get_text()
             raw = (entry or {}).get("raw") or (entry or {}).get("markdown")
@@ -381,13 +395,25 @@ def enhance_document(pdf: Path, out_dir: Path, vision: Vision, dpi: int,
                 progress(f"page {n} ({i}/{len(pages)})")
                 if isinstance(vision, GatewayVision | RoutedVision):
                     vision.page = n
-                raw = vision.transcribe(page_png(vision, page, page_text, dpi), page_text)
+                try:
+                    raw = vision.transcribe(page_png(vision, page, page_text, dpi), page_text)
+                except Exception as exc:  # noqa: BLE001 - a local engine's failure costs this page, not the job
+                    if not _local(vision):
+                        raise
+                    done[str(n)] = {"markdown": None, "raw": None, "engine": vision.name,
+                                    "post_version": POST_VERSION, "status": f"failed: {type(exc).__name__}: {exc}"}
+                    (out_dir / VISION).write_text(json.dumps(saved, indent=1, ensure_ascii=False), encoding="utf-8")
+                    continue
                 used = vision.last if isinstance(vision, RoutedVision) else vision
                 engine = used.name if used else "none"
             used = (vision.reader if isinstance(vision, RoutedVision) and engine == vision.reader.name else
                     vision.model if isinstance(vision, RoutedVision) else vision)
-            markdown = fix_headings(clean_markdown(render(used, raw)), page_text)
-            reason = rejection_reason(markdown, page_text) if engine != "none" else "no vision model for this page"
+            try:
+                markdown = fix_headings(clean_markdown(render(used, raw)), page_text)
+                reason = (rejection_reason(markdown, page_text) if engine != "none" else
+                          "no vision model for this page")
+            except Exception as exc:  # noqa: BLE001 - output Nemotron's helpers cannot convert
+                markdown, reason = "", f"conversion failed: {type(exc).__name__}: {exc}"
             ok = reason is None
             done[str(n)] = {"markdown": markdown if ok else None, "raw": raw, "engine": engine,
                             "post_version": POST_VERSION, "status": "ok" if ok else f"rejected: {reason}"}

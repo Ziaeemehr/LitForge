@@ -147,3 +147,72 @@ def test_engine_choices_are_saved_to_the_data_config(paths: Paths, config: Confi
     assert status["nemotron"]["offerable"] is False and "NVIDIA GPU" in status["nemotron"]["reason"]
     with pytest.raises(ValueError):
         app.save_engines({"page": "cloud"})
+
+
+def test_a_failing_reader_hands_the_page_to_the_model_after_freeing_the_gpu() -> None:
+    order: list[str] = []
+
+    class Failing(Reader):
+        def transcribe(self, png: bytes, page_text: str) -> str:
+            raise RuntimeError("CUDA out of memory")
+
+        def release(self) -> None:
+            order.append("release")
+
+    model = FakeVision(lambda png, text: order.append("model") or "ok", name="qwen")
+    routed = RoutedVision(Failing(_english, name="nemo"), model)
+    assert routed.transcribe(b"", "plain English text on this page " * 3) == "ok" and order == ["release", "model"]
+    with pytest.raises(RuntimeError):
+        RoutedVision(Failing(_english, name="nemo"), None).transcribe(b"", "plain English text " * 5)
+
+
+def test_a_failed_nemotron_page_costs_that_page_and_is_retried(
+    conn: sqlite3.Connection, paths: Paths, config: Config, project: str
+) -> None:
+    calls = {"n": 0}
+
+    class Flaky(nemotron.NemotronEngine):
+        name = "nemo"
+
+        def __init__(self) -> None:  # no model needed
+            pass
+
+        def transcribe(self, png: bytes, page_text: str) -> str:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("CUDA out of memory")
+            return _english(png, page_text)
+
+        def render(self, raw: str) -> str:
+            return raw.removeprefix("RAW:")
+
+    first = enhance_project(conn, paths, config, project, Flaky())
+    saved = json.loads(next(paths.parsed.rglob(VISION)).read_text())
+    failed = [p for p in saved["pages"].values() if p["status"].startswith("failed")]
+    assert len(failed) == 1 and "CUDA out of memory" in failed[0]["status"]
+    assert first.pages_improved == len(saved["pages"]) - 1
+    again = enhance_project(conn, paths, config, project, Flaky())  # only the failed page is read again
+    assert again.pages_improved == len(saved["pages"]) and calls["n"] == len(saved["pages"]) + 1
+
+
+def test_a_new_nemotron_attempt_starts_from_the_pages_read_before(tmp_path: Path) -> None:
+    base = tmp_path / "nemotron-v-abc"
+    old = tmp_path / "nemotron-v-abc-1"
+    old.mkdir()
+    (old / "nemotron.json").write_text('{"pages": {"1": {}}}')
+    new = tmp_path / "nemotron-v-abc-2"
+    run._resume_pages(base, new)
+    assert (new / "nemotron.json").read_text() == '{"pages": {"1": {}}}'
+
+
+def test_engine_settings_pinned_by_an_explicit_config_file_are_not_silently_saved(
+    paths: Paths, config: Config, tmp_path: Path
+) -> None:
+    from litforge.ui.server import App
+
+    override = tmp_path / "override.yaml"
+    override.write_text("vision:\n  engine: nemotron\n")
+    config.config_path = override
+    with pytest.raises(ValueError, match=r"vision.engine is set in .*override.yaml"):
+        App(paths, config).save_engines({"page": "auto"})
+    assert not (paths.root / "config.yaml").exists()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import time
 from pathlib import Path
@@ -138,6 +139,15 @@ def structural_parsers(paths: Paths, config: Config, pdf_path: Path, status: str
     return parsers
 
 
+def _resume_pages(base_dir: Path, out_dir: Path) -> None:
+    """Nemotron keeps each page's raw answer (nemotron.json); a new attempt starts from the newest earlier one,
+    so a parse stopped at page 10 does not read pages 1-9 again."""
+    caches = sorted(base_dir.parent.glob(base_dir.name + "-*/nemotron.json"), key=lambda p: p.stat().st_mtime)
+    if caches and not (out_dir / "nemotron.json").exists():
+        out_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(caches[-1], out_dir / "nemotron.json")
+
+
 def _run_parser(
     conn: sqlite3.Connection,
     paths: Paths,
@@ -161,9 +171,12 @@ def _run_parser(
         return cached["id"], "cached", cached["status"], json.loads(cached["route_reasons"]), None
 
     # MinerU attempts retain previous runs and their canonical files, even for the same input.
+    base_dir = parse_output_dir(paths, artifact["sha256"], parser.name, parser.version, cfg_hash)
     if parser.name in ("mineru", "nemotron"):
         cfg_hash += "-" + new_id()
     out_dir = parse_output_dir(paths, artifact["sha256"], parser.name, parser.version, cfg_hash)
+    if parser.name == "nemotron":
+        _resume_pages(base_dir, out_dir)
     pdf_path = paths.root / artifact["pdf_path"]
     start = time.perf_counter()
     try:
