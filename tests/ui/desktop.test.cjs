@@ -1,0 +1,127 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const app = fs.readFileSync('src/litforge/ui/static/app.js', 'utf8');
+const html = fs.readFileSync('src/litforge/ui/static/index.html', 'utf8');
+const write = app.split('/* ---------- Write ---------- */')[1].split('/* ---------- End Write ---------- */')[0];
+const desktop = (app.split('/* ---------- Desktop window ---------- */')[1] || '')
+  .split('/* ---------- End Desktop window ---------- */')[0];
+
+class Element {
+  constructor() { this.textContent = ''; this.hidden = false; this.onclick = null; }
+  addEventListener() {}
+}
+
+// The Write view with one open, edited file; `save` decides what the server answers to a save.
+function setup({ running = 0, save = 'ok', confirm = true, quit } = {}) {
+  const elements = {}, calls = [], shown = [];
+  const ctx = vm.createContext({
+    Promise, Object, String, Math, Date, Number, calls, shown,
+    $: id => elements[id] ||= new Element(),
+    store: { get: (k, d) => d, set() {} },
+    document: { createElement: () => new Element(), querySelectorAll: () => [] },
+    window: { confirm: msg => { calls.push(['confirm', msg]); return confirm; }, addEventListener() {} },
+    toast: msg => calls.push(['toast', msg]),
+    showStopped: () => shown.push('stopped'),
+    setTimeout: () => 0, clearTimeout() {},
+    api: async url => {
+      calls.push(['GET', url]);
+      if (url === '/api/running') return { running };
+      if (url.startsWith('/api/write/file')) return { name: 'main.tex', text: 'other', hash: 'h9' };
+      throw new Error('unexpected ' + url);
+    },
+    post: async (url, body) => {
+      calls.push([url, body]);
+      if (url === '/api/write/save') {
+        if (save === 'conflict') { const e = new Error('conflict'); e.status = 409; throw e; }
+        if (save === 'fail') throw new Error('disk full');
+        return { hash: 'h2' };
+      }
+      if (url === '/api/quit') return quit ? quit(body) : { stopped: true };
+      return { ok: true };
+    },
+  });
+  vm.runInContext(write + desktop + '\nthis.W = W; this.prepareClose = prepareClose; this.requestClose = requestClose;' +
+    ' this.useDesktopWindow = useDesktopWindow;', ctx);
+  ctx.W.doc = { id: 'd1' }; ctx.W.file = 'main.tex'; ctx.W.hash = 'h1';
+  ctx.W.editor = { getText: () => 'edited text' };
+  return { ctx, calls, shown, elements };
+}
+
+test('the page knows the desktop window: the side note and Quit change, the adapter appears', () => {
+  assert.match(html, /id="quit-note"/);
+  const { ctx, elements, calls } = setup();
+  ctx.useDesktopWindow({ desktop: false });
+  assert.equal(ctx.window.LitForgeDesktop, undefined);
+  ctx.useDesktopWindow({ desktop: true });
+  assert.match(elements['quit-note'].textContent, /Closing this window/);
+  assert.doesNotMatch(elements['quit-note'].textContent, /two minutes/);
+  assert.equal(typeof ctx.window.LitForgeDesktop.requestClose, 'function');
+  ctx.W.dirty = true;
+  elements['btn-quit'].onclick();  // Quit saves first, like the close button
+  return new Promise(r => setImmediate(r)).then(() => assert.ok(calls.some(c => c[0] === '/api/write/save')));
+});
+
+test('closing saves the edited file first, then counts running tasks', async () => {
+  const { ctx, calls } = setup({ running: 2 });
+  ctx.W.dirty = true;
+  const r = await ctx.prepareClose();
+  assert.deepEqual({ ...r }, { ready: true, running: 2, error: null });
+  const order = calls.map(c => c[0]);
+  assert.ok(order.indexOf('/api/write/save') < order.indexOf('GET'));
+  assert.equal(ctx.W.dirty, false);
+});
+
+test('a save conflict keeps the window open and says why', async () => {
+  const { ctx, calls } = setup({ save: 'conflict' });
+  ctx.W.dirty = true;
+  assert.equal(await ctx.requestClose(), false);
+  assert.ok(calls.some(c => c[0] === 'toast' && /changed outside LitForge/.test(c[1])));
+  assert.ok(!calls.some(c => c[0] === '/api/quit'));
+});
+
+test('a failed save keeps the window open and the text in the editor', async () => {
+  const { ctx, calls } = setup({ save: 'fail' });
+  ctx.W.dirty = true;
+  assert.equal(await ctx.requestClose(), false);
+  assert.equal(ctx.W.dirty, true);
+  assert.ok(calls.some(c => c[0] === 'toast' && /not saved/.test(c[1])));
+  assert.ok(!calls.some(c => c[0] === '/api/quit'));
+});
+
+test('nothing to save and nothing running: LitForge stops and the page says so', async () => {
+  const { ctx, calls, shown } = setup();
+  assert.equal(await ctx.requestClose(), true);
+  assert.equal(JSON.stringify(calls.find(c => c[0] === '/api/quit')), '["/api/quit",{"force":false}]');
+  assert.deepEqual(shown, ['stopped']);
+});
+
+test('running tasks are confirmed: keep working cancels the close', async () => {
+  const { ctx, calls } = setup({ running: 1, confirm: false });
+  assert.equal(await ctx.requestClose(), false);
+  assert.ok(calls.some(c => c[0] === 'confirm' && /1 task is still running/.test(c[1])));
+  assert.ok(!calls.some(c => c[0] === '/api/quit'));
+});
+
+test('running tasks are confirmed: stop them and quit', async () => {
+  const { ctx, calls } = setup({ running: 3, confirm: true });
+  assert.equal(await ctx.requestClose(), true);
+  assert.equal(JSON.stringify(calls.find(c => c[0] === '/api/quit')), '["/api/quit",{"force":true}]');
+});
+
+test('a task that started meanwhile keeps LitForge open', async () => {
+  const { ctx, shown } = setup({ quit: () => ({ stopped: false, running: 1 }) });
+  assert.equal(await ctx.requestClose(), false);
+  assert.deepEqual(shown, []);
+});
+
+test('repeated close clicks are one request with one save', async () => {
+  const { ctx, calls } = setup();
+  ctx.W.dirty = true;
+  const a = ctx.requestClose(), b = ctx.requestClose();
+  assert.equal(a, b);
+  await a;
+  assert.equal(calls.filter(c => c[0] === '/api/write/save').length, 1);
+  assert.equal(calls.filter(c => c[0] === '/api/quit').length, 1);
+});

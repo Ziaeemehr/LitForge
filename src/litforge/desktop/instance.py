@@ -86,7 +86,7 @@ class InstanceLease:
     """Held by the window that owns a library; close() lets the next launch own it."""
 
     def __init__(self, lock_file: IO[bytes], record_path: Path, server: socket.socket, token: bytes,
-                 on_activate: Callable[[], None]) -> None:
+                 on_activate: Callable[[], object]) -> None:
         self.record_path = record_path
         self._lock_file = lock_file
         self._server = server
@@ -108,10 +108,13 @@ class InstanceLease:
                 try:
                     conn.settimeout(2)
                     ok = hmac.compare_digest(conn.recv(256).strip(), b"ACTIVATE " + self._token)
+                    reply = b"NO\n"
                     if ok:  # before the reply, so the second launch exits only once the window was asked
+                        shown: object = True
                         with contextlib.suppress(Exception):  # a failed focus must not stop the window
-                            self._on_activate()
-                    conn.sendall(b"OK\n" if ok else b"NO\n")
+                            shown = self._on_activate()
+                        reply = b"BUSY\n" if shown is False else b"OK\n"  # False: the window is closing
+                    conn.sendall(reply)
                 except OSError:
                     continue
 
@@ -127,26 +130,43 @@ class InstanceLease:
         self._lock_file.close()
 
 
-def activate_existing(workspace: Path, *, runtime_dir: Path | None = None, timeout: float = 2.0) -> bool:
-    """Ask the window that owns `workspace` to come forward; False when there is none or it does not answer."""
+def activate_existing(workspace: Path, *, runtime_dir: Path | None = None, timeout: float = 2.0) -> str:
+    """Ask the window that owns `workspace` to come forward: "activated", "busy" (it is closing and still
+    stopping its backend) or "none" (no window, or it does not answer)."""
     _, record_path = _paths(workspace, runtime_dir)
     try:
         record = json.loads(record_path.read_text(encoding="utf-8"))
         port, token = int(record["port"]), str(record["token"])
     except (OSError, ValueError, KeyError, TypeError):
-        return False
+        return "none"
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=timeout) as c:
             c.sendall(b"ACTIVATE " + token.encode("ascii") + b"\n")
-            return c.recv(16).strip() == b"OK"
+            answer = c.recv(16).strip()
     except (OSError, UnicodeEncodeError):
-        return False
+        return "none"
+    return {b"OK": "activated", b"BUSY": "busy"}.get(answer, "none")
 
 
-def acquire_instance(workspace: Path, on_activate: Callable[[], None], *, runtime_dir: Path | None = None,
+def wait_until_free(workspace: Path, *, runtime_dir: Path | None = None, timeout: float = 60.0) -> bool:
+    """Wait for a closing window to release `workspace`; True once nobody owns it."""
+    lock_path, _ = _paths(workspace, runtime_dir)
+    deadline = time.monotonic() + timeout
+    while True:
+        with open(lock_path, "a+b") as f:
+            if _try_lock(f):
+                _unlock(f)
+                return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
+
+
+def acquire_instance(workspace: Path, on_activate: Callable[[], object], *, runtime_dir: Path | None = None,
                      wait: float = 5.0) -> InstanceLease | None:
-    """Own `workspace`, or bring its window forward and return None. Raises InstanceError when another window
-    holds it but does not answer within `wait` seconds (it may still be starting)."""
+    """Own `workspace`, or bring its window forward and return None. `on_activate` returns False once the window
+    has closed (the next launch then waits). Raises InstanceError when another window holds the library but does
+    not answer, or is still closing, after `wait` seconds."""
     lock_path, record_path = _paths(workspace, runtime_dir)
     deadline = time.monotonic() + wait
     while True:
@@ -160,7 +180,7 @@ def acquire_instance(workspace: Path, on_activate: Callable[[], None], *, runtim
             _write_private(record_path, {"port": server.getsockname()[1], "token": token, "pid": os.getpid()})
             return InstanceLease(lock_file, record_path, server, token.encode("ascii"), on_activate)
         lock_file.close()
-        if activate_existing(workspace, runtime_dir=runtime_dir, timeout=1.0):
+        if activate_existing(workspace, runtime_dir=runtime_dir, timeout=1.0) == "activated":
             return None
         if time.monotonic() >= deadline:
             raise InstanceError("LitForge is already open for this library but does not answer. "

@@ -119,3 +119,46 @@ def test_stop_reports_a_timeout_instead_of_pretending(paths: Paths, monkeypatch:
     release.set()
     handle.stop(timeout=5)  # the second attempt finishes the job
     assert not handle.is_running
+
+
+def test_the_page_learns_it_runs_in_the_desktop_window(paths: Paths) -> None:
+    desktop = start_server(paths, load_config(), desktop=True)
+    browser = start_server(paths, load_config())
+    try:
+        assert _info(desktop.url)["desktop"] is True
+        assert _info(browser.url)["desktop"] is False
+    finally:
+        desktop.stop()
+        browser.stop()
+
+
+def test_running_tasks_can_be_counted_without_stopping_anything(paths: Paths) -> None:
+    from litforge.ui.server import Job
+
+    handle = start_server(paths, load_config(), desktop=True)
+    try:
+        handle.app.jobs["j"] = Job(id="j", kind="search", project="p")
+        with urllib.request.urlopen(handle.url + "api/running", timeout=5) as resp:
+            assert json.loads(resp.read()) == {"running": 1}
+        assert handle.is_running
+    finally:
+        handle.stop()
+
+
+def test_desktop_server_announces_that_it_is_stopping(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+
+    proc = subprocess.Popen([sys.executable, "-m", "litforge.cli", "--data-dir", str(tmp_path / "data"),
+                             "desktop-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout is not None
+        url = json.loads(proc.stdout.readline())["url"]
+        req = urllib.request.Request(url + "api/quit", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=5).read()
+        assert json.loads(proc.stdout.readline()) == {"stopping": True}
+        assert proc.wait(timeout=20) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()

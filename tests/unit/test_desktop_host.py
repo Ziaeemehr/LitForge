@@ -26,6 +26,11 @@ READY = "import json,sys; print(json.dumps({'url': 'http://127.0.0.1:9/', 'pid':
 class FakeEvent:
     def __init__(self) -> None:
         self._e = threading.Event()
+        self.handlers: list[Any] = []
+
+    def __iadd__(self, handler: Any) -> FakeEvent:
+        self.handlers.append(handler)
+        return self
 
     def set(self) -> None:
         self._e.set()
@@ -40,7 +45,7 @@ class FakeEvent:
 class FakeWindow:
     def __init__(self, html: str, close_on_navigate: bool) -> None:
         self.calls: list[tuple[str, str]] = [("html", html)]
-        self.events = types.SimpleNamespace(closed=FakeEvent())
+        self.events = types.SimpleNamespace(closed=FakeEvent(), closing=FakeEvent())
         self.close_on_navigate = close_on_navigate
 
     def load_url(self, url: str) -> None:
@@ -54,6 +59,7 @@ class FakeWindow:
 
     def destroy(self) -> None:
         self.calls.append(("destroy", ""))
+        self.destroyed_at = time.monotonic()
         self.events.closed.set()
 
     def restore(self) -> None:
@@ -94,6 +100,7 @@ def test_window_shows_the_loading_page_first_then_navigates_to_the_backend(
     assert seen["start"]["gui"] == "gtk"
     assert seen["start"]["private_mode"] is False  # localStorage keeps the user's preferences
     assert seen["start"]["storage_path"] == str(tmp_path / "web")
+    assert len(seen["window"].events.closing.handlers) == 1  # the close button asks the page first
 
 
 def test_a_backend_that_fails_shows_the_error_and_the_log_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -117,6 +124,19 @@ def test_quit_in_the_page_closes_the_window(tmp_path: Path, monkeypatch: pytest.
     rc = host.run_desktop([sys.executable, "-c", quits], gui="gtk", title="LitForge", log_path=tmp_path / "d.log")
     assert rc == 0
     assert seen["window"].calls[-1] == ("destroy", "")
+
+
+def test_the_window_closes_as_soon_as_the_backend_starts_stopping(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    mod, seen = fake_webview(close_on_navigate=False)
+    monkeypatch.setitem(sys.modules, "webview", mod)
+    slow = ("import json,sys,time; print(json.dumps({'url': 'http://127.0.0.1:9/', 'pid': 1}), flush=True); "
+            "time.sleep(0.2); print(json.dumps({'stopping': True}), flush=True); time.sleep(3)")
+    started = time.monotonic()
+    rc = host.run_desktop([sys.executable, "-c", slow], gui="gtk", title="LitForge", log_path=tmp_path / "d.log")
+    assert rc == 0
+    assert seen["window"].calls[-1] == ("destroy", "")
+    assert seen["window"].destroyed_at - started < 1.5  # not after the 3 s the backend still needs
 
 
 def test_closing_the_window_stops_the_backend(tmp_path: Path) -> None:
@@ -205,7 +225,7 @@ def test_the_window_owns_its_library_and_comes_forward_when_asked(
     monkeypatch.setitem(sys.modules, "webview", mod)
     rc = host.run_desktop([sys.executable, "-c", READY], gui="gtk", title="LitForge", log_path=tmp_path / "d.log",
                           workspace=ws, runtime_dir=run_dir)
-    assert rc == 0 and answered == [True]
+    assert rc == 0 and answered == ["activated"]
     assert ("restore", "") in seen["window"].calls and ("show", "") in seen["window"].calls
     lease = instance.acquire_instance(ws, lambda: None, runtime_dir=run_dir)  # released when the window closed
     assert lease is not None

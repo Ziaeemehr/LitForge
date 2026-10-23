@@ -1333,6 +1333,7 @@ def desktop_server(
     port: Annotated[int, typer.Option(help="Preferred port; a free one is used when it is taken")] = 0,
 ) -> None:
     """Serve the UI for the desktop window: print one JSON line with the URL, stop when stdin closes."""
+    import contextlib
     import os
     import sys
     import threading
@@ -1341,9 +1342,9 @@ def desktop_server(
 
     st = _state(ctx)
     try:
-        handle = start_server(st.paths, st.config, port=port)
+        handle = start_server(st.paths, st.config, port=port, desktop=True)
     except OSError:
-        handle = start_server(st.paths, st.config, port=0)
+        handle = start_server(st.paths, st.config, port=0, desktop=True)
     print(json.dumps({"url": handle.url, "pid": os.getpid()}), flush=True)
     closed = threading.Event()
 
@@ -1356,6 +1357,8 @@ def desktop_server(
         while not closed.is_set() and not handle.wait(0.5):
             pass
     finally:
+        with contextlib.suppress(OSError):  # the window closes as soon as it reads this
+            print(json.dumps({"stopping": True}), flush=True)
         try:
             handle.stop(timeout=10)
         except TimeoutError as exc:

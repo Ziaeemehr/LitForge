@@ -44,6 +44,7 @@ def _sibling(name: str) -> types.ModuleType:
 
 
 instance = _sibling("instance")
+close = _sibling("close")
 
 
 def _log(log_path: Path, text: str) -> None:
@@ -72,6 +73,7 @@ class Backend:
         self.cmd = list(cmd)
         self.log_path = Path(log_path)
         self.proc: subprocess.Popen[str] | None = None
+        self.stopping = threading.Event()  # it said it is shutting down (Quit, or the window asked it to)
 
     @property
     def returncode(self) -> int | None:
@@ -79,6 +81,10 @@ class Backend:
 
     def exited(self) -> bool:
         return self.returncode is not None
+
+    def finishing(self) -> bool:
+        """Stopping or stopped: its window can close now, even while running tasks are still being cancelled."""
+        return self.stopping.is_set() or self.exited()
 
     def start(self, timeout: float = START_TIMEOUT) -> str:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -97,7 +103,9 @@ class Backend:
                 if not got.is_set():
                     ready.append(line)
                     got.set()
-                else:  # anything printed later goes to the log, so the pipe never fills up
+                elif line.strip() == '{"stopping": true}':
+                    self.stopping.set()
+                else:  # anything else printed later goes to the log, so the pipe never fills up
                     _log(self.log_path, "backend: " + line.rstrip())
             got.set()
 
@@ -182,11 +190,14 @@ def run_desktop(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
     log_path = Path(log_path)
     holder: dict[str, object] = {}
 
-    def bring_forward() -> None:
+    def bring_forward() -> bool:
         window = holder.get("window")
+        if holder.get("closed"):
+            return False  # closed, still stopping its backend: the next launch waits for the library
         if window is not None:
             window.restore()  # type: ignore[attr-defined]
             window.show()  # type: ignore[attr-defined]
+        return True
 
     lease = None
     if workspace is not None:
@@ -226,6 +237,8 @@ def _run_window(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
     window = webview.create_window(title, html=LOADING_HTML, width=1280, height=860, min_size=(820, 560))
     assert window is not None
     holder["window"] = window
+    coordinator = close.CloseCoordinator(window, backend.finishing, log=lambda text: _log(log_path, text))
+    window.events.closing += coordinator.on_closing
 
     def session() -> None:
         try:
@@ -240,7 +253,7 @@ def _run_window(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
             return
         window.load_url(url)
         while not window.events.closed.wait(0.5):
-            if backend.exited():  # Quit in the page stopped the backend: close the window too
+            if backend.finishing():  # Quit in the page, or the close button: the backend is stopping
                 window.destroy()
                 return
 
@@ -253,6 +266,7 @@ def _run_window(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
         show_native_error(title, f"LitForge could not open its window ({gui}): {exc}\n\nDetails are in {log_path}")
         result["rc"] = 2
     finally:
+        holder["closed"] = True
         backend.stop()
     return result["rc"]
 

@@ -35,8 +35,12 @@ def launch_desktop(explicit: Path | None = None, gui: str | None = None) -> int:
     except WorkspaceError as exc:
         host.show_native_error("LitForge", str(exc))
         return 2
-    if instance.activate_existing(workspace):  # before the port: the open window holds it
+    state = instance.activate_existing(workspace)  # before the port: an open window holds it
+    if state == "activated":
         return 0
+    if state == "busy" and not instance.wait_until_free(workspace):  # the last window is still stopping
+        host.show_native_error("LitForge", "LitForge is still closing this library. Try again in a minute.")
+        return 2
     saved_ports = settings.get("ports")
     ports: dict[str, int] = saved_ports if isinstance(saved_ports, dict) else {}
     port = preferred_port({"port": ports.get(str(workspace))})

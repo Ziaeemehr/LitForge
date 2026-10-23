@@ -1750,6 +1750,51 @@
       'To open LitForge again, use its icon in your apps.</p></div>';
   }
 
+  /* ---------- Desktop window ---------- */
+  // In the desktop window (litforge desktop) the close button and Quit take the same steps: save the open file,
+  // ask before cancelling running tasks, then stop LitForge; the window closes once the server has stopped.
+  // The window asks through window.LitForgeDesktop.requestClose(); there is no other way into the page.
+  var closing = null;
+
+  function prepareClose() {
+    var save = W.doc && (W.dirty || W.saving) ? saveWriteNow() : Promise.resolve();
+    return save.then(function () {
+      if (W.doc && W.conflictHash) {
+        return { ready: false, running: 0, error: 'The open file changed outside LitForge: choose Reload or ' +
+          'Keep mine above the editor, then close again.' };
+      }
+      if (W.doc && W.dirty) {
+        return { ready: false, running: 0, error: 'Your latest edits are not saved (see the editor). ' +
+          'LitForge stays open so nothing is lost.' };
+      }
+      return api('/api/running').then(function (r) { return { ready: true, running: r.running, error: null }; });
+    });
+  }
+
+  function requestClose() {
+    if (closing) return closing;
+    closing = prepareClose().then(function (p) {
+      if (!p.ready) { toast(p.error); return false; }
+      if (p.running && !window.confirm(p.running + ' task' + (p.running === 1 ? ' is' : 's are') +
+          ' still running and will be cancelled. Close LitForge anyway?')) return false;
+      return post('/api/quit', { force: p.running > 0 }).then(function (r) {
+        if (!r.stopped) return false;  // a task started meanwhile: the next close asks again
+        showStopped();
+        return true;
+      });
+    }).catch(function (e) { toast(e.message); return false; })
+      .then(function (ok) { closing = null; return ok; });
+    return closing;
+  }
+
+  function useDesktopWindow(info) {
+    if (!info || !info.desktop) return;
+    $('quit-note').textContent = 'Closing this window saves your edits and stops LitForge.';
+    $('btn-quit').onclick = function () { requestClose(); };
+    window.LitForgeDesktop = { prepareClose: prepareClose, requestClose: requestClose };
+  }
+  /* ---------- End Desktop window ---------- */
+
   /* ---------- help ---------- */
 
   function openGuide() {
@@ -6282,6 +6327,7 @@
 
     api('/api/info').then(function (info) {
       state.exportsRoot = info.exports_root;
+      useDesktopWindow(info);
       var medium = $('export-math').querySelector('option[value="medium"]');
       if (info.math) showMathCost(info.math.high_cloud);  // cloud pages are paid: say so in the menu
       if (info.math && !info.math.medium) {  // Pix2Text is an optional install

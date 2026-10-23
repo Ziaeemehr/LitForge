@@ -171,7 +171,31 @@ def test_concurrent_launches_give_exactly_one_owner(tmp_path: Path, run_dir: Pat
 
 
 def test_activate_existing_without_a_window(tmp_path: Path, run_dir: Path) -> None:
-    assert instance.activate_existing(_lib(tmp_path / "ws"), runtime_dir=run_dir) is False
+    assert instance.activate_existing(_lib(tmp_path / "ws"), runtime_dir=run_dir) == "none"
+
+
+def test_a_closing_window_answers_busy_and_the_next_launch_waits_for_it(tmp_path: Path, run_dir: Path) -> None:
+    ws = _lib(tmp_path / "ws")
+    lease = instance.acquire_instance(ws, lambda: False, runtime_dir=run_dir)  # False: the window has closed
+    assert lease is not None
+    assert instance.activate_existing(ws, runtime_dir=run_dir) == "busy"
+    threading.Timer(0.4, lease.close).start()  # its backend finishes stopping
+    started = time.monotonic()
+    assert instance.wait_until_free(ws, runtime_dir=run_dir, timeout=5) is True
+    assert 0.3 < time.monotonic() - started < 3
+    new = instance.acquire_instance(ws, lambda: None, runtime_dir=run_dir)
+    assert new is not None
+    new.close()
+
+
+def test_wait_until_free_gives_up(tmp_path: Path, run_dir: Path) -> None:
+    ws = _lib(tmp_path / "ws")
+    lease = instance.acquire_instance(ws, lambda: False, runtime_dir=run_dir)
+    try:
+        assert instance.wait_until_free(ws, runtime_dir=run_dir, timeout=0.3) is False
+    finally:
+        assert lease is not None
+        lease.close()
 
 
 def test_runtime_dir_per_platform(tmp_path: Path) -> None:

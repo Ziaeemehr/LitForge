@@ -163,6 +163,7 @@ class App:
         self.model_downloads: dict[str, tuple[dict[str, Any], dict[str, str]]] = {}
         self.stop: Callable[[], None] | None = None  # set by serve(): shuts the server down
         self.last_seen = time.monotonic()  # when a page last checked in, see stop_when_idle()
+        self.desktop = False  # served to the desktop window (litforge desktop), not to a browser tab
         self._embedder: Embedder | None = None
         self._embedder_loaded = False
         self._lock = threading.Lock()
@@ -1220,8 +1221,10 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(app.models.info())
                 if path == "/api/model-profiles":
                     return self._json(api.model_profiles(app.config))
+                if path == "/api/running":  # read-only, for closing the desktop window
+                    return self._json({"running": sum(j.status == "running" for j in app.jobs.values())})
                 if path == "/api/info":
-                    return self._json({"exports_root": str(app.paths.exports_root),
+                    return self._json({"exports_root": str(app.paths.exports_root), "desktop": app.desktop,
                                        "math": {"medium": formulas_available(), "high": app.config.vision.model,
                                                 "high_cloud": math_high_cloud(app.config)}})
                 if path == "/api/math-setup":
@@ -1901,12 +1904,13 @@ class ServerHandle:
 
 
 def start_server(paths: Paths, config: Config, *, host: str = "127.0.0.1", port: int = 0,
-                 idle_shutdown: bool = False) -> ServerHandle:
+                 idle_shutdown: bool = False, desktop: bool = False) -> ServerHandle:
     """Serve the UI from a background thread and return at once; never opens a browser.
 
     `idle_shutdown` stops the server once no page has checked in for a while (browser mode only: a minimised
     desktop window may not check in). Quit in the page stops it in both modes."""
     app = App(paths, config)
+    app.desktop = desktop
     httpd = ThreadingHTTPServer((host, port), make_handler(app))
     app.stop = httpd.shutdown
     if idle_shutdown:
