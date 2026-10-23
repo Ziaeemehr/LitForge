@@ -1327,6 +1327,24 @@ def desktop(
     raise typer.Exit(launch_desktop(workspace, gui))
 
 
+@app.command("desktop-setup")
+def desktop_setup(
+    engine: Annotated[str, typer.Option(help="Linux: auto, gtk (the system's WebKitGTK) or qt")] = "auto",
+) -> None:
+    """Choose and prepare the window engine for `litforge desktop` (the installer runs this; no sudo needed)."""
+    from litforge.desktop import configure_engine
+    from litforge.desktop.setup import SetupError
+
+    if engine not in ("auto", "gtk", "qt"):
+        raise typer.BadParameter("use auto, gtk or qt")
+    try:
+        result = configure_engine(engine)
+    except SetupError as exc:
+        typer.secho(str(exc), fg="red", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"Window engine: {result.engine}" + (f" — {result.message}" if result.message else ""))
+
+
 @app.command("desktop-server", hidden=True)
 def desktop_server(
     ctx: typer.Context,

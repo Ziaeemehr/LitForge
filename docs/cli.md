@@ -979,6 +979,14 @@ Open LitForge in its own window instead of a browser tab.
 | `--workspace` | Folder whose data/ holds the library (remembered) |
 | `--gui` | Window engine: gtk, qt, edgechromium or cocoa |
 
+### `litforge desktop-setup`
+
+Choose and prepare the window engine for `litforge desktop` (the installer runs this; no sudo needed).
+
+| Option | Meaning |
+|---|---|
+| `--engine` | Linux: auto, gtk (the system's WebKitGTK) or qt |
+
 ### `litforge review`
 
 Review flagged sentences and cells.

@@ -7,11 +7,13 @@ system's WebKitGTK the host runs under the system Python recorded in desktop.jso
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from litforge.desktop import host, instance
+from litforge.desktop.setup import DesktopSetup, SetupError, setup_desktop
 from litforge.desktop.workspace import (
     WorkspaceError,
     load_settings,
@@ -26,9 +28,29 @@ ICON = Path(__file__).resolve().parents[1] / "ui" / "static" / "icon.svg"
 DEFAULT_ENGINE = {"win32": "edgechromium", "darwin": "cocoa"}  # Linux: gtk, or qt where the installer chose it
 
 
+def find_uv() -> str:
+    for candidate in (shutil.which("uv"), Path.home() / ".local" / "bin" / "uv", Path.home() / ".cargo" / "bin" / "uv"):
+        if candidate and Path(candidate).is_file():
+            return str(candidate)
+    raise SetupError("uv was not found; run the LitForge installer again")
+
+
+def configure_engine(engine: str = "auto") -> DesktopSetup:
+    """Choose and prepare the window engine for this computer and remember it (desktop.json)."""
+    return setup_desktop(INSTALL_DIR, user_config_dir(sys.platform, os.environ, Path.home()), platform=sys.platform,
+                         env=os.environ, uv=find_uv() if sys.platform.startswith("linux") else "uv", engine=engine)
+
+
 def launch_desktop(explicit: Path | None = None, gui: str | None = None) -> int:
     config_dir = user_config_dir(sys.platform, os.environ, Path.home())
     settings = load_settings(config_dir)
+    if sys.platform.startswith("linux") and not gui and not settings.get("engine"):
+        try:  # not set up by the installer (an older install): once, here
+            setup_desktop(INSTALL_DIR, config_dir, platform=sys.platform, env=os.environ, uv=find_uv(), engine="auto")
+        except SetupError as exc:
+            host.show_native_error("LitForge", f"LitForge could not prepare its window:\n\n{exc}")
+            return 2
+        settings = load_settings(config_dir)
     try:
         workspace = resolve_workspace(explicit, settings=settings, install_dir=INSTALL_DIR, cwd=Path.cwd(),
                                       home=Path.home())

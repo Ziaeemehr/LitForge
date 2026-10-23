@@ -30,3 +30,7 @@ scripts/spell/node_modules/
 # local AI-tool files
 .clinerules
 .superpowers/
+
+# made by `litforge desktop-setup` in the install folder
+/desktop-host/
+/desktop-libs/

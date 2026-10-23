@@ -31,6 +31,8 @@ nemotron = ["litforge[formulas-gpu]", "timm>=1.0.22", "beautifulsoup4>=4.13", "h
 # LitForge in its own window. On Linux the window normally uses the system's WebKitGTK through a small host
 # environment made by the installer; this extra covers Windows (WebView2) and macOS (WKWebView).
 desktop = ["pywebview==6.2.1"]
+# Linux without the system's WebKitGTK bindings: Qt WebEngine from wheels (`litforge desktop-setup` decides).
+desktop-qt = ["pywebview[qt]==6.2.1"]
 
 [project.scripts]
 litforge = "litforge.cli:app"
