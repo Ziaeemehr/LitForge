@@ -101,3 +101,19 @@ test('Nemotron row shows its state and installs after confirmation; engine choic
   assert.match(no.$('tool-nemotron-status').textContent, /Not available here: needs an NVIDIA GPU/);
   assert.equal(no.$('tool-nemotron-action').hidden, true);
 });
+
+test('the LitForge window row shows its engine and checks again in the background', async () => {
+  assert.match(html, /id="tool-desktop-status"/);
+  assert.match(html, /id="tool-desktop-action"/);
+  const s = setup();
+  s.ctx.api = async url => (url === '/api/jobs/job' ? { status: 'done', report: { engine: 'gtk', message: 'x' } } : {
+    mineru: {}, pix2text: {}, vision: {}, desktop: { engine: 'gtk', label: "the system's WebKitGTK", ready: true } });
+  s.ctx.waitJob = async () => ({ status: 'done', report: { engine: 'gtk' } });
+  await s.ctx.loadOptionalTools();
+  assert.match(s.$('tool-desktop-status').textContent, /WebKitGTK/);
+  await s.$('tool-desktop-action').onclick();
+  assert.ok(s.calls.some(c => c[0] === '/api/tools/desktop/check'));
+  s.ctx.api = async () => ({ desktop: { engine: null, label: 'not set up yet', ready: false } });
+  await s.ctx.loadOptionalTools();
+  assert.match(s.$('tool-desktop-status').textContent, /not set up yet/);
+});

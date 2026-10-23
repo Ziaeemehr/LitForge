@@ -9,7 +9,7 @@
 
 LitForge turns a paper, a few keywords or a reference list into a ranked reading list, helps you
 decide what to keep, answers questions from the papers with verified quotes, and lets you write your
-own paper in LaTeX next to them. It runs in your browser, but everything stays on your machine.
+own paper in LaTeX next to them. It runs in its own window, and everything stays on your machine.
 
 ## Main purpose
 
@@ -66,7 +66,8 @@ On Windows (PowerShell):
 powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Ziaeemehr/LitForge/main/install.ps1 | iex"
 ```
 
-Then open LitForge from its icon. Closing its page stops it after about two minutes; **⏻ Quit** stops it at once.
+Then open LitForge from its icon: it opens in its own window. Closing the window (or **⏻ Quit**) stops it, after
+saving your open file.
 The installer also adds Tectonic (~22 MB), the LaTeX engine of the Writing Studio.
 At the end it offers optional tools (large downloads); **No** is the default, and you can add them later
 in Settings → Optional tools.
@@ -144,7 +145,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Zia
 
 <div dir="rtl">
 
-از این به بعد LitForge را با آیکونش باز کنید و با دکمه‌ی **⏻ Quit** در صفحه ببندید، یا فقط صفحه را ببندید؛ حدود دو دقیقه بعد خودش بسته می‌شود.
+از این به بعد LitForge را با آیکونش باز کنید؛ در پنجره‌ی خودش باز می‌شود. با بستن پنجره یا دکمه‌ی **⏻ Quit** بسته می‌شود و پیش از آن فایل باز شما ذخیره می‌شود.
 
 ### به‌روزرسانی
 

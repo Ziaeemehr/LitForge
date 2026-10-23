@@ -30,6 +30,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 import yaml
 from pydantic import ValidationError
 
+from litforge import desktop
 from litforge.analysis import ask as answers
 from litforge.analysis import audit as audits
 from litforge.analysis import claim_graph, claims, figures, gaps, living, repro, snapshots
@@ -288,7 +289,18 @@ class App:
             "engines": {"parse": self.config.parsing.complex_fallback, "page": self.config.vision.engine},
             "tectonic": engine_status(self.paths),
             "vision": {**vision, "legacy": not self._uses_model_settings(), "size": "model-dependent"},
+            "desktop": desktop.desktop_status(),
         }
+
+    def desktop_check_job(self) -> Job:
+        """Settings → LitForge window → Check again: detect and prepare the window engine (next launch uses it)."""
+        if any(j.kind == "desktop-setup" and j.status == "running" for j in self.jobs.values()):
+            raise ValueError("the window engine is already being checked")
+
+        def work(job: Job) -> None:
+            job.report = dataclasses.asdict(desktop.configure_engine("auto"))
+
+        return self.start_job("desktop-setup", "", work)
 
     def mineru_parse_job(self, paper_id: str) -> Job:
         if not find_command(self.paths, self.config.parsing):
@@ -1332,6 +1344,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(app.pix2text_install_job(body).__dict__)
                 if url.path == "/api/tools/nemotron/install":
                     return self._json(app.nemotron_install_job(body).__dict__)
+                if url.path == "/api/tools/desktop/check":
+                    return self._json(app.desktop_check_job().__dict__)
                 if url.path == "/api/tools/engines":
                     return self._json(app.save_engines(body))
                 if m := re.fullmatch(r"/api/papers/([\w-]+)/parse-mineru", url.path):

@@ -197,18 +197,25 @@ def test_installer_skips_prompts_without_tty_and_prints_hint(tmp_path: Path) -> 
     assert "Install MinerU" not in result.stdout
     assert "Optional tools" in result.stdout
     # Tectonic installs without a prompt
-    assert log == ["sync --extra embed --extra documents --inexact", "run litforge shortcut",
-                   "run litforge tools install tectonic --yes"]
+    assert log == ["sync --extra embed --extra documents --extra desktop --inexact", "run litforge desktop-setup",
+                   "run litforge shortcut", "run litforge tools install tectonic --yes"]
 
 
 def test_installer_extras_and_failed_optional_install_are_nonfatal(tmp_path: Path) -> None:
     result, log = _run_installer(tmp_path, {"LITFORGE_EXTRAS": "mineru,pix2text", "FAIL_OPTIONAL": "pix2text"})
     assert result.returncode == 0, result.stderr
-    assert log == ["sync --extra embed --extra documents --inexact", "run litforge shortcut",
-                   "run litforge tools install tectonic --yes",
-                  "run litforge tools install mineru --yes", "run litforge tools install pix2text --yes"]
+    assert log == ["sync --extra embed --extra documents --extra desktop --inexact", "run litforge desktop-setup",
+                   "run litforge shortcut", "run litforge tools install tectonic --yes",
+                   "run litforge tools install mineru --yes", "run litforge tools install pix2text --yes"]
     assert "warning" in result.stderr.lower()
     assert "litforge tools install pix2text" in result.stderr
+
+
+def test_installer_continues_with_a_browser_icon_when_the_window_cannot_be_set_up(tmp_path: Path) -> None:
+    result, log = _run_installer(tmp_path, {"FAIL_SETUP": "1"})
+    assert result.returncode == 0, result.stderr
+    assert log[1:3] == ["run litforge desktop-setup", "run litforge shortcut"]
+    assert "uv run litforge desktop-setup" in result.stderr  # how to retry
 
 
 def test_installer_prompts_read_from_configured_tty(tmp_path: Path) -> None:
@@ -220,7 +227,7 @@ def test_installer_prompts_read_from_configured_tty(tmp_path: Path) -> None:
     assert "Install MinerU for accurate PDF reading (~4 GB)? [y/N]" in asked
     assert "Install Pix2Text for better math in exports (~2 GB)? [y/N]" in asked
     assert log[-1] == "run litforge tools install mineru --yes"
-    assert len(log) == 4  # sync, shortcut, Tectonic, MinerU
+    assert len(log) == 5  # sync, window setup, shortcut, Tectonic, MinerU
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is not installed")
@@ -285,6 +292,7 @@ def _run_installer(tmp_path: Path, overrides: dict[str, str]) -> tuple[Any, list
     uv.write_text(
         "#!/bin/sh\n"
         f"printf '%s\\n' \"$*\" >> '{record}'\n"
+        "case \"$*\" in *desktop-setup*) [ \"${FAIL_SETUP:-}\" != 1 ] || exit 1;; esac\n"
         "case \"$*\" in *\"tools install \"*)\n"
         "  case \"$*\" in *\"install mineru\"*) tool=mineru;; *) tool=pix2text;; esac\n"
         "  [ \"${FAIL_OPTIONAL:-}\" != \"$tool\" ] || exit 1;;\n"

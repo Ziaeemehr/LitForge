@@ -83,12 +83,24 @@ Push-Location -LiteralPath $dir
 try {
     Say 'Installing dependencies (the first time takes a few minutes)'
     # Keep extras installed later, such as formulas.
-    Native { uv sync --extra embed --extra documents --inexact }
+    Native { uv sync --extra embed --extra documents --extra desktop --inexact }
     if ($LASTEXITCODE -ne 0) {
         Fail 'could not install dependencies'
     }
+    # LitForge's own window uses Microsoft Edge WebView2, part of Windows 11 and of updated Windows 10.
+    $webview2 = 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+    $hasWebView2 = (Test-Path "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}") -or
+        (Test-Path "HKLM:\$webview2") -or (Test-Path "HKCU:\$webview2")
+    $mode = 'desktop'
+    if ($hasWebView2) {
+        Native { uv run litforge desktop-setup }
+    } else {
+        Write-Warning ("Microsoft Edge WebView2 Runtime is missing, so LitForge opens in your browser for now. " +
+            "Install it from https://go.microsoft.com/fwlink/p/?LinkId=2124703 and run this installer again.")
+        $mode = 'browser'
+    }
     Say 'Adding the LitForge icon'
-    Native { uv run litforge shortcut }
+    Native { uv run litforge shortcut --mode $mode }
     if ($LASTEXITCODE -ne 0) {
         Fail 'could not add the LitForge icon'
     }

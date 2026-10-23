@@ -138,3 +138,14 @@ def test_the_first_launch_on_linux_sets_the_engine_up_once(tmp_path: Path, monke
     assert desktop.launch_desktop(tmp_path / "ws") == 0
     assert desktop.launch_desktop(tmp_path / "ws") == 0
     assert calls == ["auto"] and opened == ["qt", "qt"]
+
+
+def test_desktop_status_names_the_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import litforge.desktop as desktop
+    from litforge.desktop.workspace import save_settings
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setattr(desktop.sys, "platform", "linux")
+    assert desktop.desktop_status() == {"engine": None, "label": "not set up yet", "ready": False}
+    save_settings(tmp_path / "litforge", {"engine": "qt", "preload": ["/x/libxcb-cursor.so.0"]})
+    assert desktop.desktop_status() == {"engine": "qt", "label": "Qt WebEngine", "ready": True}

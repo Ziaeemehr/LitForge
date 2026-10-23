@@ -37,6 +37,19 @@ def engine_ready() -> bool:
     return importlib.util.find_spec("webview") is not None
 
 
+ENGINE_LABELS = {"gtk": "the system's WebKitGTK", "qt": "Qt WebEngine", "edgechromium": "Microsoft Edge WebView2",
+                 "cocoa": "the system's WebKit"}
+
+
+def desktop_status() -> dict[str, object]:
+    """For Settings: the engine LitForge's window uses on this computer."""
+    engine = load_settings(user_config_dir(sys.platform, os.environ, Path.home())).get("engine")
+    if not engine and not sys.platform.startswith("linux"):
+        engine = DEFAULT_ENGINE.get(sys.platform)
+    label = ENGINE_LABELS.get(str(engine), str(engine)) if engine else "not set up yet"
+    return {"engine": engine, "label": label, "ready": engine_ready()}
+
+
 def find_uv() -> str:
     for candidate in (shutil.which("uv"), Path.home() / ".local" / "bin" / "uv", Path.home() / ".cargo" / "bin" / "uv"):
         if candidate and Path(candidate).is_file():

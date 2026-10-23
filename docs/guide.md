@@ -17,7 +17,14 @@ uv run litforge export
   Papers and PDFs stay in the shared library; `--delete-exports` also removes that project's exported files.
 - `ui` starts the local web interface and opens your browser. Use `--port 8765` (`0` chooses a free port),
   `--host 127.0.0.1` to select the interface, or `--no-browser` to start without opening a window.
-- `shortcut` adds an application icon that launches the web interface; it takes no command options.
+- `desktop` opens LitForge in its own window (no browser); `--workspace FOLDER` chooses the library folder
+  (remembered), `--gui` overrides the engine. One window per library: starting it again brings the window
+  forward. Closing the window saves the open file and asks before cancelling running tasks.
+- `desktop-setup` chooses and prepares the window engine (the installer runs it; no sudo): WebView2 on
+  Windows, WebKit on macOS, the system's WebKitGTK on Linux, or Qt WebEngine (`--engine qt`) where WebKitGTK
+  is missing. The choice is stored in `desktop.json` in the user config folder (`~/.config/litforge` on Linux).
+- `shortcut` adds an application icon: LitForge's window once `desktop-setup` has run, else the web interface
+  (`--mode browser` or `--mode desktop` chooses).
 - `add` imports, parses and indexes PDFs in one step. Run it again any time; nothing is processed twice.
 - `search` returns the paper, section, page and a quoted snippet for every hit.
 - `ask "your question" --evidence-only` retrieves evidence cards with stable IDs, section and page.

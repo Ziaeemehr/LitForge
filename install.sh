@@ -44,7 +44,12 @@ fi
 
 cd "$dir"
 say "Installing dependencies (the first time takes a few minutes)"
-uv sync --extra embed --extra documents --inexact  # --inexact: keep extras installed later, such as formulas
+uv sync --extra embed --extra documents --extra desktop --inexact  # --inexact: keep extras installed later
+say "Preparing LitForge's own window (no browser needed)"
+if ! uv run litforge desktop-setup; then
+  printf 'warning: LitForge will open in your browser for now; retry with: cd "%s" && uv run litforge desktop-setup && uv run litforge shortcut\n' \
+    "$dir" >&2
+fi
 say "Adding the LitForge icon"
 uv run litforge shortcut
 

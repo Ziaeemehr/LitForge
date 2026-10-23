@@ -195,3 +195,27 @@ def test_open_pdf_needs_a_paper_or_a_document(paths: Paths, monkeypatch: pytest.
         assert err.value.code in (400, 404)
     finally:
         handle.stop()
+
+
+def test_settings_show_the_window_engine_and_can_check_again(paths: Paths, monkeypatch: pytest.MonkeyPatch) -> None:
+    import litforge.desktop as desktop
+    from litforge.desktop.setup import DesktopSetup
+
+    monkeypatch.setattr(desktop, "desktop_status", lambda: {"engine": "gtk", "label": "the system's WebKitGTK",
+                                                            "ready": True})
+    monkeypatch.setattr(desktop, "configure_engine", lambda engine="auto": DesktopSetup("gtk", message="checked"))
+    handle = start_server(paths, load_config(), desktop=True)
+    try:
+        with urllib.request.urlopen(handle.url + "api/tools", timeout=10) as resp:
+            assert json.loads(resp.read())["desktop"] == {"engine": "gtk", "label": "the system's WebKitGTK",
+                                                          "ready": True}
+        req = urllib.request.Request(handle.url + "api/tools/desktop/check", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            job = json.loads(resp.read())
+        deadline = time.monotonic() + 5
+        while handle.app.jobs[job["id"]].status == "running" and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert handle.app.jobs[job["id"]].report["engine"] == "gtk"
+    finally:
+        handle.stop()

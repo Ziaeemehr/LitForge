@@ -4567,6 +4567,11 @@
       $('engine-page').value = engines.page || 'auto';
       $('engine-parse').onchange = $('engine-page').onchange = saveEngines;
 
+      var win = tools.desktop || {};
+      $('tool-desktop-status').textContent = win.engine ? (win.ready ? 'Uses ' : 'Not ready · ') + win.label :
+        'The window is ' + (win.label || 'not set up yet') + ': Check again prepares it (no download on most Linux desktops)';
+      $('tool-desktop-action').onclick = checkDesktopEngine;
+
       var tec = (tools.tectonic || {}).tectonic || {};
       $('tool-tectonic-status').textContent = tec.installed ? 'Installed · ' + (tec.version || '') :
         tec.offerable ? 'Not installed · ' + tec.size : 'No Tectonic build for this platform; install TeX Live or MacTeX';
@@ -4635,6 +4640,16 @@
     return api('/api/math-setup').then(function (status) {
       showMathSetup(status, true);
     }).catch(function (e) { $('tool-vision-progress').textContent = e.message; });
+  }
+  function checkDesktopEngine() {
+    $('tool-desktop-status').textContent = 'Checking…';
+    return post('/api/tools/desktop/check', {}).then(function (job) { return waitJob(job.id); })
+      .then(function (j) {
+        if (j.status !== 'done') throw new Error((j.messages || []).slice(-1)[0] || 'the check failed');
+        toast('Window engine checked; it is used the next time LitForge opens.');
+      })
+      .catch(function (e) { toast(e.message); })
+      .then(loadOptionalTools);
   }
   /* ---------- End Optional tools ---------- */
 
