@@ -105,7 +105,7 @@ def test_similar_job_results_detail_and_marks(server: str) -> None:
     assert call(server, "/api/marks", {"project": "web", "paper_id": apt["id"], "mark": "bogus"})[0] == 400
 
     _, projects = call(server, "/api/projects")
-    assert projects[0]["name"] == "web" and projects[0]["export_dir"].endswith("exports/web")
+    assert projects[0]["name"] == "web" and Path(projects[0]["export_dir"]).parts[-2:] == ("exports", "web")
     _, runs = call(server, "/api/runs?project=web")
     # The seed DOI is shown by its paper's title once the library knows it.
     assert runs[0]["kind"] == "similar" and runs[0]["label"] == "The frontier of simulation-based inference"
@@ -192,7 +192,7 @@ def test_add_my_pdfs_from_folder_and_uploads(server: str, corpus: Path, tmp_path
     assert set(by_file) == {"a.pdf", "broken.pdf", "two_column.pdf"}
     assert by_file["a.pdf"]["outcome"] == "new_paper" and by_file["a.pdf"]["title"] and by_file["a.pdf"]["full_text"]
     assert by_file["broken.pdf"]["outcome"] == "failed" and by_file["broken.pdf"]["reason"]
-    assert report["library"].endswith("library/pdfs") and report["export_dir"] == str(chosen.resolve())
+    assert Path(report["library"]).parts[-2:] == ("library", "pdfs") and report["export_dir"] == str(chosen.resolve())
     _, data = call(server, f"/api/runs/{job['run_id']}")
     assert data["run"]["kind"] == "pdfs" and data["run"]["label"] == "mine" and len(data["papers"]) == 2
     assert {r for p in data["papers"] for r in p["reasons"]} == {"your PDF: a.pdf", "your PDF: two_column.pdf"}
@@ -283,7 +283,7 @@ def test_delete_project_keeps_library_and_exports(server: str, tmp_path: Path) -
     run_id = wait_job(server, job["id"])["run_id"]
     _, exp = call(server, "/api/export", {"project": "gone"})
     status, res = call(server, "/api/delete-project", {"project": "gone"})
-    assert status == 200 and res["papers"] > 0 and res["kept_exports"].endswith("exports/gone")
+    assert status == 200 and res["papers"] > 0 and Path(res["kept_exports"]).parts[-2:] == ("exports", "gone")
     assert (Path(exp["path"]) / "README.md").is_file()  # the user's exports survive
     _, projects = call(server, "/api/projects")
     assert "gone" not in [p["name"] for p in projects]
@@ -323,12 +323,12 @@ def test_import_elicit_then_expand(server: str, tmp_path: Path) -> None:
     assert next(p for p in projects if p["name"] == "kids")["export_dir"] == str(out)
     assert call(server, "/api/export-dir", {"project": "kids", "export_dir": ""})[0] == 200
     _, projects = call(server, "/api/projects")
-    assert next(p for p in projects if p["name"] == "kids")["export_dir"].endswith("exports/kids")
+    assert Path(next(p for p in projects if p["name"] == "kids")["export_dir"]).parts[-2:] == ("exports", "kids")
 
 
 def test_upload_and_safety_checks(server: str) -> None:
     status, res = call(server, "/api/upload?name=../../evil.pdf", raw=b"%PDF-1.4 tiny")
-    assert status == 200 and "/uploads/" in res["path"] and ".." not in Path(res["path"]).name
+    assert status == 200 and Path(res["path"]).parent.name == "uploads" and ".." not in Path(res["path"]).name
     assert call(server, "/api/upload?name=a.pdf", raw=b"not a pdf")[0] == 400
     status, _ = call(server, "/api/similar", {"project": "x", "seeds": ["10.1/x"]},
                      headers={"Origin": "http://evil.example", "Content-Type": "application/json"})
@@ -410,7 +410,7 @@ def test_contact_email_setting_and_fetch_job(server: str, tmp_path: Path) -> Non
     assert report["downloaded"] == 0 and len(report["items"]) == len(missing)
     assert {i["outcome"] for i in report["items"]} <= {"failed", "no_source"}
     assert all(i["reason"] for i in report["items"])
-    assert report["library"].endswith("library/pdfs") and report["export_dir"].endswith("dl")
+    assert Path(report["library"]).parts[-2:] == ("library", "pdfs") and report["export_dir"].endswith("dl")
 
     assert call(server, "/api/settings", {"mailto": ""})[1]["mailto"] is None  # cleared
 

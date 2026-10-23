@@ -38,11 +38,13 @@ class Runner:
 def _setup(tmp_path: Path, runner: Runner, *, platform: str = "linux", env: dict[str, str] | None = None,
            tools: tuple[str, ...] = ("apt-get", "dpkg-deb"), lib_present: bool = False,
            engine: str = "auto") -> setup.DesktopSetup:
+    system_python = tmp_path / "system-python"
+    system_python.touch()  # detect_gtk checks existence; Runner supplies the probe response on every OS
     return setup.setup_desktop(tmp_path / "install", tmp_path / "config", platform=platform,
                                env=env if env is not None else {"DISPLAY": ":0"}, run=runner,
                                which=lambda name: f"/usr/bin/{name}" if name in tools else None,
                                find_library=lambda name: "libxcb-cursor.so.0" if lib_present else None,
-                               uv="/usr/bin/uv", system_python="/usr/bin/python3", engine=engine)
+                               uv="/usr/bin/uv", system_python=str(system_python), engine=engine)
 
 
 def test_linux_with_webkitgtk_gets_a_small_host_environment(tmp_path: Path) -> None:
@@ -50,8 +52,8 @@ def test_linux_with_webkitgtk_gets_a_small_host_environment(tmp_path: Path) -> N
     result = _setup(tmp_path, runner)
     host_env = tmp_path / "install" / "desktop-host"
     assert result.engine == "gtk"
-    assert runner.commands[1] == ["/usr/bin/uv", "venv", "--allow-existing", "--python", "/usr/bin/python3",
-                                  "--system-site-packages", str(host_env)]
+    assert runner.commands[1] == ["/usr/bin/uv", "venv", "--allow-existing", "--python",
+                                  str(tmp_path / "system-python"), "--system-site-packages", str(host_env)]
     assert runner.commands[2][:4] == ["/usr/bin/uv", "pip", "install", "--python"]
     assert runner.commands[2][-1] == f"pywebview=={setup.PYWEBVIEW}"
     saved = load_settings(tmp_path / "config")
@@ -124,6 +126,7 @@ def test_the_first_launch_on_linux_sets_the_engine_up_once(tmp_path: Path, monke
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setattr(desktop.sys, "platform", "linux")
     monkeypatch.setattr(desktop.instance, "activate_existing", lambda ws: "none")
+    monkeypatch.setattr(desktop, "find_uv", lambda: "/test/uv")
     calls: list[str] = []
 
     def fake_setup(*a: Any, **kw: Any) -> setup.DesktopSetup:

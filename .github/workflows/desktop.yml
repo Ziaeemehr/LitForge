@@ -27,10 +27,14 @@ jobs:
         with:
           node-version: '22'
       - run: uv sync --frozen --group dev
+        id: install
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync mypy
-      - run: node --test tests/ui/
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+      - run: node --test tests/ui/*.test.cjs
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
       - run: uv run --no-sync pytest --junitxml=desktop-results/pytest-full.xml -ra
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -87,7 +91,7 @@ jobs:
           --junitxml=desktop-results/pytest-desktop.xml -ra
       - name: UI regression tests
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: node --test tests/ui/
+        run: node --test tests/ui/*.test.cjs
       - name: Real GTK window on virtual X11 display
         if: ${{ !cancelled() && runner.os == 'Linux' && steps.install.outcome == 'success' }}
         run: >-

@@ -1,6 +1,6 @@
 # Desktop window: compatibility investigation (desktop plan, Task 1)
 
-> Date: 2026-10-23. Status: **Linux X11 and macOS 27.0.1 Apple Silicon probes run; Windows, Intel Macs and the proposed minimum macOS version still need real-machine runs** (steps below).
+> Date: 2026-10-23. Status: **Linux X11 and macOS 27 Apple Silicon probes run; native CI also exercised GTK, WebView2 and both macOS 15 architectures. CI findings and three-round results are tracked in the [validation checklist](../../desktop-release-checklist.md). Windows 11, the proposed minimum macOS version and manual interaction still need real-machine runs.**
 > Probe: [2026-10-23-desktop-probe.py](2026-10-23-desktop-probe.py), a disposable script, not product code.
 
 ## What the probe does

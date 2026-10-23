@@ -20,7 +20,7 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 from litforge.config import Paths
 from litforge.parsing.pymupdf_parser import join_lines
@@ -267,11 +267,11 @@ def _load(folder: Path, device: str) -> dict[str, Any]:
     from transformers.utils import logging as hf_logging
 
     verbosity = hf_logging.get_verbosity()
-    hf_logging.set_verbosity_error()  # type: ignore[no-untyped-call]  # its notes about slow processors and remote code are not for the user
+    cast(Any, hf_logging.set_verbosity_error)()  # suppress the model's notes about processors and remote code
     try:
         model = AutoModel.from_pretrained(folder, trust_remote_code=True, dtype=dtype,
                                           local_files_only=True).to(device).eval()
-        processor = AutoProcessor.from_pretrained(  # type: ignore[no-untyped-call]
+        processor = cast(Any, AutoProcessor).from_pretrained(
             folder, trust_remote_code=True, local_files_only=True)
     finally:
         hf_logging.set_verbosity(verbosity)

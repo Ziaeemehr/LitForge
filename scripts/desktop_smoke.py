@@ -216,7 +216,8 @@ def run_worker(args: argparse.Namespace) -> int:
         if report.get("url"):
             url = urlsplit(report["url"])
             try:
-                with socket.create_connection((url.hostname, url.port), timeout=2):
+                # Windows may retry SYNs before reporting a refused connection to a closed local port.
+                with socket.create_connection((url.hostname, url.port), timeout=10):
                     report["backend_stopped"] = False
             except ConnectionRefusedError:
                 pass

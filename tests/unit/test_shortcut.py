@@ -1,5 +1,6 @@
 import os
 import plistlib
+import shlex
 import sys
 from pathlib import Path
 
@@ -19,12 +20,17 @@ def _executable(path: Path) -> bool:
     return os.name == "nt" or bool(path.stat().st_mode & 0o100)
 
 
+def _exec_args(text: str) -> list[str]:
+    # For these paths, desktop-entry double-quote/backslash escaping is also parsed by shlex.
+    return shlex.split(next(line[5:] for line in text.splitlines() if line.startswith("Exec=")))
+
+
 def test_linux_menu_entry(where: tuple[Path, Path, Path]) -> None:
     home, workdir, exe = where
     [entry] = create_shortcut("linux", home, workdir, exe)
     assert entry == home / ".local/share/applications/litforge.desktop"
     text = entry.read_text()
-    assert f'Exec="{exe}" ui' in text
+    assert _exec_args(text) == [str(exe), "ui"]
     assert f"Path={workdir}" in text
     assert "Terminal=false" in text
     assert "Icon=" not in text
@@ -36,7 +42,7 @@ def test_linux_desktop_copy_and_icon(where: tuple[Path, Path, Path]) -> None:
     (home / "Desktop").mkdir()
     written = create_shortcut("linux", home, workdir, exe, icon=Path("/x/icon.svg"))
     assert written[1] == home / "Desktop/litforge.desktop"
-    assert "Icon=/x/icon.svg" in written[1].read_text()
+    assert f"Icon={Path('/x/icon.svg')}" in written[1].read_text()
 
 
 def test_mac_app_bundle(where: tuple[Path, Path, Path]) -> None:
@@ -108,10 +114,10 @@ def test_linux_desktop_mode_opens_the_window_for_this_library(where: tuple[Path,
     gui = exe.with_name("litforge-app")
     [entry] = create_shortcut("linux", home, workdir, exe, gui_exe=gui, mode="desktop")
     text = entry.read_text()
-    assert f'Exec="{gui}" --workspace "{workdir}"' in text
+    assert _exec_args(text) == [str(gui), "--workspace", str(workdir)]
     assert "StartupWMClass=" in text  # the dock groups the window under this icon
     [entry] = create_shortcut("linux", home, workdir, exe, mode="desktop")  # no windowless launcher
-    assert f'Exec="{exe}" desktop --workspace "{workdir}"' in entry.read_text()
+    assert _exec_args(entry.read_text()) == [str(exe), "desktop", "--workspace", str(workdir)]
 
 
 def test_mac_desktop_mode(where: tuple[Path, Path, Path]) -> None:
@@ -199,4 +205,4 @@ def test_shortcut_command_finds_the_windowless_launcher_next_to_litforge(tmp_pat
     monkeypatch.chdir(tmp_path)
     assert CliRunner().invoke(cli.app, ["shortcut"]).exit_code == 0
     text = (tmp_path / ".local/share/applications/litforge.desktop").read_text()
-    assert f'Exec="{bin_dir / "litforge-app"}" --workspace' in text
+    assert _exec_args(text) == [str(bin_dir / "litforge-app"), "--workspace", str(tmp_path)]

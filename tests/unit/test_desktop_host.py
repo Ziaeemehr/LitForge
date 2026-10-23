@@ -314,7 +314,9 @@ def test_desktop_server_prints_its_url_and_stops_when_stdin_closes(tmp_path: Pat
         ready = json.loads(proc.stdout.readline())
         with urllib.request.urlopen(ready["url"] + "api/info", timeout=10) as resp:
             assert resp.status == 200
-        assert ready["pid"] == proc.pid
+        assert isinstance(ready["pid"], int) and ready["pid"] > 0
+        if sys.platform != "win32":  # Windows venv python.exe is a redirector with a separate child PID
+            assert ready["pid"] == proc.pid
         proc.stdin.close()
         assert proc.wait(timeout=20) == 0
     finally:

@@ -29,9 +29,34 @@ separate acceptance checks. No installer or release artifact is produced by this
 
 | Round | Commit / run | Findings and changes | Result |
 | --- | --- | --- | --- |
-| 1 | Pending | Establish native CI baseline after local smoke verification. | Not run |
+| 1 | `8b6b9da`; [run 40015300222](https://github.com/Ziaeemehr/LitForge/actions/runs/40015300222) | GTK and both Cocoa smoke checks passed. WebView2 passed page/PDF/worker/activation/close, but its closed-port check timed out at 2 s. Node 22 did not accept a test directory. Windows exposed POSIX-specific test assumptions; base-only mypy exposed two stale ignores. | Workflow failed; fixes prepared for round 2. |
 | 2 | Pending | Diagnose round 1 findings, fix causes and rerun all targets. | Not run |
 | 3 | Pending | Diagnose remaining findings and verify all targets again. | Not run |
+
+### Round 1 diagnosis and fixes
+
+- The Node command now enumerates `tests/ui/*.test.cjs`; the initial directory command worked with
+  the newer local Node but failed to discover tests on CI's Node 22.
+- GTK detection tests now create their fake system interpreter rather than depending on
+  `/usr/bin/python3` existing on the machine running the test. The simulated Linux launch stubs
+  uv lookup. Shortcut assertions parse the generated command and API tests compare path components,
+  preserving verification on Windows without imposing POSIX separators.
+- The desktop-server PID test accounts for Windows venv's Python redirector process. It retains
+  direct PID equality on POSIX and still verifies an actual endpoint and successful child exit.
+- The WebView2 backend had exited with code 0 and released its lease; only the subsequent connection
+  probe timed out. Allow 10 s for Windows to return connection refusal, retaining failure on a live
+  listener or a timeout. Round 2 must establish whether this resolves the observation.
+- Nemotron's optional Transformers calls now use explicit dynamic casts instead of ignores that
+  become unused when Transformers is absent. The CI errors were reproduced with
+  `uv run --isolated --frozen mypy`; mypy then passed both with the local extras and without them.
+- Quality steps now continue collecting independent test results after another check fails,
+  so a type-check failure cannot hide regression-test findings.
+
+Round 1 native evidence: Ubuntu 24.04 GTK had 136 passing desktop tests and one skip; both
+macOS 15.7.9 architectures had 137 passing desktop tests. Windows Server 2022 had 119 passes,
+15 failures and three skips. All three non-Windows smoke reports had no failed checks. The Windows
+report's only failed check was backend shutdown's connection probe. These are hosted-runner results,
+not claims of end-user OS installation coverage or representative startup performance.
 
 ## Acceptance still required
 
