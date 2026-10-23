@@ -216,15 +216,21 @@ def run_worker(args: argparse.Namespace) -> int:
                     else:
                         raise TimeoutError("Browser checks did not finish")
                     expected_links = ["https://doi.org/10.1234/litforge-smoke", "https://openalex.org/W123456789"]
+                    report["external_link_clicks"] = []
                     for url in expected_links:
                         window.evaluate_js("""(() => {
                           const a = document.createElement('a'); a.href = %URL%;
+                          a.id = 'desktop-smoke-paper-link';
                           a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Paper link smoke';
-                          document.body.appendChild(a); a.click(); a.remove();
+                          document.body.appendChild(a); a.click();
                         })()""".replace("%URL%", json.dumps(url)))
-                    deadline = time.monotonic() + 5
-                    while len(opened_links) < len(expected_links) and time.monotonic() < deadline:
-                        time.sleep(.05)
+                        # Observe each native navigation before issuing the next synthetic click.
+                        # Older WebKit may coalesce back-to-back popup requests in the same UI turn.
+                        deadline = time.monotonic() + 5
+                        while url not in opened_links and time.monotonic() < deadline:
+                            time.sleep(.05)
+                        report["external_link_clicks"].append({"url": url, "handed_off": url in opened_links})
+                        window.evaluate_js("document.getElementById('desktop-smoke-paper-link').remove()")
                     report["external_link_handoffs"] = opened_links
                     report["checks"]["external_links"] = (
                         sorted(opened_links) == sorted(expected_links)

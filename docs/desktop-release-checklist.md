@@ -145,6 +145,16 @@ arXiv, open-access and mailto anchors, and retained PDF/download/blocked-link be
 
 | Round | Evidence | Result |
 | --- | --- | --- |
-| 1 | Local Cocoa RED→GREEN and 258 UI / 41 focused Python tests passed; CI pending. | In progress |
+| 1 | `af3ef02`; [run 40019244324](https://github.com/Ziaeemehr/LitForge/actions/runs/40019244324). Local Cocoa RED→GREEN; Windows and full Linux suite passed. macOS 15 recorded only the second back-to-back synthetic popup; GTK provisioning was cancelled after slow Azure archive downloads and did not execute its native check. | Failed/incomplete; fixes prepared for round 2. |
 | 2 | Pending native CI stability run. | Not run |
 | 3 | Pending native CI stability run. | Not run |
+
+Round 1 follow-up: keep each smoke-test anchor in the page and wait for its native browser handoff
+before clicking/removing it and starting the next one. Both Mac architectures consistently recorded
+only the final URL when both synthetic clicks were issued immediately; the sequential test will
+distinguish a native navigation failure from competing synthetic requests. Both links must still be
+handed off exactly once and the app URL must remain unchanged. Individual click results are recorded.
+GTK's apt log showed 46.3 MB of packages arriving slowly from `azure.archive.ubuntu.com` (small packages
+took seconds each; a 2.2 MB package was still downloading when cancelled). Select Ubuntu's official
+HTTPS archive in the disposable CI VM, omit recommended packages, bound network retries/timeouts and
+cap the provisioning step at eight minutes. This changes CI provisioning only, not the installer.
