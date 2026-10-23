@@ -292,8 +292,7 @@ def chat(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str, A
         conn = app.db()
         try:
             gateway = app.make_gateway(conn)
-            again = wchat.prepare(conn, doc, *args, pad_before=pad_before, pad_after=pad_after, gateway=gateway,
-                                  approved=approved)
+            again = wchat.prepare(conn, doc, *args, pad_before=pad_before, pad_after=pad_after, gateway=gateway)
             job.report = wchat.run(conn, gateway, doc, again, file, approved=approved)
         finally:
             conn.close()
@@ -331,8 +330,8 @@ def assist(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str,
         conn = app.db()
         try:
             gateway = app.make_gateway(conn)
-            job.report = wassist.run(conn, gateway, doc, wassist.prepare(conn, doc, *args, **extra, gateway=gateway,
-                                                                          approved=approved), file,
+            job.report = wassist.run(conn, gateway, doc, wassist.prepare(conn, doc, *args, **extra, gateway=gateway),
+                                     file,
                                      approved=approved)
         finally:
             conn.close()

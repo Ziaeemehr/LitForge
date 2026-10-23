@@ -30,7 +30,7 @@ from litforge.analysis.evaluation import (
 from litforge.analysis.gateway import CallPreview, ModelGateway
 from litforge.analysis.matrix import create_matrix, extract_matrix, list_matrices
 from litforge.analysis.matrix import plan_calls as matrix_plan
-from litforge.analysis.query_translate import needs_translation, plan_translation, search_query
+from litforge.analysis.query_translate import needs_translation, search_query
 from litforge.analysis.retrieve import retrieve_for_question
 from litforge.indexing.fts import SearchHit
 from litforge.screening import fulltext
@@ -79,7 +79,6 @@ def plan_all(conn: sqlite3.Connection, gateway: ModelGateway, bench: RetrievalBe
     """Model calls of every stage that can be planned up front; claim relations depend on the claims extracted."""
     plan = [p for q in bench.questions for p in answers.plan_calls(conn, gateway, q.question, project_id,
                                                                      profile=profile)]
-    plan += [p for q in bench.questions for p in plan_translation(gateway, q.question)]
     if bench.matrix_columns:
         plan += matrix_plan(conn, gateway, _ensure_matrix(conn, bench, project_id), None, profile, force)
     if bench.criteria and bench.screening:
@@ -136,7 +135,7 @@ def run_all(conn: sqlite3.Connection, gateway: ModelGateway, bench: RetrievalBen
 
     def translated(conn: sqlite3.Connection, question: str, project_id: str | None = None,
                    k: int = 8) -> list[SearchHit]:
-        return retrieve_for_question(conn, search_query(conn, gateway, question, approved=approved), project_id, k)
+        return retrieve_for_question(conn, search_query(conn, gateway, question), project_id, k)
 
     if any(needs_translation(q.question) for q in bench.questions):
         report.translated = stage("retrieval with translation",

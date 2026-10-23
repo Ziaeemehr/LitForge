@@ -119,7 +119,8 @@ def search_evidence(conn: sqlite3.Connection, project_id: str, query: str, limit
                     gateway: ModelGateway | None = None) -> list[dict[str, Any]]:
     if not query.strip():
         return []
-    hits = retrieve_for_question(conn, search_query(conn, gateway, query), project_id, k=limit, max_per_paper=2)
+    hits = retrieve_for_question(conn, search_query(conn, gateway, query, sensitive=True), project_id, k=limit,
+                                 max_per_paper=2)
     spans = record_spans(conn, hits) if hits else []
     return [{"evidence_id": s.id, "paper_id": s.paper_id, "title": s.title, "page": s.page, "section": s.section,
              "quote": hit.snippet, "version": s.version_label or _version(conn, s.paper_id)}

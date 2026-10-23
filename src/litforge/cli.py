@@ -673,7 +673,8 @@ def ask(
         run_id = start_run(conn, "ask_evidence", pid, {"question": question},
                            {**st.config.model_dump(), "k": k}, "ask_evidence_v1")
         try:
-            hits = retrieve_for_question(conn, search_query(conn, ModelGateway(conn, st.config), question), pid, k,
+            hits = retrieve_for_question(conn, search_query(conn, ModelGateway(conn, st.config), question,
+                                                            sensitive=sensitive, run_id=run_id), pid, k,
                                          all_versions=all_versions)
             spans = record_spans(conn, hits)
             link_evidence(conn, run_id, spans, [h.score for h in hits], pages=[h.page for h in hits])

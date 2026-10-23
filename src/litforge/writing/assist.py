@@ -87,7 +87,7 @@ class Request:
 def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, error: str = "",
             first_line: int = 1, error_line: int = 0, *, context: str = "", image: bytes | None = None,
             pad_before: bool = False, pad_after: bool = False, new_env: bool = False,
-            gateway: ModelGateway | None = None, approved: bool = False) -> Request:
+            gateway: ModelGateway | None = None) -> Request:
     """Build what would be sent; only the selection (and, for citations, the retrieved evidence; for a title or
     an abstract, the document; for an image action, the image) is included."""
     if action not in ACTIONS:
@@ -127,7 +127,7 @@ def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, err
         req.packet = EvidencePacket(items=[selection, EvidenceItem(id="document", paper_id="manuscript", text=body,
                                                                    page=1)], sensitive=True)
     elif action == "cite":
-        query = search_query(conn, gateway, _plain(sent), approved=approved, sensitive=True)
+        query = search_query(conn, gateway, _plain(sent), sensitive=True)
         hits = retrieve_for_question(conn, query, doc.project_id, k=8, max_per_paper=2)
         if not hits:
             hint = ("; evidence is found by the papers' own words, so Persian text rarely matches English papers"
@@ -519,6 +519,11 @@ def diff_hunks(old: str, new: str) -> list[dict[str, Any]]:
         tail = old_text[len(old_text.rstrip()):]
         if old_text.strip() and new_text.strip() and not new_text[len(new_text.rstrip()):]:
             new_text += tail
+        # An added sentence after one that ended the old text needs the space the old text did not have.
+        if i1 == i2 and j1 and i1:
+            gap = b[j1 - 1][len(b[j1 - 1].rstrip()):]
+            if gap and not a[i1 - 1][len(a[i1 - 1].rstrip()):]:
+                new_text = gap + new_text
         if key(old_text) != key(new_text):
             hunks.append({"index": len(hunks), "start": offsets[i1], "end": offsets[i2], "old": old_text,
                           "new": new_text, "flags": [], "words": word_diff(old_text, new_text)})

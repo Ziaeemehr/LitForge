@@ -303,6 +303,8 @@ def test_lines_end_pieces_and_whitespace_alone_is_no_change() -> None:
     assert wa.sentences(old) == ["\\item One. ", "Two\n", "\\item Three.\n\n", "Next paragraph."]
     assert wa.diff_hunks(old, "\\item One.  Two\n\\item   Three.\n\nNext paragraph.") == []
     assert wa.sentences("") == [] and [h["new"] for h in wa.diff_hunks("", "\nx\n")] == ["\nx\n"]
+    appended = wa.diff_hunks("First sentence.", "First sentence. Added sentence.")
+    assert wa.applied_text("First sentence.", appended, [0]) == "First sentence. Added sentence."
     added = wa.diff_hunks("One. Two.", "One. New one. Two.")
     assert [(h["old"], h["new"]) for h in added] == [("", "New one. ")]
     assert wa.applied_text("One. Two.", added, [0]) == "One. New one. Two."

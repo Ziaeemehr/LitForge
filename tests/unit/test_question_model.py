@@ -71,7 +71,12 @@ def test_installed_models_skip_embeddings_images_and_what_does_not_fit(conn: sql
     monkeypatch.setattr(OllamaClient, "_call", lambda self, path, body=None: tags)
     monkeypatch.setattr(hardware, "detect_hardware",
                         lambda root: Hardware(os="linux", arch="x86_64", ram_gb=32, gpu_vram_gb=12))
+    from litforge.analysis import gateway as gateway_module
+    monkeypatch.setattr(gateway_module, "_INSTALLED", {})
     gw = ModelGateway(conn, Config(), local_models=lambda: [])
     assert [name for name, _ in REAL_INSTALLED(gw)] == ["qwen3:8b"]
+    # Each web request makes a gateway: the answer is reused instead of asking Ollama again.
     monkeypatch.setattr(OllamaClient, "_call", lambda self, path, body=None: (_ for _ in ()).throw(OSError("down")))
+    assert [name for name, _ in REAL_INSTALLED(ModelGateway(conn, Config()))] == ["qwen3:8b"]
+    monkeypatch.setattr(gateway_module, "_INSTALLED", {})
     assert REAL_INSTALLED(gw) == []

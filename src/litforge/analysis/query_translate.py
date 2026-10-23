@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import sqlite3
 
-from litforge.analysis.gateway import CallPreview, GatewayError, ModelGateway
+from litforge.analysis.gateway import GatewayError, ModelGateway
 from litforge.analysis.runs import input_hash
 from litforge.llm.base import LlmError
 from litforge.llm.evidence import EvidenceItem, EvidencePacket
@@ -36,15 +36,12 @@ def _packet(text: str, sensitive: bool) -> EvidencePacket:
     return EvidencePacket(items=[EvidenceItem(id="query", paper_id="query", text=text, page=1)], sensitive=sensitive)
 
 
-def plan_translation(gateway: ModelGateway, text: str, sensitive: bool = False) -> list[CallPreview]:
-    return [gateway.preview(TASK, _packet(text, sensitive), _messages(text), schema=_SCHEMA)] \
-        if needs_translation(text) else []
-
-
-def search_query(conn: sqlite3.Connection, gateway: ModelGateway | None, text: str, *, approved: bool = False,
-                 sensitive: bool = False) -> str:
+def search_query(conn: sqlite3.Connection, gateway: ModelGateway | None, text: str, *, sensitive: bool = False,
+                 run_id: str | None = None) -> str:
     """The text with English search terms appended when it contains Persian; the text alone when there is no
-    model, the model fails or a cloud route needs approval (search then runs on the words as written)."""
+    model, the model fails or the route would need approval (search then runs on the words as written).
+    Translation never asks: the approval a user gives is for the call they were shown, so a route that needs
+    approval (a cloud model under ask-before-cloud, or sensitive text such as a draft) is not used for it."""
     if gateway is None or not needs_translation(text):
         return text
     try:
@@ -56,9 +53,12 @@ def search_query(conn: sqlite3.Connection, gateway: ModelGateway | None, text: s
                        (key, cfg.model)).fetchone()
     if row:
         return f"{text}\n{row[0]}"
+    packet = _packet(text, sensitive)
+    preview = gateway.preview(TASK, packet, _messages(text), schema=_SCHEMA)
+    if preview.blocked_reason or preview.requires_approval:
+        return text
     try:
-        reply = gateway.call(TASK, _packet(text, sensitive), _messages(text), _SCHEMA, approved=approved,
-                             prompt_version=PROMPT_VERSION)
+        reply = gateway.call(TASK, packet, _messages(text), _SCHEMA, run_id=run_id, prompt_version=PROMPT_VERSION)
     except (LlmError, GatewayError, ValueError):
         return text
     content = reply.content if isinstance(reply.content, dict) else {}

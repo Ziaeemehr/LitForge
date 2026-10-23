@@ -34,6 +34,8 @@ LOCAL_VISION = "local_vision"  # default route for image calls: the configured l
 STRONGEST_LOCAL = "strongest_local"  # the largest installed Ollama text model that fits, for questions
 # Questions in the user's own words get the strongest model available unless the user assigned the task.
 QUESTION_TASKS = frozenset({"ask", "write_chat"})
+_INSTALLED: dict[tuple[str, str], tuple[float, list[tuple[str, int]]]] = {}  # (url, data root) -> (time, models)
+INSTALLED_TTL_S = 300  # each web request makes its own gateway; ask Ollama and the hardware at most this often
 
 
 class GatewayError(RuntimeError):
@@ -97,17 +99,25 @@ class ModelGateway:
     def _profiles(self) -> dict[str, ModelProfileConfig]:
         vision = ModelProfileConfig(provider="ollama", model=self.config.vision.model or "disabled",
                                     vision=self.config.vision.model is not None, timeout_s=self.config.vision.timeout_s)
-        strongest = self._strongest_local()
+        strongest = self._strongest[0] if self._strongest else None  # looked up only when a question needs it
         return {LOCAL_VISION: vision, **({STRONGEST_LOCAL: strongest} if strongest else {}),
                 **self.config.models.profiles, "local": self.config.models.local}
 
     def _installed_models(self) -> list[tuple[str, int]]:
-        from litforge.llm.hardware import detect_hardware
-        from litforge.llm.local_models import fit_check
         local = self.config.models.local
         if local.provider != "ollama" or local.remote:
             return []
         url = os.environ.get("LITFORGE_OLLAMA_URL") or self.config.screening.ollama_url
+        key = (url, str(self.data_root))
+        if key in _INSTALLED and time.monotonic() - _INSTALLED[key][0] < INSTALLED_TTL_S:
+            return _INSTALLED[key][1]
+        _INSTALLED[key] = (time.monotonic(), self._ask_installed(url))
+        return _INSTALLED[key][1]
+
+    def _ask_installed(self, url: str) -> list[tuple[str, int]]:
+        from litforge.llm.hardware import detect_hardware
+        from litforge.llm.local_models import fit_check
+        local = self.config.models.local
         try:
             tags = OllamaClient(url, local.model, 3)._call("/api/tags").get("models", [])
         except Exception:  # noqa: BLE001 - no Ollama: the configured local model is used as before

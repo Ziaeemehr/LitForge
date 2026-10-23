@@ -12,8 +12,14 @@ from litforge.llm.router import CloudApprovalRequired
 
 
 class FakeGateway:
-    def __init__(self, content: Any = None, error: Exception | None = None, model: str = "qwen3:4b") -> None:
+    def __init__(self, content: Any = None, error: Exception | None = None, model: str = "qwen3:4b",
+                 requires_approval: bool = False) -> None:
         self.content, self.error, self.model, self.calls = content, error, model, []
+        self.requires_approval = requires_approval
+
+    def preview(self, task: str, evidence: Any, messages: list[dict[str, str]], **kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(blocked_reason=None, requires_approval=self.requires_approval or evidence.sensitive
+                               and self.model.startswith("cloud"))
 
     def resolve(self, task: str, profile: str | None = None, vision: bool = False) -> tuple[str, Any]:
         return "local", SimpleNamespace(model=self.model)
@@ -43,9 +49,10 @@ def test_translation_is_appended_cached_and_sent_as_the_query_only(conn: sqlite3
     gateway = FakeGateway(REPLY)
     expected = (QUESTION + "\nHow does SNL avoid the bias of the proposal distribution? SNL "
                 "sequential neural likelihood proposal bias")
-    assert search_query(conn, gateway, QUESTION, approved=True, sensitive=True) == expected  # type: ignore[arg-type]
+    assert search_query(conn, gateway, QUESTION, sensitive=True, run_id="r1") == expected  # type: ignore[arg-type]
     task, evidence, messages, kwargs = gateway.calls[0]
-    assert task == "query_translate" and evidence.sensitive and kwargs["approved"]
+    assert task == "query_translate" and evidence.sensitive and kwargs["run_id"] == "r1"
+    assert "approved" not in kwargs  # translation never rides on an approval given for another call
     assert [item.text for item in evidence.items] == [QUESTION] and messages[-1]["content"] == QUESTION
     assert search_query(conn, gateway, QUESTION) == expected and len(gateway.calls) == 1  # type: ignore[arg-type]
     # Another model gets its own translation.
@@ -59,10 +66,18 @@ def test_translation_is_appended_cached_and_sent_as_the_query_only(conn: sqlite3
     FakeGateway({"english": "", "terms": []}),
     FakeGateway({"english": "هنوز فارسی", "terms": []}),  # an untranslated reply would only repeat the question
     FakeGateway("not an object"),
+    FakeGateway(REPLY, requires_approval=True),  # ask-before-cloud route: not used, never asks
 ])
 def test_failures_fall_back_to_the_words_as_written(conn: sqlite3.Connection, gateway: FakeGateway) -> None:
     assert search_query(conn, gateway, QUESTION) == QUESTION  # type: ignore[arg-type]
     assert conn.execute("SELECT COUNT(*) FROM query_translations").fetchone()[0] == 0
+
+
+def test_sensitive_text_is_not_translated_on_a_route_that_needs_approval(conn: sqlite3.Connection) -> None:
+    gateway = FakeGateway(REPLY, model="cloud/model")
+    assert search_query(conn, gateway, QUESTION, sensitive=True) == QUESTION  # type: ignore[arg-type]
+    assert gateway.calls == []
+    assert search_query(conn, gateway, QUESTION) != QUESTION  # type: ignore[arg-type]
 
 
 def test_persian_question_asks_for_a_persian_answer_and_carries_the_translation(

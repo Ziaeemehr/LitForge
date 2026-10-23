@@ -52,7 +52,7 @@ class ChatRequest:
 
 def prepare(conn: sqlite3.Connection, doc: Document, question: str, selection: str = "", context: str = "",
             history: list[dict[str, str]] | None = None, pad_before: bool = False,
-            pad_after: bool = False, gateway: ModelGateway | None = None, approved: bool = False) -> ChatRequest:
+            pad_after: bool = False, gateway: ModelGateway | None = None) -> ChatRequest:
     """Build what would be sent: the question, the selection (or the lines around the cursor), the last few
     messages and the project's evidence for the question."""
     question = question.strip()
@@ -67,7 +67,7 @@ def prepare(conn: sqlite3.Connection, doc: Document, question: str, selection: s
              if isinstance(t, dict) and str(t.get("text") or "").strip()][-MAX_HISTORY:]
     while turns and turns[0][0] != "user":  # start with the author's turn
         turns.pop(0)
-    query = search_query(conn, gateway, assist._plain(question + " " + selection), approved=approved, sensitive=True)
+    query = search_query(conn, gateway, assist._plain(question + " " + selection), sensitive=True)
     hits = retrieve_for_question(conn, query, doc.project_id, k=8, max_per_paper=2)
     spans = record_spans(conn, hits) if hits else []
     papers = to_packet(spans, sensitive=True, max_chars_per_item=1500) if spans else None
