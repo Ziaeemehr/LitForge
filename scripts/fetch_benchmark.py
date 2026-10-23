@@ -41,18 +41,23 @@ def fetch(arxiv_id: str, dest: Path) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ids-file", type=Path, help="one arXiv id per line (optional '# note')")
+    parser.add_argument("--ids-file", type=Path,
+                        help="one arXiv id per line, optionally its expected sha256 and a '# note'")
     parser.add_argument("--out", type=Path, default=Path("data/benchmark"))
     parser.add_argument("--delay", type=float, default=3.0, help="seconds between requests (arXiv policy)")
     args = parser.parse_args()
 
     ids = DEFAULT_IDS
+    expected: dict[str, str] = {}
     if args.ids_file:
         ids = {}
         for line in args.ids_file.read_text().splitlines():
             if line.strip() and not line.startswith("#"):
-                aid, _, note = line.partition("#")
-                ids[aid.strip()] = note.strip()
+                fields, _, note = line.partition("#")
+                aid, *sha = fields.split()
+                ids[aid] = note.strip()
+                if sha:
+                    expected[aid] = sha[0].lower()
     pdf_dir = args.out / "pdfs"
     pdf_dir.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -77,6 +82,9 @@ def main() -> None:
         writer.writerows(rows)
     print(f"{sum(r['status'] != 'exists' and not r['status'].startswith('error') for r in rows)} new, "
           f"manifest: {args.out / 'manifest.csv'}")
+    wrong = [r["arxiv_id"] for r in rows if r["arxiv_id"] in expected and r["sha256"] != expected[r["arxiv_id"]]]
+    if wrong:
+        raise SystemExit("sha256 differs from the pinned file (labels may not match): " + ", ".join(wrong))
 
 
 if __name__ == "__main__":

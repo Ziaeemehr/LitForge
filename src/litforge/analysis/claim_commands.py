@@ -2,14 +2,26 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated, Literal
 
 import typer
 
 from litforge.analysis import claim_graph, claims
-from litforge.analysis.commands import Approve, Json, Preview, Profile, Project, Reason, _context, check_plan
-from litforge.analysis.evaluation import evaluate_screening, load_benchmark
+from litforge.analysis.commands import (
+    Approve,
+    Json,
+    Output,
+    Preview,
+    Profile,
+    Project,
+    Reason,
+    _context,
+    check_plan,
+)
+from litforge.analysis.eval_all import plan_all, render_report, run_all
+from litforge.analysis.evaluation import check_benchmark, evaluate_claims, evaluate_screening, load_benchmark
 from litforge.analysis.gateway import ModelGateway
 from litforge.screening.active import review_queue
 from litforge.screening.fulltext import plan_calls, screen_fulltext
@@ -136,7 +148,62 @@ def eval_screening(ctx: typer.Context, benchmark: Path, project: Project = None,
             raise typer.Exit(1)
 
 
+def eval_check(ctx: typer.Context, benchmark: Path, project: Project = None, as_json: Json = False) -> None:
+    """Confirm every labelled quote is on its page in the indexed text."""
+    with _context(ctx, project) as (_, conn, pid):
+        bench = load_benchmark(benchmark)
+        problems = check_benchmark(conn, bench, pid)
+    if as_json:
+        typer.echo(json.dumps([p.model_dump() for p in problems], ensure_ascii=False, indent=1))
+    else:
+        for p in problems:
+            typer.echo(f"{p.item}: {p.paper} p.{p.page} “{p.contains}”: {p.problem}")
+        typer.echo(f"{len(problems)} problems" if problems else "all labels found")
+    if problems:
+        raise typer.Exit(1)
+
+
+def eval_claims(ctx: typer.Context, benchmark: Path, project: Project = None, as_json: Json = False) -> None:
+    """Measure claim recall and relation accuracy against labelled claims."""
+    with _context(ctx, project) as (_, conn, pid):
+        report = evaluate_claims(conn, load_benchmark(benchmark), _required(pid))
+    typer.echo(report.model_dump_json(indent=1) if as_json else
+               f"Claim recall: {report.claim_recall:.3f}; relation accuracy: {report.relation_accuracy:.3f}; "
+               f"contradiction recall: {report.contradiction_recall:.3f}; {report.extracted_claims} claims extracted")
+
+
+def eval_all(ctx: typer.Context, benchmark: Path, project: Project = None, profile: Profile = None,
+             approve: Approve = False, preview: Preview = False,
+             skip_models: Annotated[bool, typer.Option("--skip-models", help="Labels and retrieval only")] = False,
+             force: Annotated[bool, typer.Option("--force", help="Redo cached cells, decisions and claims")] = False,
+             k: Annotated[int, typer.Option("-k", min=1)] = 10, out: Output = None, as_json: Json = False) -> None:
+    """Run every part of a gold benchmark and write a Markdown report."""
+    with _context(ctx, project) as (st, conn, pid):
+        bench = load_benchmark(benchmark)
+        project_id = _required(pid)
+        gateway = ModelGateway(conn, st.config)
+        if not skip_models:
+            check_plan(gateway, plan_all(conn, gateway, bench, project_id, profile, force), approve, preview)
+        report = run_all(conn, gateway, bench, project_id, profile=profile, approved=approve,
+                         skip_models=skip_models, k=k, threshold=st.config.screening.max_false_negative_rate,
+                         force=force)
+        destination = out or st.paths.exports_root / f"eval-{bench.name}.md"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(render_report(report, bench), encoding="utf-8")
+    if as_json:
+        typer.echo(report.model_dump_json(indent=1))
+        return
+    typer.echo(str(destination))
+    failed = [s.name for s in report.stages if s.error]
+    retrieval = f"Recall@{k} {report.retrieval.recall_at_k:.3f}" if report.retrieval else "no retrieval"
+    typer.echo(f"{len(report.labels)} label problems; {retrieval}" +
+               (f"; failed: {', '.join(failed)}" if failed else ""))
+
+
 def register(app: typer.Typer, eval_app: typer.Typer) -> None:
     app.add_typer(claims_app, name="claims")
     app.command("queue")(queue)
     eval_app.command("screening")(eval_screening)
+    eval_app.command("check")(eval_check)
+    eval_app.command("claims")(eval_claims)
+    eval_app.command("all")(eval_all)

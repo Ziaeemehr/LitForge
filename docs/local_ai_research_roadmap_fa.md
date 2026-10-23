@@ -265,7 +265,7 @@ flowchart LR
 - افزودن budget guard، cost preview، audit log و نگهداری key فقط در environment یا keychain؛
 - تعریف evidence packet تا هیچ PDF کامل یا دادهٔ خارج از retrieval به‌صورت پیش‌فرض ارسال نشود؛
 - افزودن schemaهای Evidence Ledger و Analysis Run؛
-- ساخت benchmark کوچک ولی واقعی: ۳۰ سؤال، ۵۰ شاهد، ۱۰ جدول مقایسه و مجموعه‌ای از ادعاهای موافق/مخالف؛
+- ساخت benchmark کوچک ولی واقعی: ۳۰ سؤال، ۵۰ شاهد، ۱۰ جدول مقایسه و مجموعه‌ای از ادعاهای موافق/مخالف؛ ساخته شد: [sbi10](../benchmarks/sbi10/README.md) با فرمان `litforge eval all`؛
 - افزودن embedding و hybrid retrieval فقط اگر Recall@k را به‌طور معنی‌دار بهتر کند؛
 - ثبت نسخهٔ parser، prompt، model و input hash برای تمام خروجی‌ها.
 

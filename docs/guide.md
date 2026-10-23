@@ -327,6 +327,28 @@ hit-rate@k (questions with any target found), MRR (reciprocal rank of the first 
 missed targets. Retrieval currently uses lexical OR search over content words and quoted phrases.
 Keep the same benchmark when comparing future retrieval methods.
 
+### The sbi10 gold benchmark
+
+[benchmarks/sbi10](../benchmarks/sbi10/README.md) is a labelled benchmark on ten open-access arXiv
+papers, pinned by version and file hash: 30 English and 8 Persian questions with 68 page-and-quote
+targets, a 10-paper study matrix, screening labels and 14 claims with 7 relations between papers.
+Quotes are compared without case, ligatures, line-break hyphens or extra whitespace.
+
+```bash
+uv run python scripts/fetch_benchmark.py --ids-file benchmarks/sbi10/papers.txt --out data/benchmark/sbi10
+uv run litforge new sbi10 && uv run litforge add data/benchmark/sbi10/pdfs
+uv run litforge eval check benchmarks/sbi10/benchmark.yaml     # every labelled quote is in the index
+uv run litforge eval all benchmarks/sbi10/benchmark.yaml --preview
+uv run litforge eval all benchmarks/sbi10/benchmark.yaml --approve --out sbi10-report.md
+```
+
+`eval all` runs the label check, retrieval, answers, the matrix, full-text screening and the claim
+graph in turn, and writes one Markdown report that compares each metric with the roadmap's targets.
+A stage that fails is reported and the others still run; `--skip-models` stops after retrieval, and
+`--force` redoes cached matrix cells, screening decisions and claims (after a reindex or a model change).
+It sets the project's screening criteria and creates a matrix named `sbi10-gold`, so use a project
+of its own. `litforge eval claims` scores claim recall and relation accuracy on their own.
+
 ## Find papers
 
 ```bash

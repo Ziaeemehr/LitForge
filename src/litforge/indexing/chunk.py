@@ -10,6 +10,14 @@ from typing import Protocol
 from litforge.parsing.base import BBox, ParsedDocument
 
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z(\[\"'])")
+# Typeset ligatures (ﬁ, ﬂ, ﬃ …) are one character in PDF text; a search for "flow" must find "ﬂow".
+LIGATURES = str.maketrans({"\ufb00": "ff", "\ufb01": "fi", "\ufb02": "fl", "\ufb03": "ffi", "\ufb04": "ffl",
+                           "\ufb05": "st", "\ufb06": "st"})
+LIGATURE_GLOB = "*[\ufb00-\ufb06]*"
+
+
+def plain_text(text: str) -> str:
+    return text.translate(LIGATURES)
 
 
 class TokenCounter(Protocol):
@@ -95,7 +103,7 @@ def _assemble(units: list[Unit]) -> tuple[str, list[Span]]:
         if text:
             text += "\n\n"
         start = len(text)
-        text += unit.text
+        text += plain_text(unit.text)
         spans.append(Span(start, len(text), unit.page, unit.bbox))
     return text, spans
 
@@ -109,7 +117,7 @@ def section_paths(doc: ParsedDocument) -> list[str]:
             continue
         while stack and stack[-1][0] >= section.level:
             stack.pop()
-        stack.append((section.level, section.heading))
+        stack.append((section.level, plain_text(section.heading)))
         out.append(" > ".join(h for _, h in stack))
     return out
 

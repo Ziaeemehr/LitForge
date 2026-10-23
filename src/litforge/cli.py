@@ -73,7 +73,7 @@ project_app = typer.Typer(help="Manage project workspaces.", no_args_is_help=Tru
 app.add_typer(project_app, name="project")
 library_app = typer.Typer(help="Manage papers in the shared library.", no_args_is_help=True)
 app.add_typer(library_app, name="library")
-eval_app = typer.Typer(help="Evaluate retrieval quality.", no_args_is_help=True)
+eval_app = typer.Typer(help="Measure LitForge against labelled gold benchmarks.", no_args_is_help=True)
 app.add_typer(eval_app, name="eval")
 versions_app = typer.Typer(help="Inspect and manage preprint, accepted and published versions.")
 app.add_typer(versions_app, name="versions")

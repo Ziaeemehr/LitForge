@@ -24,6 +24,11 @@ def test_default_match_unchanged() -> None:
     assert build_match("the neural mass") == ('"the" "neural" "mass"', ["the", "neural", "mass"])
 
 
+def test_pasted_ligatures_match_spelled_out_index() -> None:
+    assert build_any_match("ﬂow eﬃcient") == ('"flow" OR "efficient"', ["flow", "efficient"])
+    assert build_match('"normalizing ﬂows"')[0] == '"normalizing flows"'
+
+
 def test_no_content_question(conn: sqlite3.Connection) -> None:
     assert retrieve_for_question(conn, "How is it?") == []
 

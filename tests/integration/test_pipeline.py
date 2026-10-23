@@ -165,6 +165,19 @@ def test_search_hits_point_to_pages_containing_the_quote(
     assert any(h.kind == "caption" and h.page == 2 for h in table_hits)
 
 
+def test_index_written_with_ligatures_is_rebuilt(
+    conn: sqlite3.Connection, paths: Paths, config: Config, corpus: Path, project: str
+) -> None:
+    _ingest_parse_index(conn, paths, config, corpus, project)
+    (hit,) = search(conn, "zebrafinch", project)
+    # An index from before ligatures were spelled out: "zebraﬁnch" is one token the query cannot reach.
+    conn.execute("UPDATE chunks SET text=replace(text, 'fi', char(64257)) WHERE paper_id=?", (hit.paper_id,))
+    assert search(conn, "zebrafinch", project) == []
+    outcomes = {index_run(conn, paths, config, run).outcome for run in current_runs(conn, project)}
+    assert outcomes == {"indexed", "cached"}
+    assert len(search(conn, "zebrafinch", project)) == 1
+
+
 def test_search_is_scoped_to_project(
     conn: sqlite3.Connection, paths: Paths, config: Config, corpus: Path, project: str
 ) -> None:

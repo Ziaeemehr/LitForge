@@ -1,0 +1,12 @@
+# The ten open-access arXiv papers of the sbi10 benchmark, pinned to the version (and file hash) its pages and quotes come from.
+# Fetch: uv run python scripts/fetch_benchmark.py --ids-file benchmarks/sbi10/papers.txt --out data/benchmark/sbi10
+1911.01429v3  071e3ecb630171a5ced9aaafe1d509e0355970268612df0947693ee48186692b  # Cranmer et al., The frontier of simulation-based inference
+2007.09114v2  34da75617fc897dfc5e0a7e892dfc461385a63573372725f6a2902c8e3204649  # Tejero-Cantero et al., sbi toolkit
+1905.07488v1  cb35393d9f4d61b32016e500b583e7a126384576637deac333e4eec1bacbb05f  # Greenberg et al., Automatic posterior transformation
+1805.07226v2  0f3c981e140833fc897c04964491ce51687cc8afe7a596e42bf3e91ec6097722  # Papamakarios et al., Sequential neural likelihood
+1605.06376v4  49d92ff67360e354e615d5a1e7a36c6aa18f970331b0bd515f4e92a32ac8d922  # Papamakarios & Murray, epsilon-free inference
+1705.07057v4  76e4305156f0b37a5dade502379d3702697bb82410c67cb551ac398f8828413e  # Papamakarios et al., Masked autoregressive flow
+1806.07366v6  32195e2c86f3886279395e93b8b99f2e5d242cb6306eaf2b239ed68b66bce151  # Chen et al., Neural ODEs
+1512.03385v1  1e0651b6810ecba34a3dbc5b5b0209226f889004607c1f203540a48d64e5a93a  # He et al., Deep residual learning
+1412.6980v9   eab9c73ae2ceda884b94830bda99312254bac4806f6c9f045cbab90721ecda31  # Kingma & Ba, Adam
+1706.03762v7  bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697  # Vaswani et al., Attention is all you need

@@ -653,7 +653,24 @@ List checkpointed console runs.
 
 ### `litforge eval`
 
-Evaluate retrieval quality.
+Measure LitForge against labelled gold benchmarks.
+
+#### `litforge eval all`
+
+Run every part of a gold benchmark and write a Markdown report.
+
+| Option | Meaning |
+|---|---|
+| `BENCHMARK` | argument (required) |
+| `--project`, `-p` |  |
+| `--profile` |  |
+| `--approve` |  |
+| `--preview` |  |
+| `--skip-models` | Labels and retrieval only |
+| `--force` | Redo cached cells, decisions and claims |
+| `-k` |  |
+| `-o`, `--out` |  |
+| `--json` |  |
 
 #### `litforge eval answers`
 
@@ -664,6 +681,26 @@ Measure citation precision and unsupported-sentence rate.
 | `BENCHMARK` | argument (required) |
 | `--profile` |  |
 | `--approve` |  |
+| `--project`, `-p` |  |
+| `--json` |  |
+
+#### `litforge eval check`
+
+Confirm every labelled quote is on its page in the indexed text.
+
+| Option | Meaning |
+|---|---|
+| `BENCHMARK` | argument (required) |
+| `--project`, `-p` |  |
+| `--json` |  |
+
+#### `litforge eval claims`
+
+Measure claim recall and relation accuracy against labelled claims.
+
+| Option | Meaning |
+|---|---|
+| `BENCHMARK` | argument (required) |
 | `--project`, `-p` |  |
 | `--json` |  |
 
