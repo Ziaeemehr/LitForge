@@ -4,9 +4,9 @@
 
 **Goal:** Launch LitForge in its own desktop window on macOS, Windows and Linux, without opening Chrome, Firefox or another browser application.
 
-**Architecture:** Keep the existing Python backend, HTTP API, HTML/JavaScript interface, CodeMirror editor and PDF.js viewer. Add a pywebview desktop host that owns a loopback server and the window lifecycle. Preserve a normal, writable Python environment for optional tools; treat native installers as a subsequent distribution milestone rather than freezing the entire backend immediately.
+**Architecture:** Keep the existing Python backend, HTTP API, HTML/JavaScript interface, CodeMirror editor and PDF.js viewer. Add a small pywebview desktop host process that owns the window and starts the backend as a child process (`litforge desktop-server`) on a loopback port. The host imports only the standard library and pywebview, so on Linux it can run under the system Python with the system's WebKitGTK; the backend keeps its own uv Python 3.12. Preserve a normal, writable Python environment for optional tools; treat native installers as a subsequent distribution milestone rather than freezing the entire backend immediately.
 
-**Tech Stack:** Python 3.12, pywebview (proposed; validate in Task 1), existing stdlib HTTP server, vanilla JavaScript, uv, pytest and node:test. Native platform build tools are introduced only in the distribution milestone.
+**Tech Stack:** Python 3.12 (backend), pywebview 6.2.1 with a per-OS engine: WebView2 on Windows, WKWebView on macOS, and on Linux the system WebKitGTK with a PyQt6 QtWebEngine fallback. Measured in Task 1 ([compatibility report](../specs/2026-10-23-desktop-compatibility.md)). existing stdlib HTTP server, vanilla JavaScript, uv, pytest and node:test. Native platform build tools are introduced only in the distribution milestone.
 
 **Spec:** The embedded design below records the user's requirement and the proposed technical decisions. No separate design has been approved. Confirm the renderer choice after the compatibility investigation and review this plan before product implementation.
 
@@ -29,18 +29,35 @@ The user wants a normal application window opened from the LitForge icon, withou
 
 ### Approaches and proposed choice
 
-| Approach | Fit and tradeoff |
-| --- | --- |
-| pywebview with the existing Python server | Small conceptual change; uses platform web engines. Requires real tests for WebView2 on Windows, WKWebView on macOS and a selected Linux WebKitGTK backend. Proposed first choice. |
-| Electron with a Python sidecar | Ships Chromium for a more consistent renderer. Larger distribution and an additional Node/Electron build and update surface. Fallback if the compatibility investigation finds a blocking webview issue. |
-| Rebuild the UI with native widgets | Much larger rewrite of editing, PDF viewing and existing interactions. Outside this requirement. |
+The user's priorities (2026-10-23) are: light and fast; a good working experience; installation without errors on every OS.
 
-The user has not selected pywebview. It is the plan author's recommendation, subject to Task 1 evidence. Do not build both hosts. A fallback to Electron requires revising this plan's host and packaging tasks before continuing.
+| Approach | Engine per OS | Extra download | Install risk | Verdict |
+| --- | --- | --- | --- | --- |
+| **pywebview, engine chosen per OS, host in its own process** | Windows WebView2 (Chromium, built into Windows 10/11); macOS WKWebView (system WebKit); Linux system WebKitGTK, with QtWebEngine (PyQt6) where the system lacks it | Windows and macOS: under 15 MB of Python packages. Linux GTK: none; it is part of every Ubuntu desktop through `update-manager`. Linux Qt fallback: about 210 MB | Low: no compiler and no sudo. The GTK host uses the system Python's own `gi`. The Qt fallback needs `libxcb-cursor0` on X11; Task 6 handles it | **Proposed, measured in Task 1** |
+| pywebview with GTK inside the backend's uv Python | Linux WebKitGTK | Small | High: PyGObject is published only as a source package on PyPI, so it must be compiled. The system `gi` matches the system Python (3.10 on Ubuntu 22.04, 3.13 on Fedora 41), not our pinned 3.12 | Rejected: a separate host process removes the problem |
+| pywebview with Qt as the only Linux engine | Chromium | About 210 MB (PyQt6), or about 260 MB (PySide6 6.12, whose WebEngine needs all of Addons) | Medium: on X11 Qt ≥ 6.5 aborts without `libxcb-cursor0`, which is missing on a default Ubuntu (reproduced) | Fallback only: about 520 MB on disk and about 170 MB more memory than GTK |
+| pywebview with Qt on all three OSes | Chromium everywhere | About 210 MB on every OS | Medium (as above) | Fallback for macOS only if WKWebView has a blocker |
+| Electron with a Python sidecar | Chromium everywhere | About 100 MB of Electron per OS, on top of the Python environment that the optional tools need anyway | Medium: a second toolchain (Node), a second updater, and sidecar process management | Rejected: the heaviest option, and it removes no Python packaging work |
+| Tauri with a Python sidecar | The same system webviews, so WebKitGTK on Linux | Small shell plus a frozen Python | Medium–high: a Rust toolchain and a frozen-Python sidecar, which conflicts with the writable environment the optional tools need | Rejected: has the Linux webview problem without solving packaging |
+| Chromium/Edge `--app` window | An installed browser | None | Low | Rejected: it is a browser application, which the requirement excludes; Linux and macOS may have no Chromium |
+| Rebuild the UI with native widgets | — | — | — | Outside this requirement |
+
+The proposal uses two engine families, WebKit (macOS, Linux) and Chromium (Windows, the Linux fallback); all page checks passed on both in Task 1. The same pywebview host code drives every OS; only the `gui=` argument and, on Linux GTK, the Python that runs the host differ. If an engine fails, the fallback is Qt for that OS, a one-line change with no new host. Electron is not a fallback, and the plan does not build two hosts.
+
+Task 1 measured on Ubuntu 24.04:
+
+- **GTK:** 256 MB window memory, no download.
+- **Qt:** 360–430 MB window memory, about 210 MB download, about 520 MB on disk.
+
+Windows and macOS still need their Task 1 runs. The user has not yet approved the decision.
 
 ### Proposed behavior
 
 1. The icon launches `litforge-app`; a developer may use `litforge desktop`.
-2. The desktop host resolves the workspace explicitly, starts an owned server on `127.0.0.1` with an OS-assigned port, waits until it serves `/api/info`, then opens one LitForge window.
+2. The desktop host resolves the workspace explicitly and opens one LitForge window at once, showing a built-in loading page (inline HTML, no server needed).
+   - In parallel it starts the backend child process on `127.0.0.1` with an OS-assigned port, waits until the backend serves `/api/info`, then navigates the window to it.
+   - Targets: a window visible within 1 second of the click and a usable app within 3 seconds, measured on an unlocked, visible screen. A locked screen throttles Chromium to about one frame per second.
+   - Measured in Task 1: window visible in 0.2–0.3 s; app loaded in 0.8 s with Qt and 1.3 s with GTK; backend 73–88 MB.
 3. All existing application views stay inside that window. User-clicked external article/documentation links may open the default browser; launching and using LitForge itself must not open one.
 4. Closing the window and clicking **Quit** share one close flow. Pending editor changes must be saved first. With running jobs, offer cancel-close or stop-jobs-and-quit; never silently discard changes or terminate work.
 5. Minimizing or suspending the window must not trigger the browser heartbeat shutdown policy.
@@ -54,7 +71,8 @@ The user has not selected pywebview. It is the plan author's recommendation, sub
 - Desktop launch must not call `webbrowser.open()` for its application URL.
 - Desktop HTTP binds to `127.0.0.1`, port `0`; preserve existing Host and Origin checks.
 - No privileged JavaScript-to-Python bridge for arbitrary pages. Never load an external top-level page into a window with native privileges.
-- GUI event loop runs on the main thread; HTTP serving and shutdown run outside it.
+- GUI event loop runs on the host process's main thread; HTTP serving runs in the backend child process.
+- The host module (`src/litforge/desktop/host.py`) imports only the standard library and `webview`. It must run under any Python ≥ 3.9, because on Linux GTK it runs under the system Python, and it talks to the backend only over loopback HTTP and the child's stdout. A test imports it with LitForge's other packages unavailable.
 - Data and optional dependencies live in writable user directories, never in signed bundles, Program Files or temporary extraction directories.
 - No bundled LLM weights, CUDA stack or OCR models in the base installer. Download optional components through existing explicit setup flows.
 - Preserve browser UI, CLI and source installation workflows. No database layout change is required for the desktop host.
@@ -93,16 +111,19 @@ Paths below are proposed additions unless already present. Keep host-specific lo
 
 ### Task 1: Compatibility investigation and renderer decision
 
-**Files:** Create `docs/superpowers/specs/2026-10-23-desktop-compatibility.md`. Use a disposable probe outside product source; do not commit a throwaway launcher as the application.
+**Files:** Create `docs/superpowers/specs/2026-10-23-desktop-compatibility.md` (the report) and `docs/superpowers/specs/2026-10-23-desktop-probe.py` (the disposable probe, kept so the Windows and macOS runs use the same checks). It is not product code.
 
-**Interfaces:** Consumes the current app via `litforge ui --no-browser`; produces a recorded backend/version matrix and a go/no-go decision for pywebview.
+**Interfaces:** Consumes the current app via `litforge ui --no-browser`; produces a recorded engine/version matrix and the engine decision per OS.
 
-- [ ] Read current official pywebview installation, renderer, threading and download documentation. Select and record a pinned version compatible with Python 3.12.
-- [ ] Run a small host probe on each supported OS: Windows WebView2, macOS WKWebView, Linux WebKitGTK. Record OS version, architecture and runtime versions.
-- [ ] Exercise CodeMirror completion/shortcuts/IME, Persian RTL text, clipboard, local PDF.js rendering and workers, file input, drag/drop, downloads, confirmation dialogs and external links. Include macOS Cmd shortcuts and Linux Wayland/X11 where supported.
-- [ ] Verify an app launch with browser opening disabled; test a missing WebView dependency and a renderer startup error. Record the user-visible recovery path.
-- [ ] Record startup time, idle memory and size measurements as observations, not universal promises. Select pywebview if essential flows pass; otherwise document the blocker and revise this plan for Electron.
-- [ ] Commit the compatibility report only. Pass condition: every required flow has evidence or a specific fix assigned to Task 6; no unresolved renderer blocker remains before Milestone B.
+Status on 2026-10-23: the Linux runs are done; the Windows and macOS runs are pending. See the report.
+
+- [x] Select and record the pywebview version: 6.2.1, which needs Python ≥ 3.8.
+- [x] Run the probe on Linux on GTK (system WebKitGTK 2.52 through the system Python) and on Qt (PyQt6 6.11 and PySide6 6.12). Record download size, installed size, memory and timings. Reproduce the Qt failure without `libxcb-cursor0` and verify the no-sudo preload workaround.
+- [ ] Run the probe on Windows 11 (`gui="edgechromium"`) and on macOS 13 and 14+ (`gui="cocoa"`), using the commands in the report. On macOS 13, the `withResolvers` and `pdf` results decide the floor (Safari 17.4+ WebKit) or a switch of macOS to Qt. Do not vendor a second PDF.js build.
+- [ ] Linux remainder: run on a Wayland session, on a machine without `gir1.2-webkit2-4.1` (the Qt fallback end to end) and on one non-Ubuntu desktop (Fedora or KDE).
+- [ ] With a person at the keyboard on an unlocked screen, check on each engine: CodeMirror completion, shortcuts and IME; Persian typing; file input; drag and drop; downloads; `confirm()` dialogs; external links. Include macOS Cmd shortcuts.
+- [ ] Record a missing-engine and a renderer-startup failure and the user-visible recovery path for each.
+- [ ] Commit the report updates. Pass condition: every required flow has evidence or a specific fix assigned to Task 6, and the user has approved the per-OS engine decision.
 
 ## Milestone B: Desktop window using the existing installation
 
@@ -121,9 +142,15 @@ Paths below are proposed additions unless already present. Keep host-specific lo
 
 **Files:** Create `src/litforge/desktop/__init__.py`, `host.py`, `workspace.py`, `tests/unit/test_desktop_host.py`, `tests/unit/test_desktop_workspace.py`; modify `src/litforge/cli.py`, `pyproject.toml`, `uv.lock`.
 
-**Interfaces:** `workspace.resolve_workspace(explicit: Path | None) -> Path` returns the workspace directory containing `data/`. `host.run_desktop(workspace: Path) -> int` owns the server and main-thread GUI. Add `litforge desktop --workspace PATH`. Switch `litforge-app` to `litforge.desktop:main`; retain `litforge ui` and normal CLI commands without importing GUI packages.
+**Interfaces:**
 
-- [ ] Add failing tests for startup order (server ready before window), correct URL, no browser fallback, startup exception cleanup, unavailable GUI dependencies and CLI imports without the desktop extra.
+- **Workspace:** `workspace.resolve_workspace(explicit: Path | None) -> Path` returns the workspace directory containing `data/`.
+- **Backend command:** `litforge desktop-server --workspace PATH` starts the Task 2 server with `port=0` and `idle_shutdown=False`. It prints one JSON line `{"url": ..., "pid": ...}` to stdout when `/api/info` answers. It exits when stdin closes, so it dies with the host and leaves no orphan.
+- **Host:** `host.run_desktop(backend_cmd: list[str], *, gui: str, title: str, icon: Path | None) -> int` lives in `src/litforge/desktop/host.py`. It imports only the standard library and `webview`. It opens the window with the loading page, spawns `backend_cmd`, reads the URL line and navigates.
+- **`litforge desktop`:** `litforge desktop --workspace PATH` resolves the workspace and the engine, then calls `run_desktop` in the same Python on Windows, macOS and Linux Qt. For Linux GTK it re-executes the host file with the host environment's Python, which Task 6 records in the user config as `desktop.host_python`.
+- **Entry points:** switch `litforge-app` to `litforge.desktop:main`. Retain `litforge ui` and the normal CLI commands without importing GUI packages.
+
+- [ ] Add failing tests for startup order (window shows the loading page first and navigates only after `/api/info` answers; a server that fails to start replaces the loading page with the error and log path), correct URL, no browser fallback, startup exception cleanup, unavailable GUI dependencies and CLI imports without the desktop extra.
 - [ ] Add workspace tests covering explicit path, remembered workspace, existing source-launch directory, new install default (`~/LitForge`), spaces/Persian characters and read-only directories. Precedence: explicit option, saved desktop workspace, recognized existing install workspace, then the new-install default. Persist the choice in an OS user configuration directory. If multiple known libraries exist, show a workspace chooser; never merge or copy them implicitly.
 - [ ] Run `uv run pytest tests/unit/test_desktop_host.py tests/unit/test_desktop_workspace.py -v`; confirm expected failures.
 - [ ] Implement the `desktop` extra and lazy pywebview adapter using Task 1's version/backend. Use `Paths(workspace / "data")` and existing configuration loading explicitly; do not change global CLI path semantics. Set native window title/icon; show startup errors with a log location.
@@ -160,7 +187,12 @@ Paths below are proposed additions unless already present. Keep host-specific lo
 
 - [ ] Add failing launcher tests for Windows windowless execution, macOS bundle script, Linux desktop-entry quoting, explicit workspace, and browser-mode compatibility. Add UI tests for external-link routing and pending-save failures from Task 5.
 - [ ] Run `uv run pytest tests/unit/test_shortcut.py -v` and `node --test tests/ui/desktop.test.cjs`; confirm expected failures.
-- [ ] Update installers to install `desktop` alongside existing `embed` and `documents` extras; preserve existing optional extras. Provide WebView2 prerequisite handling on Windows, system WebKit checks on macOS, and explicit WebKitGTK package guidance for the supported Linux distributions. Never silently use an obsolete renderer or fall back to a browser.
+- [ ] Update installers to install `desktop` alongside existing `embed` and `documents` extras; preserve existing optional extras. Provide WebView2 prerequisite handling on Windows: it is part of Windows 11 and of updated Windows 10; otherwise point to the Evergreen bootstrapper. Check the system WebKit version on macOS. On Linux, the installer chooses the engine in this order:
+
+1. **GTK:** if `/usr/bin/python3 -c "import gi; gi.require_version('WebKit2','4.1')"` (or `'4.0'`) succeeds, create the host environment with `uv venv --python /usr/bin/python3 --system-site-packages <install>/desktop-host` and install the pinned `pywebview` into it. No sudo and no compiler are needed.
+2. **Qt:** otherwise install `PyQt6` and `PyQt6-WebEngine` (pinned) into the LitForge environment. On X11, when `libxcb-cursor.so.0` is missing, a Debian or Ubuntu system runs `apt-get download libxcb-cursor0` into `<install>/desktop-libs` without sudo, and the host preloads it with `ctypes.CDLL(..., RTLD_GLOBAL)`. On other distributions the installer prints the exact `dnf`/`zypper`/`pacman` line.
+
+Record the engine, the host Python and any preloaded library in the user config. Settings shows them, and **Settings → Desktop engine → Check again** repeats the detection. Never silently use an obsolete renderer or fall back to a browser.
 - [ ] Implement the Task 1 fixes for download/save dialogs and top-level navigation. Internal API/PDF routes stay in the app; clicked external HTTP(S) URLs use the OS browser without native privileges; reject unexpected executable URL schemes. An external page must never replace the privileged app document.
 - [ ] Run launcher/UI tests and manual imports, PDF downloads, BibTeX/export, clipboard, Persian entry and Writing Studio compilation in the actual webviews. Update launch/quit docs and distinguish source-install updates from native-installer updates. Commit.
 
@@ -219,6 +251,23 @@ Task order: **1 → 2 → 3 → 4 → 5 → 6 → 7 → 8**. A renderer blocker 
 - Successful exit leaves no owned HTTP listener, lock or app-owned model/compiler process.
 - Browser mode and CLI still pass their existing checks.
 - Only completed milestones are described as shipped; automatic updates and unsupported platforms are not implied.
+
+## Review notes (2026-10-23, revision 2)
+
+A second, senior review took the user's priorities into account: light and fast, a good working experience, and installation without errors. These changes are already applied above:
+
+1. **Engine choice (superseded by Task 1, 2026-10-23).** This revision first proposed Qt WebEngine through PySide6 for Linux. Task 1's measurements reversed that:
+   - PySide6 6.12's WebEngine needs all of `PySide6-Addons` (about 260 MB download, 659 MB installed).
+   - Qt fails on a default Ubuntu X11 desktop without `libxcb-cursor0`.
+   - The system WebKitGTK is already on every Ubuntu desktop and uses 256 MB against 360–430 MB for Qt.
+
+   The plan now uses GTK first, with the host running under the system Python in its own process, and PyQt6 as the fallback. See the approaches table and the [compatibility report](../specs/2026-10-23-desktop-compatibility.md).
+2. **Fast startup.** The window appears immediately with a loading page instead of waiting for the server, with targets of 1 second to a visible window and 3 seconds to a usable app.
+3. **Visible errors when the GUI library itself is missing.** `litforge-app` is a gui-script with no console. If importing pywebview fails, Task 3's dialog cannot be shown through pywebview. Task 3 adds a minimal per-OS fallback: `MessageBoxW` through ctypes on Windows, `osascript` on macOS, and `zenity` or `kdialog` on Linux when present. It shows the error and the log path. Task 3 adds a test that simulates the import failure.
+4. **Guard against browser-only UI code.** `app.js` has 3 uses of `download=`, `.download =` or `window.open`. Task 6 routes them through `desktop.js` and adds a UI test that fails when a new browser-only download or `window.open` appears outside the adapter. [2026-10-23-bango-ideas.md](2026-10-23-bango-ideas.md) writes its files on the server for the same reason.
+5. **Order with the features plan.** Run Task 1 (the probe, 1–3 days) first; it removes the main uncertainty cheaply. Then land Task 2 before the features plan changes `server.py`.
+6. **Milestone C timing.** Start Milestone C only after Milestone B has been used daily for a few weeks. The one-line installer already provides Python (uv-managed) and uv, and Milestone C is most of the estimate and the risk.
+7. **Licensing.** LitForge is AGPL-3.0. WebKitGTK (LGPL) is a system library and is not bundled. The Qt fallback uses PyQt6 (GPL-3.0, compatible with AGPL-3.0), which is smaller than PySide6. Record the bundled Qt notices in Task 7 if the fallback is ever bundled.
 
 ## Official references
 
