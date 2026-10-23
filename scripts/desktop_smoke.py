@@ -141,6 +141,22 @@ def run_supervised(command: list[str], log_path: Path, *, timeout: float) -> str
             return error
 
 
+def wait_for_app(window: Any, *, timeout: float = 60) -> None:
+    """Wait for the real load event before calling evaluate_js (which has its own 20 s deadline)."""
+    deadline = time.monotonic() + timeout
+    while (remaining := deadline - time.monotonic()) > 0:
+        if not window.events.loaded.wait(min(remaining, .1)):
+            continue
+        try:
+            if window.evaluate_js("Boolean(window.LitForgeDesktop && window.pdfjsLib)"):
+                return
+        except Exception:
+            if window.events.loaded.is_set():
+                raise  # renderer/bridge failure, rather than navigation clearing the load event
+        time.sleep(min(.1, max(0, deadline - time.monotonic())))
+    raise TimeoutError(f"The desktop page did not initialize within {timeout:g} seconds")
+
+
 def run_worker(args: argparse.Namespace) -> int:
     report: dict[str, Any] = {"platform": platform.platform(), "architecture": platform.machine(),
                               "host_python": sys.version, "gui": args.gui}
@@ -166,6 +182,11 @@ def run_worker(args: argparse.Namespace) -> int:
                 super().__init__(*a, **kw)
                 backends.append(self)
 
+            def start(self, *a: Any, **kw: Any) -> str:
+                url = super().start(*a, **kw)
+                report["backend_ready_s"] = round(time.monotonic() - started, 3)
+                return str(url)
+
         host.Backend = ObservedBackend
 
         def create_window(*a: Any, **kw: Any) -> Any:
@@ -173,16 +194,11 @@ def run_worker(args: argparse.Namespace) -> int:
 
             def inspect_page() -> None:
                 try:
-                    deadline = time.monotonic() + 60
-                    while time.monotonic() < deadline:
-                        if window.evaluate_js("Boolean(window.LitForgeDesktop && window.pdfjsLib)"):
-                            break
-                        time.sleep(0.1)
-                    else:
-                        raise TimeoutError("The desktop page did not initialize within 60 seconds")
+                    wait_for_app(window)
                     report["app_ready_s"] = round(time.monotonic() - started, 3)
                     report["url"] = window.evaluate_js("location.href")
                     window.evaluate_js(PAGE_CHECKS.replace("%PDF%", sample_pdf()))
+                    deadline = time.monotonic() + 20
                     while time.monotonic() < deadline:
                         result = window.evaluate_js("JSON.stringify(window.__desktopSmoke)")
                         if result and result != "null":
@@ -213,6 +229,8 @@ def run_worker(args: argparse.Namespace) -> int:
             gui=args.gui, title="LitForge desktop smoke", log_path=output / "backend.log",
             workspace=workspace, runtime_dir=runtime, storage_path=workspace / "webview")
         report["backend_stopped"] = bool(backends) and all(b.returncode == 0 for b in backends)
+        report["backend_processes"] = [
+            {"pid": b.proc.pid if b.proc is not None else None, "returncode": b.returncode} for b in backends]
         if report.get("url"):
             url = urlsplit(report["url"])
             try:

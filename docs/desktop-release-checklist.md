@@ -30,7 +30,7 @@ separate acceptance checks. No installer or release artifact is produced by this
 | Round | Commit / run | Findings and changes | Result |
 | --- | --- | --- | --- |
 | 1 | `8b6b9da`; [run 40015300222](https://github.com/Ziaeemehr/LitForge/actions/runs/40015300222) | GTK and both Cocoa smoke checks passed. WebView2 passed page/PDF/worker/activation/close, but its closed-port check timed out at 2 s. Node 22 did not accept a test directory. Windows exposed POSIX-specific test assumptions; base-only mypy exposed two stale ignores. | Workflow failed; fixes prepared for round 2. |
-| 2 | Pending | Diagnose round 1 findings, fix causes and rerun all targets. | Not run |
+| 2 | `cc9c01e`; [run 40015981059](https://github.com/Ziaeemehr/LitForge/actions/runs/40015981059) | Linux GTK and both Cocoa jobs passed. Windows desktop tests (134 passed, 3 skipped) and all UI tests passed; its smoke called JavaScript before the renderer loaded and hit pywebview's internal startup timeout. Full Linux suite exposed a PowerShell warning-stream assertion (2126 passed, 1 failed, 4 skipped). | Workflow failed; two fixes prepared for round 3. |
 | 3 | Pending | Diagnose remaining findings and verify all targets again. | Not run |
 
 ### Round 1 diagnosis and fixes
@@ -57,6 +57,24 @@ macOS 15.7.9 architectures had 137 passing desktop tests. Windows Server 2022 ha
 15 failures and three skips. All three non-Windows smoke reports had no failed checks. The Windows
 report's only failed check was backend shutdown's connection probe. These are hosted-runner results,
 not claims of end-user OS installation coverage or representative startup performance.
+
+### Round 2 diagnosis and fixes
+
+- The Windows native window's `shown` event precedes completion of WebView2 initialization.
+  `evaluate_js` independently waits only 20 seconds for the JavaScript bridge. The smoke driver
+  now waits for the documented `loaded` event within its 60-second page deadline before evaluating
+  the app, and tolerates navigation clearing that event. An uninitialized/broken renderer still
+  fails. New tests observed RED→GREEN for waiting on load and enforcing the deadline.
+- The complete Linux suite runs PowerShell, which is absent locally. The optional-installer test
+  expected `Write-Warning` text in stderr alone; `pwsh` presents its Warning stream on stdout.
+  The assertion now accepts the warning in either captured stream, while retaining the nonfatal
+  exit and exact optional-install command checks. The installer behavior is unchanged.
+- The smoke report now includes backend readiness timing and observed child exit codes to make
+  backend startup/shutdown distinguishable from renderer initialization in subsequent evidence.
+
+Before round 3, the clean local full suite passed 2127 tests (4 skipped), and the 24 smoke-driver
+checks passed. Round 2's first-round portability failures did not recur. Its Windows renderer
+timeout prevented rechecking the 10-second connection probe; that check is still required.
 
 ## Acceptance still required
 

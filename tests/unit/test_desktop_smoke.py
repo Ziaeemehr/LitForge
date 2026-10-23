@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -89,3 +90,32 @@ def test_supervisor_reports_nonzero_exit_and_preserves_logs(tmp_path: Path) -> N
     error = smoke.run_supervised([sys.executable, "-c", "print('engine failed'); raise SystemExit(7)"], log, timeout=5)
     assert "7" in error
     assert "engine failed" in log.read_text()
+
+
+def test_page_check_waits_for_the_renderer_loaded_event() -> None:
+    loaded = threading.Event()
+
+    class Window:
+        events = type("Events", (), {"loaded": loaded})()
+
+        def evaluate_js(self, script: str) -> bool:
+            assert loaded.is_set(), "do not trigger pywebview's shorter internal startup timeout"
+            return True
+
+    timer = threading.Timer(.05, loaded.set)
+    timer.start()
+    try:
+        smoke.wait_for_app(Window(), timeout=1)
+    finally:
+        timer.join()
+
+
+def test_renderer_that_never_loads_fails_with_a_bounded_timeout() -> None:
+    class Window:
+        events = type("Events", (), {"loaded": threading.Event()})()
+
+        def evaluate_js(self, script: str) -> bool:
+            raise AssertionError("JavaScript cannot be evaluated before load")
+
+    with pytest.raises(TimeoutError, match="initialize"):
+        smoke.wait_for_app(Window(), timeout=.05)

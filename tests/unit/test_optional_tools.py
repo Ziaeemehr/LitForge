@@ -272,7 +272,8 @@ def test_powershell_installer_optional_tools_are_nonfatal(tmp_path: Path) -> Non
     commands = record.read_text().splitlines()
     assert commands[-2:] == ["run litforge tools install mineru --yes",
                              "run litforge tools install pix2text --yes"]
-    assert "Optional pix2text installation failed" in result.stderr
+    # PowerShell's Warning stream is rendered to stdout by pwsh; both streams are visible to the user.
+    assert "Optional pix2text installation failed" in result.stdout + result.stderr
     assert "Optional tools" in result.stdout
 
 
