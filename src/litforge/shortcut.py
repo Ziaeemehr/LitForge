@@ -5,10 +5,12 @@ from __future__ import annotations
 import contextlib
 import os
 import plistlib
+import re
 import shlex
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Literal
 
 
 def _desktop_quote(arg: str) -> str:
@@ -18,26 +20,34 @@ def _desktop_quote(arg: str) -> str:
 
 
 def create_shortcut(platform: str, home: Path, workdir: Path, exe: Path, icon: Path | None = None,
-                    gui_exe: Path | None = None) -> list[Path]:
+                    gui_exe: Path | None = None, *, mode: Literal["browser", "desktop"] = "browser") -> list[Path]:
     """Write the launcher(s) for `platform` (a sys.platform value) and return the files written.
 
     The data folder is resolved from the working directory, so every launcher starts in `workdir`.
-    `gui_exe` is the windowless `litforge-app` (Windows); without it the Windows launcher is a .bat.
+    `gui_exe` is the windowless `litforge-app`; without it the Windows launcher is a .bat.
+    `mode`: "browser" opens the web interface in a browser tab, "desktop" LitForge's own window for `workdir`.
     """
+    if mode == "desktop":
+        args = ["--workspace", str(workdir)] if gui_exe is not None else ["desktop", "--workspace", str(workdir)]
+        launcher = gui_exe if gui_exe is not None else exe
+    else:
+        args, launcher = ["ui"], exe
     if platform == "win32":
-        return [_windows(home, workdir, exe, gui_exe)]
+        return [_windows(home, workdir, exe, gui_exe, mode)]
     if platform == "darwin":
-        return [_mac_app(home / "Applications" / "LitForge.app", workdir, exe, icon)]
+        return [_mac_app(home / "Applications" / "LitForge.app", workdir, launcher, icon, args)]
     entry = [
         "[Desktop Entry]",
         "Type=Application",
         "Name=LitForge",
         "Comment=Find, screen and export scientific papers",
-        f"Exec={_desktop_quote(str(exe))} ui",
+        "Exec=" + " ".join(a if re.fullmatch(r"[\w-]+", a) else _desktop_quote(a) for a in [str(launcher), *args]),
         f"Path={workdir}",
-        "Terminal=false",  # stopped with Quit in the page
+        "Terminal=false",  # stopped with Quit in the page, or by closing the window
         "Categories=Education;",
     ]
+    if mode == "desktop":
+        entry.append("StartupWMClass=LitForge")  # the window's class (host.py names it), so the dock groups it
     if icon is not None:
         entry.append(f"Icon={icon}")
     text = "\n".join(entry) + "\n"
@@ -49,9 +59,10 @@ def create_shortcut(platform: str, home: Path, workdir: Path, exe: Path, icon: P
     return written
 
 
-def _mac_app(app: Path, workdir: Path, exe: Path, icon: Path | None = None) -> Path:
+def _mac_app(app: Path, workdir: Path, exe: Path, icon: Path | None = None, args: list[str] | None = None) -> Path:
     """A minimal LitForge.app (Launchpad, Spotlight, Dock) whose executable is a shell script: no Terminal window."""
-    script = f"#!/bin/sh\ncd {shlex.quote(str(workdir))} || exit 1\nexec {shlex.quote(str(exe))} ui\n"
+    command = " ".join(shlex.quote(a) for a in [str(exe), *(args if args is not None else ["ui"])])
+    script = f"#!/bin/sh\ncd {shlex.quote(str(workdir))} || exit 1\nexec {command}\n"
     _write(app / "Contents" / "MacOS" / "LitForge", script, executable=True)
     info = {"CFBundleName": "LitForge", "CFBundleExecutable": "LitForge", "CFBundleIdentifier": "org.litforge.app",
             "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "1.0"}
@@ -87,7 +98,7 @@ def _make_icns(svg: Path, out: Path) -> bool:
     return out.is_file()
 
 
-def _windows(home: Path, workdir: Path, exe: Path, gui_exe: Path | None) -> Path:
+def _windows(home: Path, workdir: Path, exe: Path, gui_exe: Path | None, mode: str = "browser") -> Path:
     # With OneDrive backup on, the visible desktop is the one inside OneDrive.
     desktop = home / "OneDrive" / "Desktop"
     desktop = desktop if desktop.is_dir() else home / "Desktop"
@@ -95,15 +106,17 @@ def _windows(home: Path, workdir: Path, exe: Path, gui_exe: Path | None) -> Path
     if gui_exe is not None:  # a .lnk to the windowless launcher; only PowerShell (COM) can write one
         lnk = desktop / "LitForge.lnk"
         ps = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LF_LNK); $s.TargetPath = $env:LF_EXE; "
-              "$s.Arguments = 'ui'; $s.WorkingDirectory = $env:LF_DIR; $s.Description = 'LitForge'; $s.Save()")
-        env = {**os.environ, "LF_LNK": str(lnk), "LF_EXE": str(gui_exe), "LF_DIR": str(workdir)}
+              "$s.Arguments = $env:LF_ARGS; $s.WorkingDirectory = $env:LF_DIR; $s.Description = 'LitForge'; $s.Save()")
+        args = f'--workspace "{workdir}"' if mode == "desktop" else "ui"
+        env = {**os.environ, "LF_LNK": str(lnk), "LF_EXE": str(gui_exe), "LF_DIR": str(workdir), "LF_ARGS": args}
         with contextlib.suppress(OSError, subprocess.SubprocessError):
             subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],  # noqa: S603, S607
                            env=env, check=True, capture_output=True, timeout=30)
         if lnk.exists():
             return lnk
     # Fallback, with a console window. chcp 65001: read this UTF-8 file right when a path has non-ASCII letters.
-    lines = ["@echo off", "chcp 65001 >nul", f'cd /d "{workdir}"', f'"{exe}" ui', "if errorlevel 1 pause", ""]
+    command = f'"{exe}" desktop --workspace "{workdir}"' if mode == "desktop" else f'"{exe}" ui'
+    lines = ["@echo off", "chcp 65001 >nul", f'cd /d "{workdir}"', command, "if errorlevel 1 pause", ""]
     return _write(desktop / "LitForge.bat", "\r\n".join(lines), executable=False)
 
 

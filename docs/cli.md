@@ -958,7 +958,11 @@ Open the web interface in your browser (runs locally on Linux, macOS and Windows
 
 ### `litforge shortcut`
 
-Add a LitForge icon to your apps that opens the web interface with one click.
+Add a LitForge icon to your apps that opens LitForge with one click.
+
+| Option | Meaning |
+|---|---|
+| `--mode` | desktop (its own window) or browser; default: desktop when its window engine is set up (litforge desktop-setup) |
 
 ### `litforge update`
 

@@ -210,6 +210,8 @@ def run_desktop(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
 
     With `workspace`, one window per library: when one is already open it is brought forward instead."""
     log_path = Path(log_path)
+    if sys.argv:
+        sys.argv[0] = title  # GTK and Qt name the window class after it; desktop files match it (StartupWMClass)
     holder: dict[str, object] = {}
 
     def bring_forward() -> bool:

@@ -107,6 +107,14 @@ def test_window_shows_the_loading_page_first_then_navigates_to_the_backend(
                             "OPEN_EXTERNAL_LINKS_IN_BROWSER": True}  # save dialog for downloads; no file:// pages
 
 
+def test_the_window_is_named_litforge_for_the_dock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    mod, _ = fake_webview()
+    monkeypatch.setitem(sys.modules, "webview", mod)
+    monkeypatch.setattr(sys, "argv", ["/x/desktop/host.py", "--gui", "gtk"])
+    host.run_desktop([sys.executable, "-c", READY], gui="gtk", title="LitForge", log_path=tmp_path / "d.log")
+    assert sys.argv[0] == "LitForge"  # GTK and Qt take the window class (StartupWMClass) from it
+
+
 def test_a_backend_that_fails_shows_the_error_and_the_log_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     mod, seen = fake_webview()
     monkeypatch.setitem(sys.modules, "webview", mod)

@@ -28,6 +28,15 @@ ICON = Path(__file__).resolve().parents[1] / "ui" / "static" / "icon.svg"
 DEFAULT_ENGINE = {"win32": "edgechromium", "darwin": "cocoa"}  # Linux: gtk, or qt where the installer chose it
 
 
+def engine_ready() -> bool:
+    """Whether `litforge desktop` can open its window here: the engine was set up (Linux) or pywebview is installed."""
+    if sys.platform.startswith("linux"):
+        return bool(load_settings(user_config_dir(sys.platform, os.environ, Path.home())).get("engine"))
+    import importlib.util
+
+    return importlib.util.find_spec("webview") is not None
+
+
 def find_uv() -> str:
     for candidate in (shutil.which("uv"), Path.home() / ".local" / "bin" / "uv", Path.home() / ".cargo" / "bin" / "uv"):
         if candidate and Path(candidate).is_file():
@@ -83,6 +92,14 @@ def launch_desktop(explicit: Path | None = None, gui: str | None = None) -> int:
                             preload=preload, workspace=workspace)
 
 
-def main() -> None:
-    """Entry point of the windowless `litforge-app` launcher (the LitForge icon)."""
-    sys.exit(launch_desktop())
+def main(argv: list[str] | None = None) -> None:
+    """Entry point of the windowless `litforge-app` launcher (the LitForge icon): `--workspace PATH` opens that
+    library's window; `ui` (icons made before the desktop window) opens the web interface as before."""
+    args = sys.argv[1:] if argv is None else argv
+    if args[:1] == ["ui"]:
+        from litforge.cli import app
+
+        app(["ui"])
+        sys.exit(0)
+    workspace = Path(args[1]) if args[:1] == ["--workspace"] and len(args) > 1 else None
+    sys.exit(launch_desktop(workspace))

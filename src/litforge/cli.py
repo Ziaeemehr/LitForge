@@ -1385,22 +1385,32 @@ def desktop_server(
 
 
 @app.command()
-def shortcut() -> None:
-    """Add a LitForge icon to your apps that opens the web interface with one click."""
+def shortcut(
+    mode: Annotated[str | None, typer.Option(help="desktop (its own window) or browser; default: desktop when "
+                                                  "its window engine is set up (litforge desktop-setup)")] = None,
+) -> None:
+    """Add a LitForge icon to your apps that opens LitForge with one click."""
     import shutil
     import sys
 
+    from litforge import desktop
     from litforge.shortcut import create_shortcut
 
+    if mode not in (None, "desktop", "browser"):
+        raise typer.BadParameter("use desktop or browser")
+    chosen = mode or ("desktop" if desktop.engine_ready() else "browser")
     exe = shutil.which("litforge") or str(Path(sys.argv[0]).resolve())
-    gui = shutil.which("litforge-app")
+    beside = Path(exe).with_name("litforge-app.exe" if sys.platform == "win32" else "litforge-app")
+    gui = shutil.which("litforge-app") or (str(beside) if beside.is_file() else None)
     icon = Path(__file__).parent / "ui" / "static" / "icon.svg"
-    written = create_shortcut(sys.platform, Path.home(), Path.cwd(), Path(exe), icon, Path(gui) if gui else None)
+    written = create_shortcut(sys.platform, Path.home(), Path.cwd(), Path(exe), icon, Path(gui) if gui else None,
+                              mode="desktop" if chosen == "desktop" else "browser")
     for path in written:
         typer.echo(f"created {path}")
     where = {"darwin": "Launchpad (drag it to the Dock to keep it there)",
              "win32": "the LitForge icon on your desktop"}.get(sys.platform, "Show Apps (pin it to the dock)")
-    typer.echo(f"Open LitForge from {where}. Stop it with Quit in the page.")
+    stop = "Closing its window stops it." if chosen == "desktop" else "Stop it with Quit in the page."
+    typer.echo(f"Open LitForge from {where}. {stop}")
     typer.echo(f"It uses the data in {Path.cwd()}, the folder you ran this command in.")
 
 
