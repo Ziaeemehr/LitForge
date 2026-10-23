@@ -4277,10 +4277,22 @@
   function suggestionHunk(h) {
     var div = document.createElement('div');
     div.className = 'hunk';
-    var del = document.createElement('del'); del.textContent = h.old; del.dir = 'auto';
-    var ins = document.createElement('ins'); ins.textContent = h.new; ins.dir = 'auto';
-    if (h.old) div.appendChild(del);
-    if (h.new) div.appendChild(ins);
+    if (h.words && h.words.length) {
+      // One sentence with the changed words marked inside it; dir=auto puts a Persian sentence right to left.
+      var words = document.createElement('p'); words.className = 'words'; words.dir = 'auto';
+      h.words.forEach(function (w) {
+        var el = w.op === 'del' ? document.createElement('del') : w.op === 'ins' ? document.createElement('ins') :
+          document.createElement('span');
+        el.textContent = w.text;
+        words.appendChild(el);
+      });
+      div.appendChild(words);
+    } else {  // suggestions saved before sentence hunks
+      var del = document.createElement('del'); del.textContent = h.old; del.dir = 'auto';
+      var ins = document.createElement('ins'); ins.textContent = h.new; ins.dir = 'auto';
+      if (h.old) div.appendChild(del);
+      if (h.new) div.appendChild(ins);
+    }
     h.flags.forEach(function (f) {
       var p = document.createElement('p'); p.className = 'flag'; p.textContent = '⚠ ' + f; div.appendChild(p);
     });
@@ -4573,7 +4585,8 @@
     asset_analyze: 'Analyze figures and tables', equation_compare: 'Compare equations',
     gap_design: 'Design research gaps', console_plan: 'Plan console workflows', page_rewrite: 'Rewrite pages',
     write_fix: 'Write: fix errors', write_rewrite: 'Write: rewrite and translate', write_cite: 'Write: suggest citations',
-    write_chat: 'Write: assistant', write_summary: 'Write: title and abstract', write_image: 'Write: LaTeX from an image'
+    write_chat: 'Write: assistant', write_summary: 'Write: title and abstract', write_image: 'Write: LaTeX from an image',
+    query_translate: 'Translate Persian questions for search'
   };
   function taskLabel(task) { return modelTaskLabels[task] || task.replace(/_/g, ' '); }
 
@@ -4870,7 +4883,7 @@
   }
   var TASK_GROUPS = [
     ['Library and analysis', ['ask', 'audit', 'matrix_extract', 'claim_extract', 'claim_relation', 'asset_analyze',
-      'equation_compare', 'gap_design', 'console_plan', 'page_rewrite']],
+      'equation_compare', 'gap_design', 'console_plan', 'page_rewrite', 'query_translate']],
     ['Screening', ['screen', 'screen_fulltext']],
     ['Writing', ['write_fix', 'write_rewrite', 'write_cite', 'write_chat', 'write_summary', 'write_image']]];
 

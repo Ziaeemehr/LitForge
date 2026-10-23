@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from html import escape
 
 from litforge.analysis.ledger import EvidenceSpan
 from litforge.llm.evidence import EvidencePacket
 
-ASK_PROMPT_VERSION = "ask-v4"
+ASK_PROMPT_VERSION = "ask-v5"
 AUDIT_PROMPT_VERSION = "audit-v2"
 MATRIX_PROMPT_VERSION = "matrix-v2"
 WRITE_PROMPT_VERSION = "write-v2"  # v2: no line numbers in the fix excerpt; \lr{...} unwrapped
@@ -28,8 +29,12 @@ def evidence_text(packet: EvidencePacket, spans: Sequence[EvidenceSpan]) -> str:
     )
 
 
-def ask_messages(question: str, packet: EvidencePacket, spans: Sequence[EvidenceSpan]) -> list[dict[str, str]]:
-    return [dict(role="system", content=_UNTRUSTED +
+def ask_messages(question: str, packet: EvidencePacket, spans: Sequence[EvidenceSpan],
+                 translation: str | None = None) -> list[dict[str, str]]:
+    """`translation`: English search terms for a question in Persian, so a small model also reads it in English."""
+    persian = ("The question is in Persian: answer it (never repeat or restate the question) and write every "
+               "sentence of the answer in Persian. " if re.search(r"[\u0600-\u06FF]", question) else "")
+    return [dict(role="system", content=_UNTRUSTED + persian +
                  "Answer only from the evidence, briefly, at most 8 sentences. Every sentence cites evidence IDs. "
                  "Use kind reported_fact for directly stated facts, interpretation for inferences across evidence, "
                  "or unsupported for needed information absent from evidence. Say when evidence is insufficient. "
@@ -37,8 +42,11 @@ def ask_messages(question: str, packet: EvidencePacket, spans: Sequence[Evidence
                  "verbatim supporting passage (one sentence) from that evidence; never paraphrase. "
                  "Evidence may contain LaTeX ($...$); copy it verbatim in quotes. "
                  "Use at least 2 words per quote, at most 400 characters, and at most 3 quotes per sentence. "
+                 "Write the sentences in the language of the question (a Persian question gets a Persian answer), "
+                 "with numbers in digits 0-9; quotes stay verbatim in the evidence's own language. "
                  "Return JSON with sentences (text, kind, evidence_ids, quotes) and insufficient."),
-            dict(role="user", content=question + "\n" + evidence_text(packet, spans))]
+            dict(role="user", content=(f"Question: {translation}\nAsked in Persian as: {question}" if translation
+                                       else question) + "\n" + evidence_text(packet, spans))]
 
 
 def audit_messages(text: str, packet: EvidencePacket, spans: Sequence[EvidenceSpan]) -> list[dict[str, str]]:

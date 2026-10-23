@@ -142,10 +142,10 @@ def choose_tier(hw: Hardware) -> Tier:
 
 
 Mode = Literal["local", "cloud", "hybrid", "manual"]
-# Many calls on many papers: on this computer in Hybrid. Every other task (questions, analysis, writing) is the
-# quality work a strong cloud model does better.
+# Many calls on many papers, or a short translation of a Persian question into search terms: on this computer in
+# Hybrid. Every other task (questions, analysis, writing) is the quality work a strong cloud model does better.
 BULK_TASKS = frozenset({"screen", "screen_fulltext", "matrix_extract", "claim_extract", "asset_analyze",
-                        "equation_compare", "page_rewrite"})
+                        "equation_compare", "page_rewrite", "query_translate"})
 IMAGE_TASKS = frozenset({"write_image"})  # quality work that sends an image: only to a model that reads images
 
 
@@ -203,7 +203,8 @@ def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap:
             if strong and strong not in entries:
                 raise ValueError("Choose a catalogued strong model")
             models["profiles"].update(_cloud_profiles(entries, cheap, strong))
-            extraction = {"matrix_extract", "claim_extract", "asset_analyze", "equation_compare", "page_rewrite"}
+            extraction = {"matrix_extract", "claim_extract", "asset_analyze", "equation_compare", "page_rewrite",
+                          "query_translate"}
             local_screening = hw.ollama and mode is None  # Cloud mode: light work goes to the cloud too
             strong_reads_images = bool(strong and "image" in entries[strong]["input_modalities"])
             models["tasks"] = {task: {"profile": "local" if local_screening and task in {"screen", "screen_fulltext"}
@@ -226,7 +227,8 @@ def setup_proposal(root: Path, hw: Hardware, tier: Tier | None = None, *, cheap:
                     "timeout_s": 600, "reasoning_output_tokens": 8192}
         models["profiles"] = {"gemma4": profile("gemma4", True), "qwen3-4b": profile("qwen3-4b")}
         models["local"] = profile("qwen3-4b")
-        models["tasks"] = {task: {"profile": "qwen3-4b" if task in {"screen", "screen_fulltext"} else "gemma4",
+        models["tasks"] = {task: {"profile": "qwen3-4b" if task in {"screen", "screen_fulltext", "query_translate"}
+                                  else "gemma4",
                                  "reasoning": "off"}
                            for task in TASK_NAMES}
         models["vision_profile"] = "gemma4"

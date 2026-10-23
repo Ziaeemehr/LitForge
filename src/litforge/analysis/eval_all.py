@@ -30,6 +30,9 @@ from litforge.analysis.evaluation import (
 from litforge.analysis.gateway import CallPreview, ModelGateway
 from litforge.analysis.matrix import create_matrix, extract_matrix, list_matrices
 from litforge.analysis.matrix import plan_calls as matrix_plan
+from litforge.analysis.query_translate import needs_translation, search_query
+from litforge.analysis.retrieve import retrieve_for_question
+from litforge.indexing.fts import SearchHit
 from litforge.screening import fulltext
 from litforge.screening.criteria import save_criteria
 
@@ -51,6 +54,7 @@ class AllReport(BaseModel):
     labels: list[LabelProblem] = Field(default_factory=list)
     stages: list[Stage] = Field(default_factory=list)
     retrieval: RetrievalReport | None = None
+    translated: RetrievalReport | None = None  # retrieval after Persian questions get English search terms
     answers: AnswerReport | None = None
     matrix: MatrixReport | None = None
     screening: ScreeningReport | None = None
@@ -128,6 +132,14 @@ def run_all(conn: sqlite3.Connection, gateway: ModelGateway, bench: RetrievalBen
 
     off = "--skip-models" if skip_models else None
     report.retrieval = stage("retrieval", lambda: evaluate_retrieval(conn, bench, k, project_id))
+
+    def translated(conn: sqlite3.Connection, question: str, project_id: str | None = None,
+                   k: int = 8) -> list[SearchHit]:
+        return retrieve_for_question(conn, search_query(conn, gateway, question), project_id, k)
+
+    if any(needs_translation(q.question) for q in bench.questions):
+        report.translated = stage("retrieval with translation",
+                                  lambda: evaluate_retrieval(conn, bench, k, project_id, translated), off)
     report.answers = stage("answers", lambda: evaluate_answers(conn, gateway, bench, profile, project_id, approved),
                            off)
     report.matrix = stage("matrix", matrix, off or (None if bench.matrix_columns else "no matrix columns"))
@@ -162,6 +174,11 @@ def render_report(report: AllReport, bench: RetrievalBenchmark) -> str:
             + [(f"Recall@{r.k} ({lang})", _pct(v), "") for lang, v in r.recall_by_lang.items()])]
         missed = [f"- {q.id} ({q.lang}): {t.paper} p.{t.page}" for q in r.questions for t in q.missed]
         out += ["", f"Missed targets ({len(missed)}):", "", *missed] if missed else []
+    if t := report.translated:
+        out += ["", "## Retrieval with translated Persian questions", "", *_table(
+            [(f"Recall@{t.k} ({lang})", _pct(v), "") for lang, v in t.recall_by_lang.items()])]
+        missed = [f"- {q.id}: {m.paper} p.{m.page}" for q in t.questions if q.lang != "en" for m in q.missed]
+        out += ["", f"Missed Persian targets ({len(missed)}):", "", *missed] if missed else []
     if a := report.answers:
         out += ["", "## Answers", "", *_table([
             ("Citations that resolve to retrieved evidence", _pct(a.citation_validity),

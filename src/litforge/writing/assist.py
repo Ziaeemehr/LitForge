@@ -25,6 +25,7 @@ from litforge.analysis.prompts import (
     write_rewrite_messages,
     write_summary_messages,
 )
+from litforge.analysis.query_translate import search_query
 from litforge.analysis.retrieve import retrieve_for_question
 from litforge.analysis.validation import QuoteLocator, numbers
 from litforge.llm.evidence import EvidenceItem, EvidencePacket
@@ -85,7 +86,8 @@ class Request:
 
 def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, error: str = "",
             first_line: int = 1, error_line: int = 0, *, context: str = "", image: bytes | None = None,
-            pad_before: bool = False, pad_after: bool = False, new_env: bool = False) -> Request:
+            pad_before: bool = False, pad_after: bool = False, new_env: bool = False,
+            gateway: ModelGateway | None = None) -> Request:
     """Build what would be sent; only the selection (and, for citations, the retrieved evidence; for a title or
     an abstract, the document; for an image action, the image) is included."""
     if action not in ACTIONS:
@@ -125,10 +127,11 @@ def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, err
         req.packet = EvidencePacket(items=[selection, EvidenceItem(id="document", paper_id="manuscript", text=body,
                                                                    page=1)], sensitive=True)
     elif action == "cite":
-        hits = retrieve_for_question(conn, _plain(sent), doc.project_id, k=8, max_per_paper=2)
+        query = search_query(conn, gateway, _plain(sent), sensitive=True)
+        hits = retrieve_for_question(conn, query, doc.project_id, k=8, max_per_paper=2)
         if not hits:
             hint = ("; evidence is found by the papers' own words, so Persian text rarely matches English papers"
-                    if _PERSIAN.search(sent) else "")
+                    if _PERSIAN.search(sent) and query == _plain(sent) else "")
             raise AssistError("no evidence in this project's papers matches the selection" + hint)
         spans = record_spans(conn, hits)
         packet = to_packet(spans, sensitive=True, max_chars_per_item=1500)
@@ -431,38 +434,107 @@ def _resolve_citations(conn: sqlite3.Connection, req: Request, text: str,
     return out, [c for c in verified.values() if c["key"] in used], dropped
 
 
+_ABBREVIATIONS = frozenset({"e.g", "i.e", "al", "etc", "vs", "cf", "fig", "figs", "eq", "eqs", "sec", "ref", "refs",
+                            "no", "dr", "prof", "approx", "resp", "ch", "tab"})
+_SENTENCE_END = re.compile(r"[.!?\u061f\u2026]+[\"')\]]*(?=\s)|\n")
+
+
+def sentences(text: str) -> list[str]:
+    """Sentence pieces that join back to `text`: a piece ends after . ! ? ؟ … and the whitespace that follows,
+    and at every line break (LaTeX structure lives on lines: \\item, \\section, table rows); never inside braces,
+    $...$ or \\(...\\) math, after an abbreviation (e.g., Fig.) or an initial."""
+    depth, math, cuts = 0, False, []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and i + 1 < len(text):
+            if text[i + 1] in "()[]":
+                math = text[i + 1] in "(["
+            i += 2
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth = max(0, depth - 1)
+        elif ch == "$":
+            math = not math
+        elif not depth and not math and (m := _SENTENCE_END.match(text, i)):
+            word = re.search(r"([\w.]+)$", text[:i])
+            if m.group().startswith("\n") or not (ch == "." and word and (
+                    word.group(1).lower().rstrip(".") in _ABBREVIATIONS or len(word.group(1)) == 1)):
+                end = m.end()
+                while end < len(text) and text[end].isspace():
+                    end += 1
+                cuts.append(end)
+                i = end
+                continue
+        i += 1
+    pieces, last = [], 0
+    for cut in cuts:
+        if cut > last:
+            pieces.append(text[last:cut])
+            last = cut
+    return pieces + ([text[last:]] if last < len(text) else [])
+
+
+def word_diff(old: str, new: str) -> list[dict[str, str]]:
+    """Equal, deleted and inserted runs of words: equal+del joins to `old`, equal+ins to `new`. A space between two
+    changes belongs to both sides, so a rewritten phrase reads as one deletion and one insertion."""
+    a, b = re.findall(r"\S+|\s+", old), re.findall(r"\S+|\s+", new)
+    runs: list[tuple[str, str, str]] = []  # (equal text, deleted, inserted); a change run has empty equal text
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if tag == "equal":
+            runs.append(("".join(a[i1:i2]), "", ""))
+        else:
+            runs.append(("", "".join(a[i1:i2]), "".join(b[j1:j2])))
+    merged: list[tuple[str, str, str]] = []
+    for k, run in enumerate(runs):
+        between = 0 < k < len(runs) - 1 and not runs[k - 1][0] and not runs[k + 1][0]
+        if run[0] and run[0].isspace() and between:
+            run = ("", run[0], run[0])
+        if merged and not run[0] and not merged[-1][0]:
+            merged[-1] = ("", merged[-1][1] + run[1], merged[-1][2] + run[2])
+        else:
+            merged.append(run)
+    out: list[dict[str, str]] = []
+    for equal, deleted, inserted in merged:
+        out += [{"op": op, "text": text} for op, text in (("equal", equal), ("del", deleted), ("ins", inserted))
+                if text]
+    return out
+
+
 def diff_hunks(old: str, new: str) -> list[dict[str, Any]]:
-    """Line hunks (word hunks for a one-line text), with character offsets into `old`."""
-    split = (lambda t: re.findall(r"\S+|\s+", t)) if "\n" not in old.strip() else (
-        lambda t: t.splitlines(keepends=True))
-    a, b = split(old), split(new)
+    """One hunk per changed sentence (a group when sentences were added, removed, split or joined), with offsets
+    in code points into `old` and the changed words marked inside it. Changes of whitespace alone are no hunk."""
+    a, b = sentences(old), sentences(new)
     offsets = [0]
     for piece in a:
         offsets.append(offsets[-1] + len(piece))
+    def key(piece: str) -> str:
+        return " ".join(piece.split())
     hunks: list[dict[str, Any]] = []
-    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
-        if tag == "equal":
-            continue
-        hunks.append({"index": len(hunks), "start": offsets[i1], "end": offsets[i2], "old": "".join(a[i1:i2]),
-                      "new": "".join(b[j1:j2]), "flags": []})
-    return _merge_close(hunks, old)
-
-
-def _merge_close(hunks: list[dict[str, Any]], old: str) -> list[dict[str, Any]]:
-    # Word diffs of a rewritten sentence would give dozens of tiny hunks; join those separated by one space.
-    merged: list[dict[str, Any]] = []
-    for hunk in hunks:
-        if merged and hunk["start"] - merged[-1]["end"] <= 1:
-            gap = old[merged[-1]["end"]:hunk["start"]]
-            prev = merged[-1]
-            prev["old"] += gap + hunk["old"]
-            prev["new"] += gap + hunk["new"]
-            prev["end"] = hunk["end"]
-        else:
-            merged.append(dict(hunk))
-    for i, hunk in enumerate(merged):
-        hunk["index"] = i
-    return merged
+    def add(i1: int, i2: int, j1: int, j2: int) -> None:
+        old_text, new_text = "".join(a[i1:i2]), "".join(b[j1:j2])
+        # Keep the old text's trailing space when the sentence is replaced, so the next sentence is not glued on.
+        tail = old_text[len(old_text.rstrip()):]
+        if old_text.strip() and new_text.strip() and not new_text[len(new_text.rstrip()):]:
+            new_text += tail
+        # An added sentence after one that ended the old text needs the space the old text did not have.
+        if i1 == i2 and j1 and i1:
+            gap = b[j1 - 1][len(b[j1 - 1].rstrip()):]
+            if gap and not a[i1 - 1][len(a[i1 - 1].rstrip()):]:
+                new_text = gap + new_text
+        if key(old_text) != key(new_text):
+            hunks.append({"index": len(hunks), "start": offsets[i1], "end": offsets[i2], "old": old_text,
+                          "new": new_text, "flags": [], "words": word_diff(old_text, new_text)})
+    matcher = difflib.SequenceMatcher(None, [key(x) for x in a], [key(x) for x in b], autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "replace" and i2 - i1 == j2 - j1:
+            for n in range(i2 - i1):
+                add(i1 + n, i1 + n + 1, j1 + n, j1 + n + 1)
+        elif tag != "equal":
+            add(i1, i2, j1, j2)
+    return hunks
 
 
 def _flag_hunk(hunk: dict[str, Any], allowed: set[Any], known: set[str], conn: sqlite3.Connection) -> dict[str, Any]:

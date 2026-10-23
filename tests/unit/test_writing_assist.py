@@ -252,8 +252,62 @@ def test_cite_action_flags_changed_wording_and_added_commands(env) -> None:
 def test_hunk_offsets_are_code_points_with_emoji() -> None:
     old, new = "نتیجه 😀 خوب است و مهم", "نتیجه 😀 عالی است و مهم"
     hunks = wa.diff_hunks(old, new)
-    assert old[hunks[0]["start"]:hunks[0]["end"]] == "خوب"
+    assert old[hunks[0]["start"]:hunks[0]["end"]] == old
+    assert [w for w in hunks[0]["words"] if w["op"] != "equal"] == [{"op": "del", "text": "خوب"},
+                                                                    {"op": "ins", "text": "عالی"}]
     assert wa.applied_text(old, hunks, [0]) == new
+
+
+def _check(old: str, new: str, hunks: list[dict]) -> None:
+    for hunk in hunks:
+        assert old[hunk["start"]:hunk["end"]] == hunk["old"]
+        assert "".join(w["text"] for w in hunk["words"] if w["op"] != "ins") == hunk["old"]
+        assert "".join(w["text"] for w in hunk["words"] if w["op"] != "del") == hunk["new"]
+    assert wa.applied_text(old, hunks, []) == old
+
+
+def test_each_changed_sentence_is_its_own_hunk() -> None:
+    old = "The model was fitted to data. It gave good results. We thank everyone."
+    new = "The model was fitted carefully to the data. It gave very good results. We thank everyone."
+    hunks = wa.diff_hunks(old, new)
+    _check(old, new, hunks)
+    assert [h["old"] for h in hunks] == ["The model was fitted to data. ", "It gave good results. "]
+    assert wa.applied_text(old, hunks, [0, 1]) == new
+    assert wa.applied_text(old, hunks, [1]) == ("The model was fitted to data. It gave very good results. "
+                                                "We thank everyone.")
+    # A rewritten phrase reads as one deletion and one insertion, not word by word.
+    assert [w["op"] for w in wa.diff_hunks("It is a big red car.", "It is one small blue car.")[0]["words"]] == [
+        "equal", "del", "ins", "equal"]
+
+
+def test_persian_sentences_split_at_persian_question_mark() -> None:
+    old = "این روش دقیق است. آیا سریع هم هست؟ بله، خیلی."
+    new = "این روش بسیار دقیق است. آیا سریع هم هست؟ بله، تا حدی."
+    hunks = wa.diff_hunks(old, new)
+    _check(old, new, hunks)
+    assert [h["old"] for h in hunks] == ["این روش دقیق است. ", "بله، خیلی."]
+    assert wa.applied_text(old, hunks, [0, 1]) == new
+
+
+@pytest.mark.parametrize("text", [
+    "As in Fig.~\\ref{fig:a.b}, the gain was 3.5 times higher, e.g. in model A. ",
+    "The error $x. y$ is small (Smith et al. 2020) and \\cite{a.b} agrees. ",
+    "The value \\(a. b\\) holds, i.e. always. ",
+])
+def test_no_split_inside_math_braces_numbers_or_abbreviations(text: str) -> None:
+    assert wa.sentences(text) == [text]
+
+
+def test_lines_end_pieces_and_whitespace_alone_is_no_change() -> None:
+    old = "\\item One. Two\n\\item Three.\n\nNext paragraph."
+    assert wa.sentences(old) == ["\\item One. ", "Two\n", "\\item Three.\n\n", "Next paragraph."]
+    assert wa.diff_hunks(old, "\\item One.  Two\n\\item   Three.\n\nNext paragraph.") == []
+    assert wa.sentences("") == [] and [h["new"] for h in wa.diff_hunks("", "\nx\n")] == ["\nx\n"]
+    appended = wa.diff_hunks("First sentence.", "First sentence. Added sentence.")
+    assert wa.applied_text("First sentence.", appended, [0]) == "First sentence. Added sentence."
+    added = wa.diff_hunks("One. Two.", "One. New one. Two.")
+    assert [(h["old"], h["new"]) for h in added] == [("", "New one. ")]
+    assert wa.applied_text("One. Two.", added, [0]) == "One. New one. Two."
 
 
 def test_fix_names_the_error_line_without_numbers(env) -> None:

@@ -228,6 +228,75 @@ questions:
       - {paper: "1806.07366", page: 1, contains: constant memory cost as a function of depth}
       - {paper: "1806.07366", page: 2, contains: compute gradients using the adjoint sensitivity method}
 
+  - id: fa02
+    lang: fa
+    question: چه عواملی به استنباط مبتنی بر شبیه‌سازی شتاب تازه‌ای داده‌اند؟
+    relevant:
+      - {paper: "1911.01429", page: 1, contains: forces are giving new momentum}
+      - {paper: "1911.01429", page: 3, contains: three main directions of progress}
+  - id: fa03
+    lang: fa
+    question: وقتی تلورانس اپسیلون در محاسبهٔ بیزی تقریبی به صفر میل می‌کند چه مشکلی پیش می‌آید؟
+    relevant:
+      - {paper: "1911.01429", page: 3, contains: for continuous data the acceptance probability vanishes}
+      - {paper: "1605.06376", page: 1, contains: These algorithms critically slow down}
+  - id: fa04
+    lang: fa
+    question: روش SNPE-A با توزیع پیشنهادی گاوسی خود به چه مشکلی برمی‌خورد؟
+    relevant:
+      - {paper: "1805.07226", page: 2, contains: Gaussian with negative variance}
+      - {paper: "1905.07488", page: 2, contains: does not admit multimodal proposals}
+      - {paper: "1805.07226", page: 6, contains: SNPE-A fails in the second round}
+  - id: fa05
+    lang: fa
+    question: چرا وزن‌های اهمیت در SNPE-B می‌توانند آموزش را ناپایدار کنند؟
+    relevant:
+      - {paper: "1805.07226", page: 2, contains: the weights can have high variance}
+      - {paper: "1905.07488", page: 3, contains: can lead to slow or inaccurate inference}
+  - id: fa08
+    lang: fa
+    question: روش SNL برای نمونه‌گیری از توزیع پسین تقریبی از کدام روش مونت‌کارلوی زنجیرهٔ مارکوف استفاده می‌کند؟
+    relevant:
+      - {paper: "1805.07226", page: 3, contains: in the form of Slice Sampling}
+  - id: fa11
+    lang: fa
+    question: وقتی ابعاد بی‌اطلاع زیادی به داده‌ها اضافه شود، APT و SNL چگونه رفتار می‌کنند؟
+    relevant:
+      - {paper: "1905.07488", page: 6, contains: APT degrades only slightly}
+  - id: fa14
+    lang: fa
+    question: جعبه‌ابزار sbi روی کدام چارچوب یادگیری عمیق ساخته شده و با چه مجوزی منتشر شده است؟
+    relevant:
+      - {paper: "2007.09114", page: 1, contains: PyTorch-based package}
+      - {paper: "2007.09114", page: 1, contains: under the AGPLv3 license}
+  - id: fa16
+    lang: fa
+    question: یادگرفتن تابع درست‌نمایی به جای توزیع پسین چه مزیت‌هایی دارد؟
+    relevant:
+      - {paper: "1805.07226", page: 8, contains: a model of the likelihood can be reused}
+      - {paper: "1911.01429", page: 7, contains: The prior independence}
+  - id: fa21
+    lang: fa
+    question: خطای پنج‌تای‌اول مجموعهٔ ResNet روی دادهٔ آزمون ImageNet چقدر بود؟
+    relevant:
+      - {paper: "1512.03385", page: 7, contains: This leads to 3.57% top-5 error on the test set}
+      - {paper: "1512.03385", page: 1, contains: achieves 3.57% error}
+  - id: fa23
+    lang: fa
+    question: چرا در سازوکار توجه، ضرب‌های داخلی بر ریشهٔ دوم بُعد کلیدها تقسیم می‌شوند؟
+    relevant:
+      - {paper: "1706.03762", page: 4, contains: extremely small gradients}
+  - id: fa27
+    lang: fa
+    question: شبکهٔ ODE در مقایسه با ResNet روی MNIST چه عملکردی داشت؟
+    relevant:
+      - {paper: "1806.07366", page: 3, contains: can achieve around the same performance as the ResNet}
+  - id: fa30
+    lang: fa
+    question: مقالهٔ مروری استنباط مبتنی بر شبیه‌سازی در بیشتر موارد امتحان کدام رویکرد را توصیه می‌کند؟
+    relevant:
+      - {paper: "1911.01429", page: 8, contains: we recommend trying methods based on training a neural network surrogate}
+
 matrix_question: How were these methods trained and released?
 matrix_columns:
   - key: code_available

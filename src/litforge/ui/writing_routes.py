@@ -93,7 +93,7 @@ def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) ->
         doc = _doc(conn, app, query)
         q = query.get("q", "")
         if query.get("tab") == "evidence":
-            return {"results": wcite.search_evidence(conn, doc.project_id, q)}
+            return {"results": wcite.search_evidence(conn, doc.project_id, q, gateway=app.make_gateway(conn))}
         return {"results": wcite.search_library(conn, doc.project_id, q)}
     if path == "/api/write/quote":
         return wcite.quotes_for_key(conn, _doc(conn, app, query), query.get("key", ""))
@@ -275,8 +275,8 @@ def chat(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str, A
     args = (str(body.get("question") or ""), str(body.get("selection") or ""), str(body.get("context") or ""),
             history)
     pad_before, pad_after = body.get("pad_before") is True, body.get("pad_after") is True
-    req = wchat.prepare(conn, doc, *args, pad_before=pad_before, pad_after=pad_after)
     gateway = app.make_gateway(conn)
+    req = wchat.prepare(conn, doc, *args, pad_before=pad_before, pad_after=pad_after, gateway=gateway)
     preview = wchat.preview(gateway, req).model_dump()
     sent = {"characters": len(req.question) + len(req.selection or str(body.get("context") or "")[:wchat.MAX_CONTEXT]),
             "evidence": len(req.evidence)}
@@ -291,8 +291,9 @@ def chat(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str, A
         job.messages.append(f"Asking {preview['model'] or preview['profile']}…")
         conn = app.db()
         try:
-            again = wchat.prepare(conn, doc, *args, pad_before=pad_before, pad_after=pad_after)
-            job.report = wchat.run(conn, app.make_gateway(conn), doc, again, file, approved=approved)
+            gateway = app.make_gateway(conn)
+            again = wchat.prepare(conn, doc, *args, pad_before=pad_before, pad_after=pad_after, gateway=gateway)
+            job.report = wchat.run(conn, gateway, doc, again, file, approved=approved)
         finally:
             conn.close()
 
@@ -312,8 +313,8 @@ def assist(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str,
                              "image": wassist.decode_image(str(body.get("image") or "")),
                              "pad_before": body.get("pad_before") is True, "pad_after": body.get("pad_after") is True,
                              "new_env": body.get("new_env") is True}
-    req = wassist.prepare(conn, doc, *args, **extra)
     gateway = app.make_gateway(conn)
+    req = wassist.prepare(conn, doc, *args, **extra, gateway=gateway)
     preview = wassist.preview(gateway, req).model_dump()
     sent = {"characters": len(req.text) + len(req.context), "images": len(req.images),
             "evidence": len(req.evidence)}
@@ -329,7 +330,8 @@ def assist(app: App, conn: sqlite3.Connection, doc: wd.Document, body: dict[str,
         conn = app.db()
         try:
             gateway = app.make_gateway(conn)
-            job.report = wassist.run(conn, gateway, doc, wassist.prepare(conn, doc, *args, **extra), file,
+            job.report = wassist.run(conn, gateway, doc, wassist.prepare(conn, doc, *args, **extra, gateway=gateway),
+                                     file,
                                      approved=approved)
         finally:
             conn.close()

@@ -19,6 +19,7 @@ from litforge.analysis.commands import register, run_ask
 from litforge.analysis.evaluation import evaluate_retrieval, load_benchmark
 from litforge.analysis.gateway import GatewayError, ModelGateway
 from litforge.analysis.ledger import record_spans
+from litforge.analysis.query_translate import search_query
 from litforge.analysis.retrieve import retrieve_for_question
 from litforge.analysis.runs import finish_run, link_evidence, start_run
 from litforge.config import Config, EnvSettings, Paths, contact_email, load_config, resolve_paths
@@ -630,6 +631,8 @@ def search_cmd(
     """Lexical (BM25) search; every hit carries paper, section, page and a quoted snippet."""
     st = _state(ctx)
     conn = st.db()
+    if not raw:  # a Persian query gets English search terms from the local model (the papers are English)
+        query = search_query(conn, ModelGateway(conn, st.config), query)
     hits = search(conn, query, _project(st, conn, project)[1], limit, max_per_paper, raw)
     if as_json:
         _emit_json(hits)
@@ -670,7 +673,9 @@ def ask(
         run_id = start_run(conn, "ask_evidence", pid, {"question": question},
                            {**st.config.model_dump(), "k": k}, "ask_evidence_v1")
         try:
-            hits = retrieve_for_question(conn, question, pid, k, all_versions=all_versions)
+            hits = retrieve_for_question(conn, search_query(conn, ModelGateway(conn, st.config), question,
+                                                            sensitive=sensitive, run_id=run_id), pid, k,
+                                         all_versions=all_versions)
             spans = record_spans(conn, hits)
             link_evidence(conn, run_id, spans, [h.score for h in hits], pages=[h.page for h in hits])
             result = {"run_id": run_id, "spans": [{**s.model_dump(), "page": h.page}
