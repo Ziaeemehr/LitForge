@@ -1858,6 +1858,64 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
+class ServerHandle:
+    """A running server owned by its caller: serve() for the browser, the desktop window otherwise."""
+
+    def __init__(self, app: App, httpd: ThreadingHTTPServer, thread: threading.Thread, url: str) -> None:
+        self.app = app
+        self._httpd = httpd
+        self._thread = thread
+        self._lock = threading.Lock()
+        self._cleanup: threading.Thread | None = None
+        self._closed = False
+        self.url = url
+
+    @property
+    def is_running(self) -> bool:
+        return self._thread.is_alive()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Wait until the server stops serving (stop(), or Quit in the page); True once it has."""
+        self._thread.join(timeout)
+        return not self._thread.is_alive()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        """Stop serving, then cancel jobs and stop owned processes (App.shutdown) once and free the address.
+
+        Safe to call again; raises TimeoutError while the cleanup is still running, so a caller never
+        reports a clean exit that did not happen."""
+        with self._lock:
+            if self._closed:
+                return
+            if self._cleanup is None:
+                self._httpd.shutdown()
+                self._thread.join()
+                self._cleanup = threading.Thread(target=self.app.shutdown, args=(timeout,), daemon=True,
+                                                 name="litforge-shutdown")
+                self._cleanup.start()
+            self._cleanup.join(timeout)
+            if self._cleanup.is_alive():
+                raise TimeoutError(f"LitForge did not finish stopping within {timeout:g} s")
+            self._httpd.server_close()
+            self._closed = True
+
+
+def start_server(paths: Paths, config: Config, *, host: str = "127.0.0.1", port: int = 0,
+                 idle_shutdown: bool = False) -> ServerHandle:
+    """Serve the UI from a background thread and return at once; never opens a browser.
+
+    `idle_shutdown` stops the server once no page has checked in for a while (browser mode only: a minimised
+    desktop window may not check in). Quit in the page stops it in both modes."""
+    app = App(paths, config)
+    httpd = ThreadingHTTPServer((host, port), make_handler(app))
+    app.stop = httpd.shutdown
+    if idle_shutdown:
+        stop_when_idle(app, httpd)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True, name="litforge-http")
+    thread.start()
+    return ServerHandle(app, httpd, thread, f"http://{host}:{httpd.server_address[1]}/")
+
+
 def serve(paths: Paths, config: Config, host: str = "127.0.0.1", port: int = 8765,
           open_browser: bool = True) -> None:
     import webbrowser
@@ -1869,21 +1927,17 @@ def serve(paths: Paths, config: Config, host: str = "127.0.0.1", port: int = 876
         if open_browser:
             webbrowser.open(f"http://{host}:{port}/")
         return
-    app = App(paths, config)
-    httpd = ThreadingHTTPServer((host, port), make_handler(app))
-    app.stop = httpd.shutdown
-    stop_when_idle(app, httpd)
-    url = f"http://{host}:{httpd.server_address[1]}/"
-    print(f"LitForge UI on {url}  (stop it with Quit in the page or Ctrl+C)")
+    handle = start_server(paths, config, host=host, port=port, idle_shutdown=True)
+    print(f"LitForge UI on {handle.url}  (stop it with Quit in the page or Ctrl+C)")
     if open_browser:
-        threading.Timer(0.5, webbrowser.open, args=(url,)).start()
+        threading.Timer(0.5, webbrowser.open, args=(handle.url,)).start()
     try:
-        httpd.serve_forever()
+        while not handle.wait(0.5):  # a short wait keeps Ctrl+C responsive
+            pass
     except KeyboardInterrupt:
         pass
     finally:
-        app.shutdown()
-        httpd.server_close()
+        handle.stop()
 
 
 def stop_when_idle(app: App, httpd: ThreadingHTTPServer, idle_s: float = IDLE_STOP_S, check_s: float = 5.0) -> None:
