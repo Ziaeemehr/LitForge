@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from litforge.desktop import host
+from litforge.desktop import host, instance
 from litforge.desktop.workspace import (
     WorkspaceError,
     load_settings,
@@ -35,6 +35,8 @@ def launch_desktop(explicit: Path | None = None, gui: str | None = None) -> int:
     except WorkspaceError as exc:
         host.show_native_error("LitForge", str(exc))
         return 2
+    if instance.activate_existing(workspace):  # before the port: the open window holds it
+        return 0
     saved_ports = settings.get("ports")
     ports: dict[str, int] = saved_ports if isinstance(saved_ports, dict) else {}
     port = preferred_port({"port": ports.get(str(workspace))})
@@ -47,11 +49,12 @@ def launch_desktop(explicit: Path | None = None, gui: str | None = None) -> int:
     host_python = settings.get("host_python")
     if engine == "gtk" and isinstance(host_python, str) and Path(host_python).exists():
         cmd = [host_python, "-I", str(Path(host.__file__)), "--gui", engine, "--log", str(log),
-               "--storage", str(storage), "--icon", str(ICON), *[a for p in preload for a in ("--preload", p)],
+               "--storage", str(storage), "--icon", str(ICON), "--workspace", str(workspace),
+               *[a for p in preload for a in ("--preload", p)],
                "--", *backend]
         return subprocess.call(cmd)
     return host.run_desktop(backend, gui=engine, title="LitForge", log_path=log, icon=ICON, storage_path=storage,
-                            preload=preload)
+                            preload=preload, workspace=workspace)
 
 
 def main() -> None:

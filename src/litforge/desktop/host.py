@@ -10,12 +10,14 @@ from __future__ import annotations
 import argparse
 import ctypes
 import html
+import importlib.util
 import json
 import shutil
 import subprocess
 import sys
 import threading
 import time
+import types
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -30,6 +32,18 @@ LOADING_HTML = (
 
 class BackendError(Exception):
     pass
+
+
+def _sibling(name: str) -> types.ModuleType:
+    """Load a module next to this file by path: under the system Python `litforge` is not importable."""
+    spec = importlib.util.spec_from_file_location(f"_litforge_desktop_{name}", Path(__file__).with_name(name + ".py"))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+instance = _sibling("instance")
 
 
 def _log(log_path: Path, text: str) -> None:
@@ -160,10 +174,41 @@ def show_native_error(title: str, text: str) -> None:
 
 def run_desktop(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: Path,
                 icon: Path | None = None, storage_path: Path | None = None,
-                preload: Sequence[str] = ()) -> int:
+                preload: Sequence[str] = (), workspace: Path | None = None, runtime_dir: Path | None = None) -> int:
     """Open the window and run until it is closed: 0 after a normal session, 1 when the backend failed (its
-    error is shown in the window), 2 when no window could be opened (a native message is shown instead)."""
+    error is shown in the window), 2 when no window could be opened (a native message is shown instead).
+
+    With `workspace`, one window per library: when one is already open it is brought forward instead."""
     log_path = Path(log_path)
+    holder: dict[str, object] = {}
+
+    def bring_forward() -> None:
+        window = holder.get("window")
+        if window is not None:
+            window.restore()  # type: ignore[attr-defined]
+            window.show()  # type: ignore[attr-defined]
+
+    lease = None
+    if workspace is not None:
+        try:
+            lease = instance.acquire_instance(workspace, bring_forward, runtime_dir=runtime_dir)
+        except instance.InstanceError as exc:
+            _log(log_path, str(exc))
+            show_native_error(title, str(exc))
+            return 2
+        if lease is None:
+            _log(log_path, "LitForge is already open for this library: brought its window forward")
+            return 0
+    try:
+        return _run_window(backend_cmd, gui=gui, title=title, log_path=log_path, icon=icon,
+                           storage_path=storage_path, preload=preload, holder=holder)
+    finally:
+        if lease is not None:
+            lease.close()
+
+
+def _run_window(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: Path, icon: Path | None,
+                storage_path: Path | None, preload: Sequence[str], holder: dict[str, object]) -> int:
     for lib in preload:  # e.g. libxcb-cursor for Qt on X11, copied by the installer without sudo
         try:
             ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
@@ -180,6 +225,7 @@ def run_desktop(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
     result = {"rc": 0}
     window = webview.create_window(title, html=LOADING_HTML, width=1280, height=860, min_size=(820, 560))
     assert window is not None
+    holder["window"] = window
 
     def session() -> None:
         try:
@@ -219,13 +265,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--storage", type=Path)
     parser.add_argument("--icon", type=Path)
     parser.add_argument("--preload", action="append", default=[])
+    parser.add_argument("--workspace", type=Path)
     parser.add_argument("backend", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     backend = args.backend[1:] if args.backend[:1] == ["--"] else args.backend
     if not backend:
         parser.error("give the backend command after --")
     return run_desktop(backend, gui=args.gui, title=args.title, log_path=args.log, icon=args.icon,
-                       storage_path=args.storage, preload=args.preload)
+                       storage_path=args.storage, preload=args.preload, workspace=args.workspace)
 
 
 if __name__ == "__main__":

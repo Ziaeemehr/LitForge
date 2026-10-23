@@ -56,6 +56,12 @@ class FakeWindow:
         self.calls.append(("destroy", ""))
         self.events.closed.set()
 
+    def restore(self) -> None:
+        self.calls.append(("restore", ""))
+
+    def show(self) -> None:
+        self.calls.append(("show", ""))
+
 
 def fake_webview(close_on_navigate: bool = True) -> tuple[types.ModuleType, dict[str, Any]]:
     seen: dict[str, Any] = {}
@@ -154,6 +160,56 @@ def test_an_engine_that_cannot_start_shows_a_native_message_and_stops_the_backen
     rc = host.run_desktop([sys.executable, "-c", READY], gui="gtk", title="LitForge", log_path=tmp_path / "d.log")
     assert rc == 2
     assert "QT or GTK" in shown[0][1] and str(tmp_path / "d.log") in shown[0][1]
+
+
+def test_a_second_window_for_the_same_library_brings_the_first_forward(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from litforge.desktop import instance
+
+    mod, seen = fake_webview()
+    monkeypatch.setitem(sys.modules, "webview", mod)
+    ws, run_dir, marker = tmp_path / "ws", tmp_path / "run", tmp_path / "backend-started"
+    activated: list[int] = []
+    lease = instance.acquire_instance(ws, lambda: activated.append(1), runtime_dir=run_dir)
+    try:
+        rc = host.run_desktop([sys.executable, "-c", f"open({str(marker)!r}, 'w')"], gui="gtk", title="LitForge",
+                              log_path=tmp_path / "d.log", workspace=ws, runtime_dir=run_dir)
+    finally:
+        assert lease is not None
+        lease.close()
+    assert rc == 0 and activated == [1]
+    assert "window" not in seen and not marker.exists()  # no second window, no second backend
+
+
+def test_the_window_owns_its_library_and_comes_forward_when_asked(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from litforge.desktop import instance
+
+    mod, seen = fake_webview()
+    ws, run_dir = tmp_path / "ws", tmp_path / "run"
+    answered: list[bool] = []
+    real_create = mod.create_window
+
+    def create_window(title: str, html: str = "", **kw: Any) -> FakeWindow:
+        window = real_create(title, html=html, **kw)
+        original = window.load_url
+
+        def load_url(url: str) -> None:  # while the window is open, a second launch asks it to come forward
+            answered.append(instance.activate_existing(ws, runtime_dir=run_dir))
+            original(url)
+
+        window.load_url = load_url  # type: ignore[method-assign]
+        return window
+
+    mod.create_window = create_window  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "webview", mod)
+    rc = host.run_desktop([sys.executable, "-c", READY], gui="gtk", title="LitForge", log_path=tmp_path / "d.log",
+                          workspace=ws, runtime_dir=run_dir)
+    assert rc == 0 and answered == [True]
+    assert ("restore", "") in seen["window"].calls and ("show", "") in seen["window"].calls
+    lease = instance.acquire_instance(ws, lambda: None, runtime_dir=run_dir)  # released when the window closed
+    assert lease is not None
+    lease.close()
 
 
 class _OnlyStdlib(importlib.abc.MetaPathFinder):
