@@ -217,7 +217,8 @@ def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, question: str, p
     if not spans:
         return plan
     packet, messages = gateway.fit_evidence("ask", to_packet(spans, sensitive=sensitive),
-        lambda p: ask_messages(question, p, spans), profile, schema=AnswerDraft.model_json_schema())
+        lambda p: ask_messages(question, p, spans, query[len(question):].strip() or None), profile,
+        schema=AnswerDraft.model_json_schema())
     return [*plan, gateway.preview("ask", packet, messages, profile=profile, schema=AnswerDraft.model_json_schema())]
 
 
@@ -236,7 +237,8 @@ def ask(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_
         model, provider = "", ""
         if spans:
             packet, messages = gateway.fit_evidence("ask", to_packet(spans, sensitive=sensitive),
-                lambda p: ask_messages(question, p, spans), profile, schema=AnswerDraft.model_json_schema())
+                lambda p: ask_messages(question, p, spans, query[len(question):].strip() or None), profile,
+        schema=AnswerDraft.model_json_schema())
             reply = gateway.call("ask", packet, messages, AnswerDraft.model_json_schema(),
                                  profile=profile, approved=approved, run_id=run_id, prompt_version=ASK_PROMPT_VERSION)
             draft = AnswerDraft.model_validate(reply.content)
@@ -245,6 +247,11 @@ def ask(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_
             packet = None
             draft = AnswerDraft(sentences=[SentenceDraft(
                 text="No evidence found in the library for this question.", kind="unsupported")], insufficient=True)
+        # A small model given a Persian question sometimes returns the question itself (real run, 2026-10-23).
+        asked = " ".join(question.split()).rstrip("?؟ ")
+        draft.sentences = [s for s in draft.sentences if " ".join(s.text.split()).rstrip("?؟ ") != asked] or (
+            draft.sentences and [SentenceDraft(text="The model repeated the question instead of answering it.",
+                                               kind="unsupported")])
         sentences, invalid = validate_sentences(draft.sentences, packet, spans)
         answer = Answer(run_id=run_id, question=question, sentences=sentences, evidence=spans,
                         invalid_citations=invalid, insufficient=draft.insufficient, model=model, provider=provider,

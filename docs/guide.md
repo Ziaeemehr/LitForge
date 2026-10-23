@@ -503,7 +503,8 @@ in another editor. Start from the **English article** or **Persian article** tem
 - **AI** works on the selection only: **Fix this error** (click a compile error first), **Rewrite: clearer /
   shorter**, **Translate** to English or Persian, and **Suggest citations** from the project's evidence. The local
   model is used unless you assign a cloud model to the `write_fix`, `write_rewrite` or `write_cite` task; a cloud
-  route asks before sending and says what is sent. The answer is shown as changes you accept or reject one by one;
+  route asks before sending and says what is sent. The answer is shown as changes you accept or reject one by one,
+  one changed sentence at a time with the removed and added words marked inside it (right to left for Persian);
   nothing changes before you click **Apply accepted**. Changes are flagged (and start as rejected) when they add a
   number that is not in your text or the evidence, a citation key that is unknown or not backed by a quote, drop
   LaTeX commands, math, `\cite`, `\ref` or `\label`, or add commands. Suggested citations are kept only when
@@ -705,6 +706,15 @@ All model calls use the configured gateway. Source text is treated as untrusted 
 unknown citations are removed and uncited facts become `unsupported`. Numeric checks compare
 normalised numbers (including decimal, scientific and thousands notation) with the cited
 text actually sent to the model. These checks validate citations and numbers, not semantic truth.
+
+A question written in Persian finds evidence in English papers: the local model first turns it into English
+search terms (the `query_translate` task, local in every mode, cached per question), which are searched together
+with the words as written. The answer is written in Persian and its quotes stay in the paper's English. The same
+step runs for `litforge search`, Writing Studio citations and the assistant. If the model is not available, the
+words are searched as written. On the sbi10 benchmark this raised Persian Recall@10 from 22% to 66% (English:
+67%). The small default model (`qwen3:4b`) often writes poor Persian or repeats the question (such an answer is
+replaced by a note); `qwen3:8b` answered 16 of 20 Persian questions in good Persian, so assign a larger model to
+the `ask` task if you ask in Persian.
 
 Ask also shows verified exact supporting quotes under each sentence (up to three, 400 characters each).
 Click a quote's paper/page chip to open its evidence with the original passage highlighted. Quotes are

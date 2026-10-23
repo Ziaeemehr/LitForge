@@ -63,3 +63,29 @@ def test_translation_is_appended_cached_and_sent_as_the_query_only(conn: sqlite3
 def test_failures_fall_back_to_the_words_as_written(conn: sqlite3.Connection, gateway: FakeGateway) -> None:
     assert search_query(conn, gateway, QUESTION) == QUESTION  # type: ignore[arg-type]
     assert conn.execute("SELECT COUNT(*) FROM query_translations").fetchone()[0] == 0
+
+
+def test_persian_question_asks_for_a_persian_answer_and_carries_the_translation(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    from litforge.analysis import prompts
+    from litforge.analysis.prompts import ask_messages
+    from litforge.llm.evidence import EvidenceItem, EvidencePacket
+    monkeypatch.setattr(prompts, "evidence_text", lambda packet, spans: "<evidence/>")
+    packet = EvidencePacket(items=[EvidenceItem(id="e1", paper_id="p", text="SNL learns the likelihood.", page=1)])
+    system, user = ask_messages(QUESTION, packet, [], "How does SNL avoid proposal bias?")
+    assert "write every sentence of the answer in Persian" in system["content"]
+    assert "never repeat or restate the question" in system["content"]
+    assert user["content"].startswith("Question: How does SNL avoid proposal bias?\nAsked in Persian as: " + QUESTION)
+    english = ask_messages("How does SNL work?", packet, [])
+    assert "never repeat" not in english[0]["content"] and english[1]["content"].startswith("How does SNL work?\n")
+
+
+def test_an_answer_that_repeats_the_question_is_not_presented_as_an_answer(conn: sqlite3.Connection) -> None:
+    from lens_fakes import gateway, seed
+    span = seed(conn, text="Results: SNL learns the likelihood with a flow.")
+    gw, _ = gateway(conn, {"sentences": [{"text": "What does SNL learn?", "kind": "reported_fact",
+                                          "evidence_ids": [span.id], "quotes": []}], "insufficient": False})
+    from litforge.analysis.ask import ask
+    answer = ask(conn, gw, "What does SNL learn?")
+    assert [s.text for s in answer.sentences] == ["The model repeated the question instead of answering it."]
+    assert answer.sentences[0].kind == "unsupported"
