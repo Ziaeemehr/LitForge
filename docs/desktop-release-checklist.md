@@ -190,4 +190,20 @@ Windows shortcut migration regressions. Both new migration cases passed after ob
 browser launcher fail first. Ruff and mypy passed. Real Cocoa smoke passed including desktop runtime
 copy, PDF worker/RTL, external-link handoffs and clean shutdown. In the restricted sandbox the macOS
 Quick Look icon-generation test could not run successfully; native CI will verify it on a real runner.
-Three CI rounds are pending; do not treat these local results as cross-platform completion.
+CI source: `8bb6635`. Round 1 passed all five jobs: 2133 Python tests passed, 4 skipped,
+43 warnings; 262 UI tests, Ruff and mypy passed. Native desktop/server regressions: Linux
+142 passed / 1 skipped; Windows 140 passed / 3 skipped; both Macs 143 passed. Every native
+report recorded desktop runtime, PDF worker/text/RTL, both external link handoffs and clean
+host/backend/lease shutdown. The Mac CI jobs also passed actual icon generation.
+
+| Round | Evidence | Result |
+| --- | --- | --- |
+| 1 | [Run 40024297145, attempt 1](https://github.com/Ziaeemehr/LitForge/actions/runs/40024297145/attempts/1) | PASS — all five jobs green. |
+| 2 | [Run 40024297145, attempt 2](https://github.com/Ziaeemehr/LitForge/actions/runs/40024297145/attempts/2), same source on fresh runners | PASS — all five jobs green; same regression counts and every native smoke check passed. |
+| 3 | [Run 40024297145, attempt 3](https://github.com/Ziaeemehr/LitForge/actions/runs/40024297145/attempts/3), same source on fresh runners | PASS — all five jobs green; same regression counts and every native smoke check passed. |
+
+These are automated native-engine checks; manual daily use, clean-machine installer validation
+and signing/release acceptance remain separate. The user subsequently authorized committing, merging into `main` and pushing. All three rounds passed
+before integration; `main` was the unchanged ancestor, allowing a fast-forward with identical product
+code. No release is published. Independent review found the old generated Windows BAT migration
+issue, which was fixed and verified; the follow-up review found no further material issue.
