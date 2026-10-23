@@ -20,6 +20,7 @@ import time
 import types
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, cast
 
 START_TIMEOUT = 90.0  # a first start may migrate the database
 LOADING_HTML = (
@@ -288,7 +289,7 @@ def _run_window(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
         settings["ALLOW_DOWNLOADS"] = True  # exports and saved briefs: a save dialog, not a silent failure
         settings["ALLOW_FILE_URLS"] = False  # the window shows LitForge, never local files as pages
     try:
-        webview.start(session, (), gui=gui, private_mode=False,  # type: ignore[arg-type]  # gui is checked by pywebview
+        webview.start(session, (), gui=cast(Any, gui), private_mode=False,  # gui is checked by pywebview
                       storage_path=str(storage_path) if storage_path is not None else None,
                       icon=str(icon) if icon is not None else None)
     except Exception as exc:  # noqa: BLE001 - any engine failure ends in the same message

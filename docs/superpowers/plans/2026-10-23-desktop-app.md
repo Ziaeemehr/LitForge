@@ -10,6 +10,27 @@
 
 **Spec:** The embedded design below records the user's requirement and the proposed technical decisions. No separate design has been approved. Confirm the renderer choice after the compatibility investigation and review this plan before product implementation.
 
+## Execution checkpoint (2026-10-23)
+
+The user requested resuming this plan, three rounds of execution/diagnosis/fixes, and GitHub Actions
+validation on Linux, Windows and macOS. Commits `24e9974` through `02b15a2` implement the server,
+host, workspace selection, instance ownership, close flow, links/downloads, engine setup and launchers
+(Tasks 2–6). Their unchecked acceptance items below are still requirements, not proof of completion.
+Task 1 has Linux X11 evidence and a macOS 27 Apple Silicon probe; the proposed minimum OS versions
+and remaining manual interactions are unverified.
+
+**Next step:** finish automated cross-platform validation of Tasks 1–6. Bring forward only Task 8's
+test matrix and real-webview evidence collection. Task 7's native packaging and Task 8's artifact
+build/sign/publish steps remain later work, after Milestone B is validated and used daily.
+
+Use `.github/workflows/desktop.yml` for a native matrix (Ubuntu GTK, Windows WebView2, macOS Cocoa),
+`scripts/desktop_smoke.py` for a bounded production-host smoke check with scratch data, and
+`docs/desktop-release-checklist.md` for evidence from all three rounds. Run the full Python suite,
+Node UI suite, Ruff and mypy on Linux, desktop Python tests and UI tests on every target, and the
+real engine on every target. A smoke failure must fail its job and preserve logs. Diagnose before
+fixing, then rerun; a green rerun without code changes is a stability round. Never substitute three
+identical retries of a known defect for a fix. Preserve the current branch and its in-progress changes.
+
 ## Embedded design
 
 ### Confirmed requirement

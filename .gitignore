@@ -34,3 +34,7 @@ scripts/spell/node_modules/
 # made by `litforge desktop-setup` in the install folder
 /desktop-host/
 /desktop-libs/
+
+# Desktop CI environments and evidence (published as Actions artifacts)
+/.desktop-host-ci/
+/desktop-results/

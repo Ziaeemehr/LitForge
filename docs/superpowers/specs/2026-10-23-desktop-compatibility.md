@@ -1,6 +1,6 @@
 # Desktop window: compatibility investigation (desktop plan, Task 1)
 
-> Date: 2026-10-23. Status: **Linux done; Windows and macOS still need a run on real machines** (steps below).
+> Date: 2026-10-23. Status: **Linux X11 and macOS 27.0.1 Apple Silicon probes run; Windows, Intel Macs and the proposed minimum macOS version still need real-machine runs** (steps below).
 > Probe: [2026-10-23-desktop-probe.py](2026-10-23-desktop-probe.py), a disposable script, not product code.
 
 ## What the probe does
@@ -55,7 +55,48 @@ Server process (`litforge ui`): 73–88 MB, import 0.4 s, ready in 0.6–1.1 s. 
 
 The installer chooses the Linux engine once, by trying `python3 -c "import gi; gi.require_version('WebKit2','4.1')"` and then `'4.0'`. It records the choice, and Settings shows it. Electron, Tauri and the GTK backend inside the uv Python are rejected (see the plan's approaches table).
 
-## Still to run (Windows and macOS)
+## macOS result (2026-10-23)
+
+The existing disposable probe ran on macOS 27.0.1 (build 26A434), Apple Silicon (`arm64`),
+CPython 3.12.15, pywebview 6.2.1 and PyObjC 12.2.2, using `gui="cocoa"` (WKWebView).
+The window closed automatically after the checks; it used a scratch library in `/private/tmp`.
+
+| Check | Result |
+| --- | --- |
+| Window shown | 2.69 s |
+| Backend ready | 3.16 s |
+| App loaded | 3.36 s |
+| PDF.js rendering and text extraction | Pass: one page, `LitForge probe page` |
+| Spell worker | No load error during the probe's 1.5 s observation; spellchecking itself was not exercised |
+| CodeMirror | Present (`object`) |
+| Promise.withResolvers, structuredClone, crypto.randomUUID, Intl.Segmenter, CSS :has | All present |
+| Clipboard API / secure context | Present / true; clipboard interaction was not exercised |
+| Persian DOM direction | `rtl`; keyboard input was not exercised |
+| Navigation DOMContentLoaded | 158 ms |
+
+This run exceeds the proposed 1 s visible-window and 3 s usable-app targets. These are single-run
+measurements, not a startup benchmark. Memory was not measured. The probe launches the browser-mode
+backend without opening a browser, so it does not validate the production desktop host's close,
+single-instance or installer flows. Manual input, shortcuts, drag and drop, downloads and dialogs
+remain unverified. This result establishes compatibility on this machine only; it does not establish
+the proposed macOS 13 floor or Intel compatibility.
+
+An additional automated smoke run used the production `host.run_desktop()` with the real Cocoa
+engine and `litforge desktop-server`, in a separate scratch workspace. It waited for the page's
+`window.LitForgeDesktop` adapter and 136 buttons, then requested window destruction. The host
+returned 0, removed its instance JSON record and stopped its loopback listener (a subsequent
+connection returned macOS `ECONNREFUSED`, errno 61). The reusable `.lock` file remained. This
+checks an idle, unedited session only; dirty-editor closing, running jobs, repeated launch,
+minimize/sleep and icon installation still need real-window checks.
+
+Reproduce from the repository root with pywebview 6.2.1 installed in a separate probe environment:
+
+```sh
+<probe-python> -I docs/superpowers/specs/2026-10-23-desktop-probe.py \
+  --gui cocoa --litforge "$PWD/.venv/bin/litforge" --data <empty-scratch-folder>
+```
+
+## Still to run (Windows and remaining macOS targets)
 
 On each machine, with LitForge installed by the normal installer:
 

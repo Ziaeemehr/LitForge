@@ -254,6 +254,14 @@ def test_downloads_have_a_folder_even_without_xdg_user_dirs(tmp_path: Path, monk
 
     gtk = types.ModuleType("webview.platforms.gtk")
     gtk.BrowserView = BrowserView  # type: ignore[attr-defined]
+    webview = types.ModuleType("webview")
+    webview.__path__ = []  # type: ignore[attr-defined]
+    platforms = types.ModuleType("webview.platforms")
+    platforms.__path__ = []  # type: ignore[attr-defined]
+    platforms.gtk = gtk  # type: ignore[attr-defined]
+    webview.platforms = platforms  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "webview", webview)
+    monkeypatch.setitem(sys.modules, "webview.platforms", platforms)
     monkeypatch.setitem(sys.modules, "webview.platforms.gtk", gtk)
     monkeypatch.setattr(host.Path, "home", staticmethod(lambda: tmp_path))
     host.patch_gtk_file_dialog()
