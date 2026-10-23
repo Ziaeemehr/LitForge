@@ -31,7 +31,7 @@ separate acceptance checks. No installer or release artifact is produced by this
 | --- | --- | --- | --- |
 | 1 | `8b6b9da`; [run 40015300222](https://github.com/Ziaeemehr/LitForge/actions/runs/40015300222) | GTK and both Cocoa smoke checks passed. WebView2 passed page/PDF/worker/activation/close, but its closed-port check timed out at 2 s. Node 22 did not accept a test directory. Windows exposed POSIX-specific test assumptions; base-only mypy exposed two stale ignores. | Workflow failed; fixes prepared for round 2. |
 | 2 | `cc9c01e`; [run 40015981059](https://github.com/Ziaeemehr/LitForge/actions/runs/40015981059) | Linux GTK and both Cocoa jobs passed. Windows desktop tests (134 passed, 3 skipped) and all UI tests passed; its smoke called JavaScript before the renderer loaded and hit pywebview's internal startup timeout. Full Linux suite exposed a PowerShell warning-stream assertion (2126 passed, 1 failed, 4 skipped). | Workflow failed; two fixes prepared for round 3. |
-| 3 | Pending | Diagnose remaining findings and verify all targets again. | Not run |
+| 3 | `b5bcdcb`; [run 40016796125](https://github.com/Ziaeemehr/LitForge/actions/runs/40016796125) | Corrected load-event timing and PowerShell warning assertion; all four native targets and full Linux quality job completed successfully. | **PASS — all five jobs green.** |
 
 ### Round 1 diagnosis and fixes
 
@@ -76,9 +76,46 @@ Before round 3, the clean local full suite passed 2127 tests (4 skipped), and th
 checks passed. Round 2's first-round portability failures did not recur. Its Windows renderer
 timeout prevented rechecking the 10-second connection probe; that check is still required.
 
+### Round 3 verified evidence
+
+All jobs below ran against `b5bcdcba1bd4538f4085c0b93e5767557a8eaa35` and concluded `success`.
+The later documentation-only commit records these results without triggering an unnecessary fourth round.
+
+| Target | Desktop/server Python tests | UI tests | Native smoke |
+| --- | --- | --- | --- |
+| Ubuntu 24.04 x64, system GTK/WebKitGTK, virtual X11 | 138 passed, 1 skipped | 258 passed | All checks passed |
+| Windows Server 2022 x64, WebView2 | 136 passed, 3 skipped | 258 passed | All checks passed |
+| macOS 15.7.9 Intel, Cocoa/WKWebView | 139 passed | 258 passed | All checks passed |
+| macOS 15.7.9 Apple Silicon, Cocoa/WKWebView | 139 passed | 258 passed | All checks passed |
+
+The separate Linux quality job passed **2129 Python tests**, with 4 skips and 43 warnings;
+Ruff, mypy (139 source files) and all 258 UI tests also passed. Skips and warnings remain
+visible in the JUnit reports/job logs; this is not a claim of executing optional live services.
+All native reports use pywebview 6.2.1. The Linux host used CPython 3.12.3; Windows and both
+Mac hosts used CPython 3.12.10. Each report verified PDF rendering/text, an actual worker response,
+desktop API/adapter presence, essential browser APIs, RTL direction, authenticated window activation,
+idle close, backend exit code 0, closed loopback listener and reacquirable instance ownership.
+The Windows 10-second connection-refusal check passed in this round.
+
+Observed shown/backend-ready/app-ready times in seconds were Linux `2.206 / 1.030 / 3.266`,
+Windows `1.703 / 2.063 / 8.610`, Mac Intel `2.298 / 39.270 / 40.589`, and Mac ARM
+`0.868 / 37.252 / 38.724`. These hosted-runner timings exceed the product startup targets;
+they are recorded rather than used to claim a performance acceptance pass. A local macOS 27 ARM
+smoke with the loaded-event fix showed the window at 0.191 s and initialized the app at 0.582 s.
+Use controlled, unlocked real machines for a representative startup benchmark.
+
+Evidence artifacts on the successful run: `desktop-quality-1`, `desktop-linux-gtk-x64-1`,
+`desktop-windows-webview2-x64-1`, `desktop-macos-cocoa-x64-1`, and `desktop-macos-cocoa-arm64-1`
+(14-day artifact retention; job logs/run links above also record the results).
+
+The independent code review reported no remaining material findings after the process-tree timeout
+fix. The user-requested three-round automated validation is complete. Next: the remaining Task 1/6
+manual interactions and end-user OS checks below, then Task 7 packaging when Milestone B's daily-use
+condition in the plan is satisfied. Automated validation alone does not complete the whole desktop plan.
+
 ## Acceptance still required
 
-- [ ] Native CI window flow on all listed targets, with links to passing evidence.
+- [x] Native CI window flow on all listed targets, with links to passing evidence.
 - [ ] Windows 11 and proposed minimum macOS versions on actual machines.
 - [ ] Existing library and optional tools preserved through install/update.
 - [ ] Icon launch, second launch and restart after a crash on each target.

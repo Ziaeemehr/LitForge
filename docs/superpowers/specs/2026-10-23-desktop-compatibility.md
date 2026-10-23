@@ -3,6 +3,12 @@
 > Date: 2026-10-23. Status: **Linux X11 and macOS 27 Apple Silicon probes run; native CI also exercised GTK, WebView2 and both macOS 15 architectures. CI findings and three-round results are tracked in the [validation checklist](../../desktop-release-checklist.md). Windows 11, the proposed minimum macOS version and manual interaction still need real-machine runs.**
 > Probe: [2026-10-23-desktop-probe.py](2026-10-23-desktop-probe.py), a disposable script, not product code.
 
+The production-host CI driver is now `scripts/desktop_smoke.py`. Its third-round
+[Actions run](https://github.com/Ziaeemehr/LitForge/actions/runs/40016796125) passed actual GTK,
+WebView2 and Cocoa windows on Linux, Windows Server 2022 and both macOS 15.7.9 architectures.
+The [validation checklist](../../desktop-release-checklist.md#round-3-verified-evidence) records
+exact test counts, runtime versions, startup timings and the remaining manual/end-user checks.
+
 ## What the probe does
 
 1. **Window first:** it opens a window at once with an inline "Starting LitForge…" page.

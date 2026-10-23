@@ -19,7 +19,7 @@ host, workspace selection, instance ownership, close flow, links/downloads, engi
 Task 1 has Linux X11 evidence and a macOS 27 Apple Silicon probe; the proposed minimum OS versions
 and remaining manual interactions are unverified.
 
-**Next step:** finish automated cross-platform validation of Tasks 1–6. Bring forward only Task 8's
+**Validation scope:** finish automated cross-platform validation of Tasks 1–6. Bring forward only Task 8's
 test matrix and real-webview evidence collection. Task 7's native packaging and Task 8's artifact
 build/sign/publish steps remain later work, after Milestone B is validated and used daily.
 
@@ -30,6 +30,15 @@ Node UI suite, Ruff and mypy on Linux, desktop Python tests and UI tests on ever
 real engine on every target. A smoke failure must fail its job and preserve logs. Diagnose before
 fixing, then rerun; a green rerun without code changes is a stability round. Never substitute three
 identical retries of a known defect for a fix. Preserve the current branch and its in-progress changes.
+
+**Checkpoint result:** the three rounds are recorded in the linked validation checklist. Round 3,
+[Actions run 40016796125](https://github.com/Ziaeemehr/LitForge/actions/runs/40016796125), passed
+all five jobs on commit `b5bcdcb`: native GTK, WebView2, Intel Cocoa and ARM Cocoa, plus the full
+Linux suite (2129 passed, 4 skipped), 258 UI tests, Ruff and mypy. This completes Task 8's
+automated validation subset only. **Next step:** finish the remaining Task 1/6 manual input,
+download/dialog, existing-library, running-job close, minimum-OS and sleep/wake acceptance checks.
+Then follow the plan's daily-use gate before Task 7's native runtime/installers. Do not mark all
+Tasks 1–6 complete merely because their automated checks passed.
 
 ## Embedded design
 
