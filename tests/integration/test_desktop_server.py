@@ -162,3 +162,36 @@ def test_desktop_server_announces_that_it_is_stopping(tmp_path: Path) -> None:
     finally:
         if proc.poll() is None:
             proc.kill()
+
+
+def test_a_paper_pdf_opens_in_the_system_pdf_app(paths: Paths, monkeypatch: pytest.MonkeyPatch,
+                                                  tmp_path: Path) -> None:
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.7")
+    opened: list[Path] = []
+    monkeypatch.setattr(srv.api, "paper_pdf", lambda conn, p, paper_id: (pdf, "Paper.pdf"))
+    monkeypatch.setattr(srv, "open_with_system", lambda path: opened.append(path))
+    handle = start_server(paths, load_config(), desktop=True)
+    try:
+        req = urllib.request.Request(handle.url + "api/open-pdf", data=json.dumps({"paper": "p1"}).encode(),
+                                     method="POST", headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            assert json.loads(resp.read()) == {"opened": str(pdf)}
+        assert opened == [pdf]
+    finally:
+        handle.stop()
+
+
+def test_open_pdf_needs_a_paper_or_a_document(paths: Paths, monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.error
+
+    monkeypatch.setattr(srv, "open_with_system", lambda path: pytest.fail("nothing to open"))
+    handle = start_server(paths, load_config(), desktop=True)
+    try:
+        req = urllib.request.Request(handle.url + "api/open-pdf", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json"})
+        with pytest.raises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(req, timeout=5)
+        assert err.value.code in (400, 404)
+    finally:
+        handle.stop()

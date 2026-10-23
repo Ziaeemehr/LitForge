@@ -84,6 +84,8 @@ def fake_webview(close_on_navigate: bool = True) -> tuple[types.ModuleType, dict
 
     mod.create_window = create_window  # type: ignore[attr-defined]
     mod.start = start  # type: ignore[attr-defined]
+    mod.settings = {"ALLOW_DOWNLOADS": False, "ALLOW_FILE_URLS": True,  # type: ignore[attr-defined]
+                    "OPEN_EXTERNAL_LINKS_IN_BROWSER": True}
     return mod, seen
 
 
@@ -101,6 +103,8 @@ def test_window_shows_the_loading_page_first_then_navigates_to_the_backend(
     assert seen["start"]["private_mode"] is False  # localStorage keeps the user's preferences
     assert seen["start"]["storage_path"] == str(tmp_path / "web")
     assert len(seen["window"].events.closing.handlers) == 1  # the close button asks the page first
+    assert mod.settings == {"ALLOW_DOWNLOADS": True, "ALLOW_FILE_URLS": False,  # type: ignore[attr-defined]
+                            "OPEN_EXTERNAL_LINKS_IN_BROWSER": True}  # save dialog for downloads; no file:// pages
 
 
 def test_a_backend_that_fails_shows_the_error_and_the_log_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -230,6 +234,28 @@ def test_the_window_owns_its_library_and_comes_forward_when_asked(
     lease = instance.acquire_instance(ws, lambda: None, runtime_dir=run_dir)  # released when the window closed
     assert lease is not None
     lease.close()
+
+
+def test_downloads_have_a_folder_even_without_xdg_user_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[Any] = []
+
+    class BrowserView:
+        def create_file_dialog(self, dialog_type: int, directory: Any, *rest: Any) -> str:
+            seen.append(directory)
+            return "ok"
+
+    gtk = types.ModuleType("webview.platforms.gtk")
+    gtk.BrowserView = BrowserView  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "webview.platforms.gtk", gtk)
+    monkeypatch.setattr(host.Path, "home", staticmethod(lambda: tmp_path))
+    host.patch_gtk_file_dialog()
+    host.patch_gtk_file_dialog()  # applying it twice wraps once
+    assert BrowserView().create_file_dialog(20, None, False, "a.zip", ()) == "ok"
+    assert BrowserView().create_file_dialog(20, "/given", False, "a.zip", ()) == "ok"
+    assert seen == [str(tmp_path), "/given"]
+    (tmp_path / "Downloads").mkdir()
+    BrowserView().create_file_dialog(20, None, False, "a.zip", ())
+    assert seen[-1] == str(tmp_path / "Downloads")
 
 
 class _OnlyStdlib(importlib.abc.MetaPathFinder):

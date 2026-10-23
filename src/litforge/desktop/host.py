@@ -180,6 +180,28 @@ def show_native_error(title: str, text: str) -> None:
         pass
 
 
+def patch_gtk_file_dialog() -> None:
+    """pywebview 6.2.1 on GTK crashes the save dialog when GLib knows no Downloads folder (no XDG user-dirs, as on
+    minimal installs): fall back to ~/Downloads, else the home folder. Applied once; harmless if pywebview changed."""
+    try:
+        from webview.platforms import gtk as webview_gtk
+    except Exception:  # noqa: BLE001 - not the GTK engine, or a pywebview without it
+        return
+    view = getattr(webview_gtk, "BrowserView", None)
+    original = getattr(view, "create_file_dialog", None)
+    if view is None or original is None or getattr(original, "_litforge_patched", False):
+        return
+
+    def create_file_dialog(self: object, dialog_type: object, directory: object, *rest: object) -> object:
+        if not directory:
+            downloads = Path.home() / "Downloads"
+            directory = str(downloads if downloads.is_dir() else Path.home())
+        return original(self, dialog_type, directory, *rest)
+
+    create_file_dialog._litforge_patched = True  # type: ignore[attr-defined]
+    view.create_file_dialog = create_file_dialog
+
+
 def run_desktop(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: Path,
                 icon: Path | None = None, storage_path: Path | None = None,
                 preload: Sequence[str] = (), workspace: Path | None = None, runtime_dir: Path | None = None) -> int:
@@ -257,6 +279,12 @@ def _run_window(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
                 window.destroy()
                 return
 
+    if gui == "gtk":
+        patch_gtk_file_dialog()
+    settings = getattr(webview, "settings", None)
+    if settings is not None:
+        settings["ALLOW_DOWNLOADS"] = True  # exports and saved briefs: a save dialog, not a silent failure
+        settings["ALLOW_FILE_URLS"] = False  # the window shows LitForge, never local files as pages
     try:
         webview.start(session, (), gui=gui, private_mode=False,  # type: ignore[arg-type]  # gui is checked by pywebview
                       storage_path=str(storage_path) if storage_path is not None else None,

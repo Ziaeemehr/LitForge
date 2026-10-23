@@ -1787,10 +1787,36 @@
     return closing;
   }
 
+  // Where a link goes in the window: PDFs to the system's PDF app, web pages to the browser. Other schemes are
+  // blocked, and nothing replaces LitForge itself in the window.
+  function routeLink(href, origin) {
+    var u;
+    try { u = new URL(href, origin); } catch (e) { return { action: 'block' }; }
+    if (u.origin === origin) {
+      var paper = u.pathname.match(/^\/api\/papers\/([\w-]+)\/pdf$/);
+      if (paper) return { action: 'open-pdf', body: { paper: paper[1] } };
+      if (u.pathname === '/api/write/pdf') return { action: 'open-pdf', body: { doc: u.searchParams.get('doc') } };
+      return { action: 'app' };
+    }
+    if (u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:') return { action: 'external' };
+    return { action: 'block' };
+  }
+
+  function onLinkClick(e) {
+    var a = e.target && e.target.closest && e.target.closest('a[href]');
+    if (!a || a.hasAttribute('download')) return;  // downloads get the save dialog
+    var r = routeLink(a.getAttribute('href'), location.origin);
+    if (r.action === 'app') return;
+    e.preventDefault();
+    if (r.action === 'open-pdf') post('/api/open-pdf', r.body).catch(function (err) { toast(err.message); });
+    else if (r.action === 'external') window.open(a.href, '_blank');
+  }
+
   function useDesktopWindow(info) {
     if (!info || !info.desktop) return;
     $('quit-note').textContent = 'Closing this window saves your edits and stops LitForge.';
     $('btn-quit').onclick = function () { requestClose(); };
+    document.addEventListener('click', onLinkClick, true);
     window.LitForgeDesktop = { prepareClose: prepareClose, requestClose: requestClose };
   }
   /* ---------- End Desktop window ---------- */

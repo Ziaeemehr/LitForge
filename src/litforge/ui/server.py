@@ -102,6 +102,7 @@ from litforge.tools import (
 )
 from litforge.ui import api, writing_routes
 from litforge.updates import UpdateChecker, automatic_enabled
+from litforge.writing import documents as wd
 from litforge.writing.compile import engine_status
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
@@ -1449,11 +1450,24 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     finally:
                         conn.close()
                     folder.mkdir(parents=True, exist_ok=True)
-                    if sys.platform == "win32":
-                        os.startfile(folder)  # type: ignore[attr-defined]  # noqa: S606
-                    else:
-                        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)])  # noqa: S603
+                    open_with_system(folder)
                     return self._json({"path": str(folder)})
+                if url.path == "/api/open-pdf":  # the desktop window shows PDFs in the system's PDF app
+                    conn = app.db()
+                    try:
+                        if body.get("paper"):
+                            pdf = api.paper_pdf(conn, app.paths, str(body["paper"]))[0]
+                        elif body.get("doc"):
+                            doc = wd.get_document(conn, app.paths, str(body["doc"]))
+                            pdf = wd.resolve_inside(doc.folder, doc.output(".pdf"), allow_hidden=True)
+                            if not pdf.is_file():
+                                raise LookupError("no PDF yet; compile the document first")
+                        else:
+                            raise ValueError("give a paper or a document")
+                    finally:
+                        conn.close()
+                    open_with_system(pdf)
+                    return self._json({"opened": str(pdf)})
                 if url.path == "/api/quit":  # the Quit button: LitForge may run without a terminal to close
                     if app.stop is None:
                         raise ValueError("this server cannot be stopped from the page")
@@ -1859,6 +1873,15 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
             self._json({"run_id": report.run_id, "papers": report.papers, "created": report.created})
 
     return Handler
+
+
+def open_with_system(path: Path) -> None:
+    """Show a file or folder in the system's own app for it (file manager, PDF viewer)."""
+    if sys.platform == "win32":
+        os.startfile(path)  # type: ignore[attr-defined]  # noqa: S606
+    else:
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)],  # noqa: S603
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 
 class ServerHandle:

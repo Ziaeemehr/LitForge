@@ -17,10 +17,10 @@ class Element {
 function setup({ running = 0, save = 'ok', confirm = true, quit } = {}) {
   const elements = {}, calls = [], shown = [];
   const ctx = vm.createContext({
-    Promise, Object, String, Math, Date, Number, calls, shown,
+    Promise, Object, String, Math, Date, Number, URL, calls, shown,
     $: id => elements[id] ||= new Element(),
     store: { get: (k, d) => d, set() {} },
-    document: { createElement: () => new Element(), querySelectorAll: () => [] },
+    document: { createElement: () => new Element(), querySelectorAll: () => [], addEventListener() {} },
     window: { confirm: msg => { calls.push(['confirm', msg]); return confirm; }, addEventListener() {} },
     toast: msg => calls.push(['toast', msg]),
     showStopped: () => shown.push('stopped'),
@@ -43,7 +43,7 @@ function setup({ running = 0, save = 'ok', confirm = true, quit } = {}) {
     },
   });
   vm.runInContext(write + desktop + '\nthis.W = W; this.prepareClose = prepareClose; this.requestClose = requestClose;' +
-    ' this.useDesktopWindow = useDesktopWindow;', ctx);
+    ' this.useDesktopWindow = useDesktopWindow; this.routeLink = routeLink;', ctx);
   ctx.W.doc = { id: 'd1' }; ctx.W.file = 'main.tex'; ctx.W.hash = 'h1';
   ctx.W.editor = { getText: () => 'edited text' };
   return { ctx, calls, shown, elements };
@@ -124,4 +124,42 @@ test('repeated close clicks are one request with one save', async () => {
   await a;
   assert.equal(calls.filter(c => c[0] === '/api/write/save').length, 1);
   assert.equal(calls.filter(c => c[0] === '/api/quit').length, 1);
+});
+
+test('links in the window: PDFs to the PDF app, the web to the browser, nothing else', () => {
+  const { ctx } = setup();
+  const o = 'http://127.0.0.1:54635';
+  const route = href => JSON.stringify(ctx.routeLink(href, o));
+  assert.equal(route('/api/papers/p-1/pdf'), '{"action":"open-pdf","body":{"paper":"p-1"}}');
+  assert.equal(route('/api/write/pdf?doc=d1&t=123'), '{"action":"open-pdf","body":{"doc":"d1"}}');
+  assert.equal(route('https://doi.org/10.1/x'), '{"action":"external"}');
+  assert.equal(route('mailto:a@b.org'), '{"action":"external"}');
+  assert.equal(route(o + '/api/papers/p-1/files/fig.png'), '{"action":"app"}');
+  assert.equal(route('javascript:alert(1)'), '{"action":"block"}');
+  assert.equal(route('file:///etc/passwd'), '{"action":"block"}');
+  assert.equal(route('http://127.0.0.1:9999/other-app'), '{"action":"external"}');
+});
+
+test('in the window, a click on a link is routed; downloads keep their save dialog', async () => {
+  const { ctx, calls } = setup();
+  const opened = [];
+  let onclick;
+  ctx.window.open = (url, target) => opened.push([url, target]);
+  ctx.document.addEventListener = (type, fn) => { if (type === 'click') onclick = fn; };
+  ctx.location = { origin: 'http://127.0.0.1:54635' };
+  ctx.useDesktopWindow({ desktop: true });
+  const click = attrs => {
+    const a = { getAttribute: k => attrs[k] ?? null, hasAttribute: k => k in attrs, href: attrs.href };
+    const ev = { prevented: false, target: { closest: () => a }, preventDefault() { this.prevented = true; } };
+    onclick(ev);
+    return ev.prevented;
+  };
+  assert.equal(click({ href: 'https://arxiv.org/abs/1', target: '_blank' }), true);
+  assert.equal(JSON.stringify(opened), '[["https://arxiv.org/abs/1","_blank"]]');
+  assert.equal(click({ href: '/api/papers/p-1/pdf', target: '_blank' }), true);
+  await new Promise(r => setImmediate(r));
+  assert.equal(JSON.stringify(calls.find(c => c[0] === '/api/open-pdf')), '["/api/open-pdf",{"paper":"p-1"}]');
+  assert.equal(click({ href: 'blob:http://127.0.0.1:54635/x', download: 'brief.md' }), false);
+  assert.equal(click({ href: 'javascript:void(0)' }), true);
+  assert.equal(click({ href: '#section' }), false);
 });
