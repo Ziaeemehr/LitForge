@@ -11,6 +11,7 @@ from typing import Any
 from litforge.analysis.gateway import CallPreview, ModelGateway
 from litforge.analysis.ledger import record_spans, to_packet
 from litforge.analysis.prompts import WRITE_PROMPT_VERSION, write_chat_messages
+from litforge.analysis.query_translate import search_query
 from litforge.analysis.retrieve import retrieve_for_question
 from litforge.llm.evidence import EvidenceItem, EvidencePacket
 from litforge.writing import assist
@@ -51,7 +52,7 @@ class ChatRequest:
 
 def prepare(conn: sqlite3.Connection, doc: Document, question: str, selection: str = "", context: str = "",
             history: list[dict[str, str]] | None = None, pad_before: bool = False,
-            pad_after: bool = False) -> ChatRequest:
+            pad_after: bool = False, gateway: ModelGateway | None = None, approved: bool = False) -> ChatRequest:
     """Build what would be sent: the question, the selection (or the lines around the cursor), the last few
     messages and the project's evidence for the question."""
     question = question.strip()
@@ -66,8 +67,8 @@ def prepare(conn: sqlite3.Connection, doc: Document, question: str, selection: s
              if isinstance(t, dict) and str(t.get("text") or "").strip()][-MAX_HISTORY:]
     while turns and turns[0][0] != "user":  # start with the author's turn
         turns.pop(0)
-    hits = retrieve_for_question(conn, assist._plain(question + " " + selection), doc.project_id, k=8,
-                                 max_per_paper=2)
+    query = search_query(conn, gateway, assist._plain(question + " " + selection), approved=approved, sensitive=True)
+    hits = retrieve_for_question(conn, query, doc.project_id, k=8, max_per_paper=2)
     spans = record_spans(conn, hits) if hits else []
     papers = to_packet(spans, sensitive=True, max_chars_per_item=1500) if spans else None
     req = ChatRequest(question=question, selection=selection, evidence={s.id: s for s in spans},

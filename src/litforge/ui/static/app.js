@@ -4573,7 +4573,8 @@
     asset_analyze: 'Analyze figures and tables', equation_compare: 'Compare equations',
     gap_design: 'Design research gaps', console_plan: 'Plan console workflows', page_rewrite: 'Rewrite pages',
     write_fix: 'Write: fix errors', write_rewrite: 'Write: rewrite and translate', write_cite: 'Write: suggest citations',
-    write_chat: 'Write: assistant', write_summary: 'Write: title and abstract', write_image: 'Write: LaTeX from an image'
+    write_chat: 'Write: assistant', write_summary: 'Write: title and abstract', write_image: 'Write: LaTeX from an image',
+    query_translate: 'Translate Persian questions for search'
   };
   function taskLabel(task) { return modelTaskLabels[task] || task.replace(/_/g, ' '); }
 
@@ -4870,7 +4871,7 @@
   }
   var TASK_GROUPS = [
     ['Library and analysis', ['ask', 'audit', 'matrix_extract', 'claim_extract', 'claim_relation', 'asset_analyze',
-      'equation_compare', 'gap_design', 'console_plan', 'page_rewrite']],
+      'equation_compare', 'gap_design', 'console_plan', 'page_rewrite', 'query_translate']],
     ['Screening', ['screen', 'screen_fulltext']],
     ['Writing', ['write_fix', 'write_rewrite', 'write_cite', 'write_chat', 'write_summary', 'write_image']]];
 

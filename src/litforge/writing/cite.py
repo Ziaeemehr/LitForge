@@ -7,7 +7,9 @@ import re
 import sqlite3
 from typing import Any
 
+from litforge.analysis.gateway import ModelGateway
 from litforge.analysis.ledger import get_spans, record_spans
+from litforge.analysis.query_translate import search_query
 from litforge.analysis.retrieve import retrieve_for_question
 from litforge.discovery.versions import _role_for_paper
 from litforge.storage.db import now
@@ -113,10 +115,11 @@ def search_library(conn: sqlite3.Connection, project_id: str, query: str, limit:
     return out
 
 
-def search_evidence(conn: sqlite3.Connection, project_id: str, query: str, limit: int = 10) -> list[dict[str, Any]]:
+def search_evidence(conn: sqlite3.Connection, project_id: str, query: str, limit: int = 10,
+                    gateway: ModelGateway | None = None) -> list[dict[str, Any]]:
     if not query.strip():
         return []
-    hits = retrieve_for_question(conn, query, project_id, k=limit, max_per_paper=2)
+    hits = retrieve_for_question(conn, search_query(conn, gateway, query), project_id, k=limit, max_per_paper=2)
     spans = record_spans(conn, hits) if hits else []
     return [{"evidence_id": s.id, "paper_id": s.paper_id, "title": s.title, "page": s.page, "section": s.section,
              "quote": hit.snippet, "version": s.version_label or _version(conn, s.paper_id)}

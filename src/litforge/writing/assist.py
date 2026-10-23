@@ -25,6 +25,7 @@ from litforge.analysis.prompts import (
     write_rewrite_messages,
     write_summary_messages,
 )
+from litforge.analysis.query_translate import search_query
 from litforge.analysis.retrieve import retrieve_for_question
 from litforge.analysis.validation import QuoteLocator, numbers
 from litforge.llm.evidence import EvidenceItem, EvidencePacket
@@ -85,7 +86,8 @@ class Request:
 
 def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, error: str = "",
             first_line: int = 1, error_line: int = 0, *, context: str = "", image: bytes | None = None,
-            pad_before: bool = False, pad_after: bool = False, new_env: bool = False) -> Request:
+            pad_before: bool = False, pad_after: bool = False, new_env: bool = False,
+            gateway: ModelGateway | None = None, approved: bool = False) -> Request:
     """Build what would be sent; only the selection (and, for citations, the retrieved evidence; for a title or
     an abstract, the document; for an image action, the image) is included."""
     if action not in ACTIONS:
@@ -125,10 +127,11 @@ def prepare(conn: sqlite3.Connection, doc: Document, action: str, text: str, err
         req.packet = EvidencePacket(items=[selection, EvidenceItem(id="document", paper_id="manuscript", text=body,
                                                                    page=1)], sensitive=True)
     elif action == "cite":
-        hits = retrieve_for_question(conn, _plain(sent), doc.project_id, k=8, max_per_paper=2)
+        query = search_query(conn, gateway, _plain(sent), approved=approved, sensitive=True)
+        hits = retrieve_for_question(conn, query, doc.project_id, k=8, max_per_paper=2)
         if not hits:
             hint = ("; evidence is found by the papers' own words, so Persian text rarely matches English papers"
-                    if _PERSIAN.search(sent) else "")
+                    if _PERSIAN.search(sent) and query == _plain(sent) else "")
             raise AssistError("no evidence in this project's papers matches the selection" + hint)
         spans = record_spans(conn, hits)
         packet = to_packet(spans, sensitive=True, max_chars_per_item=1500)

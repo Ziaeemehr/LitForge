@@ -13,6 +13,7 @@ from litforge.analysis.figures import relevant_asset_spans
 from litforge.analysis.gateway import CallPreview, ModelGateway
 from litforge.analysis.ledger import EvidenceSpan, record_spans, to_packet
 from litforge.analysis.prompts import ASK_PROMPT_VERSION, ask_messages
+from litforge.analysis.query_translate import plan_translation, search_query
 from litforge.analysis.retrieve import retrieve_for_question
 from litforge.analysis.runs import canonical_json, finish_run, get_run, link_evidence, start_run
 from litforge.analysis.validation import (
@@ -207,14 +208,17 @@ def get_answer(conn: sqlite3.Connection, run_id: str) -> Answer:
 def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_id: str | None = None,
                k: int = 8, profile: str | None = None, sensitive: bool = False,
                paper_ids: list[str] | None = None, all_versions: bool = False) -> list[CallPreview]:
-    hits = retrieve_for_question(conn, question, project_id, k, paper_ids=paper_ids,
+    query = search_query(conn, gateway, question, sensitive=sensitive)
+    # A translation that needs approval (a cloud route) is planned here; a local one has already run and is cached.
+    plan = plan_translation(gateway, question, sensitive) if query == question else []
+    hits = retrieve_for_question(conn, query, project_id, k, paper_ids=paper_ids,
                                  all_versions=all_versions)
-    spans = _question_spans(conn, hits, question, project_id, paper_ids, all_versions)
+    spans = _question_spans(conn, hits, query, project_id, paper_ids, all_versions)
     if not spans:
-        return []
+        return plan
     packet, messages = gateway.fit_evidence("ask", to_packet(spans, sensitive=sensitive),
         lambda p: ask_messages(question, p, spans), profile, schema=AnswerDraft.model_json_schema())
-    return [gateway.preview("ask", packet, messages, profile=profile, schema=AnswerDraft.model_json_schema())]
+    return [*plan, gateway.preview("ask", packet, messages, profile=profile, schema=AnswerDraft.model_json_schema())]
 
 
 def ask(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_id: str | None = None,
@@ -224,9 +228,10 @@ def ask(conn: sqlite3.Connection, gateway: ModelGateway, question: str, project_
                        {"question": question, "retrieval": "lexical", "k": k, "profile": profile,
                         "sensitive": sensitive, "paper_ids": paper_ids}, ASK_PROMPT_VERSION)
     try:
-        hits = retrieve_for_question(conn, question, project_id, k, paper_ids=paper_ids,
+        query = search_query(conn, gateway, question, approved=approved, sensitive=sensitive)
+        hits = retrieve_for_question(conn, query, project_id, k, paper_ids=paper_ids,
                                      all_versions=all_versions)
-        spans = _question_spans(conn, hits, question, project_id, paper_ids, all_versions)
+        spans = _question_spans(conn, hits, query, project_id, paper_ids, all_versions)
         link_evidence(conn, run_id, spans, [*(h.score for h in hits), *([None] * (len(spans) - len(hits)))])
         model, provider = "", ""
         if spans:

@@ -7,7 +7,7 @@ and "not applicable" cells, where models tend to invent values.
 
 | Part | Contents |
 |---|---|
-| `questions` | 30 English questions (68 targets with the Persian ones), each with a short reference answer; 8 Persian questions that mirror English ones (`fa01` ~ `q01`) |
+| `questions` | 30 English questions, each with a short reference answer, and 20 Persian questions that mirror English ones (`fa01` ~ `q01`) and share their targets; 88 targets in all |
 | `matrix_columns`, `matrix` | 4 columns × 10 papers: code availability, optimizer, inference target, GPUs used (34 labelled cells) |
 | `criteria`, `screening` | One inclusion and one exclusion criterion; 5 relevant and 5 irrelevant papers |
 | `claims`, `relations` | 14 claims from the SBI papers; 7 relations between different papers (3 supports, 2 contradicts, 2 qualifies) |

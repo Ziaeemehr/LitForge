@@ -266,7 +266,7 @@ def test_quote_round_trip_and_prompt(conn: sqlite3.Connection) -> None:
     assert quote.start is not None and quote.end is not None
     assert span.text[quote.start:quote.end] == "The treat-\nment improves outcomes."
     assert get_answer(conn, answer.run_id) == answer
-    assert ASK_PROMPT_VERSION == "ask-v4"
+    assert ASK_PROMPT_VERSION == "ask-v5"
     prompt = ask_messages("outcomes?", to_packet([span]), [span])[0]["content"]
     assert "quotes" in prompt and "verbatim" in prompt and "never paraphrase" in prompt.lower()
     conn.execute("UPDATE answer_sentences SET quotes_json='[]'")

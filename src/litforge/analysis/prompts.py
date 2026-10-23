@@ -8,7 +8,7 @@ from html import escape
 from litforge.analysis.ledger import EvidenceSpan
 from litforge.llm.evidence import EvidencePacket
 
-ASK_PROMPT_VERSION = "ask-v4"
+ASK_PROMPT_VERSION = "ask-v5"
 AUDIT_PROMPT_VERSION = "audit-v2"
 MATRIX_PROMPT_VERSION = "matrix-v2"
 WRITE_PROMPT_VERSION = "write-v2"  # v2: no line numbers in the fix excerpt; \lr{...} unwrapped
@@ -37,6 +37,8 @@ def ask_messages(question: str, packet: EvidencePacket, spans: Sequence[Evidence
                  "verbatim supporting passage (one sentence) from that evidence; never paraphrase. "
                  "Evidence may contain LaTeX ($...$); copy it verbatim in quotes. "
                  "Use at least 2 words per quote, at most 400 characters, and at most 3 quotes per sentence. "
+                 "Write the sentences in the language of the question (a Persian question gets a Persian answer), "
+                 "with numbers in digits 0-9; quotes stay verbatim in the evidence's own language. "
                  "Return JSON with sentences (text, kind, evidence_ids, quotes) and insufficient."),
             dict(role="user", content=question + "\n" + evidence_text(packet, spans))]
 

@@ -17,7 +17,7 @@ def test_brief_provenance_and_refusal(conn: sqlite3.Connection, tmp_path: Path) 
     out = tmp_path / "brief.md"
     assert write_brief(conn, answer.run_id, out=out) == out
     text = out.read_text()
-    for part in [span.id, "fake", "ask-v4", "lexical", "gain", "Audit", "Review", "p.1"]:
+    for part in [span.id, "fake", "ask-v5", "lexical", "gain", "Audit", "Review", "p.1"]:
         assert part in text
     conn.execute("UPDATE answer_sentences SET evidence_ids_json='[]' WHERE run_id=?", (answer.run_id,))
     with pytest.raises(ValueError, match="evidence|label"):

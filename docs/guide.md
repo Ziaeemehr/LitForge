@@ -330,7 +330,7 @@ Keep the same benchmark when comparing future retrieval methods.
 ### The sbi10 gold benchmark
 
 [benchmarks/sbi10](../benchmarks/sbi10/README.md) is a labelled benchmark on ten open-access arXiv
-papers, pinned by version and file hash: 30 English and 8 Persian questions with 68 page-and-quote
+papers, pinned by version and file hash: 30 English and 20 Persian questions with 88 page-and-quote
 targets, a 10-paper study matrix, screening labels and 14 claims with 7 relations between papers.
 Quotes are compared without case, ligatures, line-break hyphens or extra whitespace.
 
