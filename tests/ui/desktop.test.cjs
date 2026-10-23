@@ -140,11 +140,10 @@ test('links in the window: PDFs to the PDF app, the web to the browser, nothing 
   assert.equal(route('http://127.0.0.1:9999/other-app'), '{"action":"external"}');
 });
 
-test('in the window, a click on a link is routed; downloads keep their save dialog', async () => {
+test('external paper links retain native anchor navigation; PDFs and downloads keep their routes', async () => {
   const { ctx, calls } = setup();
-  const opened = [];
   let onclick;
-  ctx.window.open = (url, target) => opened.push([url, target]);
+  ctx.window.open = () => { throw new Error('Cocoa does not hand off script-created popups'); };
   ctx.document.addEventListener = (type, fn) => { if (type === 'click') onclick = fn; };
   ctx.location = { origin: 'http://127.0.0.1:54635' };
   ctx.useDesktopWindow({ desktop: true });
@@ -152,14 +151,20 @@ test('in the window, a click on a link is routed; downloads keep their save dial
     const a = { getAttribute: k => attrs[k] ?? null, hasAttribute: k => k in attrs, href: attrs.href };
     const ev = { prevented: false, target: { closest: () => a }, preventDefault() { this.prevented = true; } };
     onclick(ev);
-    return ev.prevented;
+    return { prevented: ev.prevented, anchor: a };
   };
-  assert.equal(click({ href: 'https://arxiv.org/abs/1', target: '_blank' }), true);
-  assert.equal(JSON.stringify(opened), '[["https://arxiv.org/abs/1","_blank"]]');
-  assert.equal(click({ href: '/api/papers/p-1/pdf', target: '_blank' }), true);
+  for (const href of ['https://doi.org/10.1/x', 'https://openalex.org/W1', 'https://arxiv.org/abs/1',
+    'https://example.org/open-access', 'mailto:author@example.org']) {
+    const { prevented, anchor } = click({ href });
+    assert.equal(prevented, false, href);
+    assert.equal(anchor.target, '_blank');
+    assert.match(anchor.rel, /noopener/);
+    assert.match(anchor.rel, /noreferrer/);
+  }
+  assert.equal(click({ href: '/api/papers/p-1/pdf', target: '_blank' }).prevented, true);
   await new Promise(r => setImmediate(r));
   assert.equal(JSON.stringify(calls.find(c => c[0] === '/api/open-pdf')), '["/api/open-pdf",{"paper":"p-1"}]');
-  assert.equal(click({ href: 'blob:http://127.0.0.1:54635/x', download: 'brief.md' }), false);
-  assert.equal(click({ href: 'javascript:void(0)' }), true);
-  assert.equal(click({ href: '#section' }), false);
+  assert.equal(click({ href: 'blob:http://127.0.0.1:54635/x', download: 'brief.md' }).prevented, false);
+  assert.equal(click({ href: 'javascript:void(0)' }).prevented, true);
+  assert.equal(click({ href: '#section' }).prevented, false);
 });

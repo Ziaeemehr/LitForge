@@ -1807,9 +1807,15 @@
     if (!a || a.hasAttribute('download')) return;  // downloads get the save dialog
     var r = routeLink(a.getAttribute('href'), location.origin);
     if (r.action === 'app') return;
+    if (r.action === 'external') {
+      // Preserve the anchor navigation: Cocoa ignores script-created window.open popups.
+      // Every external anchor opens through the webview's native browser handoff, never in the app.
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      return;
+    }
     e.preventDefault();
     if (r.action === 'open-pdf') post('/api/open-pdf', r.body).catch(function (err) { toast(err.message); });
-    else if (r.action === 'external') window.open(a.href, '_blank');
   }
 
   function useDesktopWindow(info) {

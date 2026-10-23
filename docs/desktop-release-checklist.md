@@ -126,3 +126,25 @@ condition in the plan is satisfied. Automated validation alone does not complete
 - [ ] Linux Wayland and Linux Qt fallback end to end.
 - [ ] Task 7 runtime packaging, clean installation, update and uninstall without losing data.
 - [ ] Signing/notarization and release publication, when separately authorized and configured.
+
+## Paper-detail external links regression (2026-10-23)
+
+Task 6 follow-up: the user reported DOI/OpenAlex links doing nothing in the paper detail panel on
+macOS. The desktop click handler cancelled the original anchor navigation and called `window.open`.
+pywebview 6.2.1's Cocoa new-window delegate opens the OS browser only for `WKNavigationTypeLinkActivated`,
+so it ignores that script-created popup. Preserve the native external anchor navigation with
+`target="_blank"`, `rel="noopener noreferrer"` and explicit native external-browser handling.
+PDF routes, downloads and blocked schemes retain their existing handling.
+
+The real Cocoa smoke reproduced the defect before the fix: both DOI/OpenAlex clicks produced zero
+OS-browser handoffs. After the fix both correct URLs were handed to `webbrowser.open`, while the app
+stayed at its original loopback URL. The smoke intercepts that final OS-browser call, so it verifies
+real engine routing without launching a browser or contacting the publishers. This check is now
+mandatory in every native CI report (`checks.external_links`). The unit regression also verifies
+arXiv, open-access and mailto anchors, and retained PDF/download/blocked-link behavior.
+
+| Round | Evidence | Result |
+| --- | --- | --- |
+| 1 | Local Cocoa RED→GREEN and 258 UI / 41 focused Python tests passed; CI pending. | In progress |
+| 2 | Pending native CI stability run. | Not run |
+| 3 | Pending native CI stability run. | Not run |

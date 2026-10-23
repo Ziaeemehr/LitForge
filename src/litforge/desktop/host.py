@@ -288,6 +288,7 @@ def _run_window(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
     if settings is not None:
         settings["ALLOW_DOWNLOADS"] = True  # exports and saved briefs: a save dialog, not a silent failure
         settings["ALLOW_FILE_URLS"] = False  # the window shows LitForge, never local files as pages
+        settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True  # native anchor clicks open in the OS browser
     try:
         webview.start(session, (), gui=cast(Any, gui), private_mode=False,  # gui is checked by pywebview
                       storage_path=str(storage_path) if storage_path is not None else None,

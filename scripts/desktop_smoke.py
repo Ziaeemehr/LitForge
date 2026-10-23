@@ -22,13 +22,14 @@ import tempfile
 import threading
 import time
 import traceback
+import webbrowser
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 BOOLEAN_CHECKS = ("desktop", "codemirror", "worker", "withResolvers", "structuredClone", "randomUUID",
-                  "segmenter", "cssHas", "clipboardApi", "secureContext")
+                  "segmenter", "cssHas", "clipboardApi", "secureContext", "external_links")
 
 
 def check_report(report: dict[str, Any]) -> list[str]:
@@ -168,6 +169,13 @@ def run_worker(args: argparse.Namespace) -> int:
     try:
         import webview
 
+        opened_links: list[str] = []
+
+        def open_external(url: str, *a: Any, **kw: Any) -> bool:
+            opened_links.append(str(url))
+            return True  # capture the OS-browser handoff without opening a browser or contacting a publisher
+
+        webbrowser.open = open_external
         report["pywebview"] = importlib.metadata.version("pywebview")
         spec = importlib.util.spec_from_file_location("_litforge_smoke_host", ROOT / "src/litforge/desktop/host.py")
         assert spec and spec.loader
@@ -207,6 +215,20 @@ def run_worker(args: argparse.Namespace) -> int:
                         time.sleep(0.1)
                     else:
                         raise TimeoutError("Browser checks did not finish")
+                    expected_links = ["https://doi.org/10.1234/litforge-smoke", "https://openalex.org/W123456789"]
+                    for url in expected_links:
+                        window.evaluate_js("""(() => {
+                          const a = document.createElement('a'); a.href = %URL%;
+                          a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Paper link smoke';
+                          document.body.appendChild(a); a.click(); a.remove();
+                        })()""".replace("%URL%", json.dumps(url)))
+                    deadline = time.monotonic() + 5
+                    while len(opened_links) < len(expected_links) and time.monotonic() < deadline:
+                        time.sleep(.05)
+                    report["external_link_handoffs"] = opened_links
+                    report["checks"]["external_links"] = (
+                        sorted(opened_links) == sorted(expected_links)
+                        and window.evaluate_js("location.href") == report["url"])
                     report["activation"] = host.instance.activate_existing(workspace, runtime_dir=runtime)
                 except Exception:
                     report["error"] = traceback.format_exc()
