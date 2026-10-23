@@ -15,16 +15,14 @@ uv run litforge export
 - `project create NAME --topic "Topic" --question "Research question"` also creates and activates a project;
   both description options are optional. `project delete NAME` asks for confirmation (`--yes` / `-y` skips it).
   Papers and PDFs stay in the shared library; `--delete-exports` also removes that project's exported files.
-- `ui` starts the local web interface and opens your browser. Use `--port 8765` (`0` chooses a free port),
-  `--host 127.0.0.1` to select the interface, or `--no-browser` to start without opening a window.
 - `desktop` opens LitForge in its own window (no browser); `--workspace FOLDER` chooses the library folder
   (remembered), `--gui` overrides the engine. One window per library: starting it again brings the window
   forward. Closing the window saves the open file and asks before cancelling running tasks.
 - `desktop-setup` chooses and prepares the window engine (the installer runs it; no sudo): WebView2 on
   Windows, WebKit on macOS, the system's WebKitGTK on Linux, or Qt WebEngine (`--engine qt`) where WebKitGTK
   is missing. The choice is stored in `desktop.json` in the user config folder (`~/.config/litforge` on Linux).
-- `shortcut` adds an application icon: LitForge's window once `desktop-setup` has run, else the web interface
-  (`--mode browser` or `--mode desktop` chooses).
+- `shortcut` adds an application icon for LitForge's desktop window, including when its engine still
+  needs setup. An engine failure shows recovery instructions instead of switching to a browser.
 - `add` imports, parses and indexes PDFs in one step. Run it again any time; nothing is processed twice.
 - `search` returns the paper, section, page and a quoted snippet for every hit.
 - `ask "your question" --evidence-only` retrieves evidence cards with stable IDs, section and page.
@@ -35,7 +33,7 @@ uv run litforge export
 
 ## Settings, keys and cloud-light
 
-Open **⚙ Settings** in the sidebar footer, use **`,`** outside a text field, or bookmark `#settings`.
+Open **⚙ Settings** in the sidebar footer, or use **`,`** outside a text field.
 This full-width page has cards for Updates, Models, API keys, Add API model, Cloud & budget, and Library & export.
 Settings has four tabs: General, Models, Tools, and Cloud & keys.
 
@@ -450,7 +448,7 @@ in another editor. Start from the **English article** or **Persian article** tem
 `xepersian` with the Vazirmatn font (shipped in the document's `fonts/` folder).
 
 - **Editing.** The editor (CodeMirror) highlights LaTeX, searches (Ctrl/Cmd+F) and shows Persian lines right to
-  left. It saves 2 seconds after you stop typing and when you leave the editor. If the file changed in another tab
+  left. It saves 2 seconds after you stop typing and when you leave the editor. If the file changed in another editor
   or editor, a banner asks whether to reload that version or keep yours; nothing is overwritten silently.
 - **Versions.** A version is kept at most every 2 minutes while you save (the last 30 are kept; named versions are
   never removed). **Versions** lists them with the lines added and removed, shows what changed in one (against the

@@ -91,16 +91,14 @@ try {
     $webview2 = 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
     $hasWebView2 = (Test-Path "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}") -or
         (Test-Path "HKLM:\$webview2") -or (Test-Path "HKCU:\$webview2")
-    $mode = 'desktop'
     if ($hasWebView2) {
         Native { uv run litforge desktop-setup }
     } else {
-        Write-Warning ("Microsoft Edge WebView2 Runtime is missing, so LitForge opens in your browser for now. " +
+        Write-Warning ("Microsoft Edge WebView2 Runtime is required to open the LitForge window. " +
             "Install it from https://go.microsoft.com/fwlink/p/?LinkId=2124703 and run this installer again.")
-        $mode = 'browser'
     }
     Say 'Adding the LitForge icon'
-    Native { uv run litforge shortcut --mode $mode }
+    Native { uv run litforge shortcut --mode desktop }
     if ($LASTEXITCODE -ne 0) {
         Fail 'could not add the LitForge icon'
     }

@@ -47,11 +47,11 @@ say "Installing dependencies (the first time takes a few minutes)"
 uv sync --extra embed --extra documents --extra desktop --inexact  # --inexact: keep extras installed later
 say "Preparing LitForge's own window (no browser needed)"
 if ! uv run litforge desktop-setup; then
-  printf 'warning: LitForge will open in your browser for now; retry with: cd "%s" && uv run litforge desktop-setup && uv run litforge shortcut\n' \
+  printf 'warning: The desktop window is not ready. Retry with: cd "%s" && uv run litforge desktop-setup\n' \
     "$dir" >&2
 fi
 say "Adding the LitForge icon"
-uv run litforge shortcut
+uv run litforge shortcut --mode desktop
 
 extras=",${LITFORGE_EXTRAS:-},"
 tty_path="${LITFORGE_TTY:-/dev/tty}"

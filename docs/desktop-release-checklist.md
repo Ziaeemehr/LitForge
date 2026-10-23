@@ -172,3 +172,22 @@ no extra browser requests, unchanged app URL and normal backend/lease cleanup. I
 found no material issue in the product fix. The final full suite retains 43 dependency/test warnings.
 Actual publisher-page loading is outside this smoke: only the final OS-browser function is intercepted.
 Restart the desktop application to load the fixed click handler; no library migration is needed.
+
+## Desktop defaults and developer browser cleanup (2026-10-23)
+
+Task 6 follow-up: the user approved desktop-only normal launch/settings and retaining `litforge ui`
+for developer debugging. Installers and default shortcuts now always launch desktop; missing engines
+show a repair instruction instead of silently selecting a browser. The developer command is hidden
+from normal CLI help. Legacy `litforge-app ui` icons now launch desktop, and generated Windows BAT
+browser launchers are upgraded when a native shortcut is created (custom BAT files are preserved).
+The desktop no longer starts the browser heartbeat or unload prompt; native close/save handling remains
+responsible for shutdown. Shutdown/conflict text and PDF opening reflect the desktop window. Without
+PDF.js, desktop offers the system PDF app rather than a browser iframe fallback. Developer browser
+heartbeat, unload protection and PDF iframe still work through the explicit debugging command.
+
+Local checks: 262 UI tests passed; 152 focused Python tests passed, 1 skipped before the additional
+Windows shortcut migration regressions. Both new migration cases passed after observing the generated
+browser launcher fail first. Ruff and mypy passed. Real Cocoa smoke passed including desktop runtime
+copy, PDF worker/RTL, external-link handoffs and clean shutdown. In the restricted sandbox the macOS
+Quick Look icon-generation test could not run successfully; native CI will verify it on a real runner.
+Three CI rounds are pending; do not treat these local results as cross-platform completion.

@@ -790,6 +790,19 @@ test('without PDF.js the browser\'s own viewer is used', async () => {
   assert.equal($('write-pdf').hidden, false);
 });
 
+test('desktop without PDF.js offers the PDF app instead of a browser-only iframe viewer', async () => {
+  const { ctx, $ } = setup();
+  await ctx.openWriteDoc('d1');
+  ctx.window.LitForgeDesktop = {};
+  ctx.W.doc.pdf = true;
+  await ctx.showWritePdf(true);
+  assert.equal($('write-pdf').hidden, true);
+  assert.equal($('write-pdfview').hidden, false);
+  assert.match($('write-pdf-open').href, /\/api\/write\/pdf\?doc=d1/);
+  assert.match($('write-pdf-pages').textContent, /Open/);
+  assert.equal($('write-pdf-in').disabled, true);
+});
+
 test('in fit mode the PDF is re-fitted when its pane changes width, not for small changes', () => {
   const { ctx } = setup();
   assert.equal(ctx.needsRefit(400, 640, true), true);

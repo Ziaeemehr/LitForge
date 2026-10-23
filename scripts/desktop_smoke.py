@@ -29,7 +29,7 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 BOOLEAN_CHECKS = ("desktop", "codemirror", "worker", "withResolvers", "structuredClone", "randomUUID",
-                  "segmenter", "cssHas", "clipboardApi", "secureContext", "external_links")
+                  "segmenter", "cssHas", "clipboardApi", "secureContext", "external_links", "desktop_runtime")
 
 
 def check_report(report: dict[str, Any]) -> list[str]:
@@ -81,6 +81,8 @@ window.__desktopSmoke = null;
   try {
     const info = await fetch('/api/info').then(response => response.json());
     r.desktop = r.desktop && info.desktop === true;
+    r.desktop_runtime = document.getElementById('quit-note').textContent.includes('Closing this window') &&
+      document.getElementById('write-pdf-open').title === 'Open PDF in your PDF app';
     const worker = new Worker('/static/vendor/spell.worker.js');
     r.worker = await new Promise(resolve => {
       const timer = setTimeout(() => resolve(false), 5000);

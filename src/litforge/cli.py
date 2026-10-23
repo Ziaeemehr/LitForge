@@ -1300,14 +1300,14 @@ def papers(
         typer.echo(f"{score} {pdf} {r['year'] or '????'}  {(r['title'] or '(no title)')[:90]}")
 
 
-@app.command()
+@app.command(hidden=True)
 def ui(
     ctx: typer.Context,
     port: Annotated[int, typer.Option(help="Port (0 = pick a free one)")] = 8765,
     host: Annotated[str, typer.Option(help="Interface to bind (keep 127.0.0.1)")] = "127.0.0.1",
     no_browser: Annotated[bool, typer.Option("--no-browser", help="Don't open a browser window")] = False,
 ) -> None:
-    """Open the web interface in your browser (runs locally on Linux, macOS and Windows)."""
+    """Developer browser interface for debugging; normal app launches use `desktop`."""
     from litforge.ui.server import serve
 
     st = _state(ctx)
@@ -1386,19 +1386,17 @@ def desktop_server(
 
 @app.command()
 def shortcut(
-    mode: Annotated[str | None, typer.Option(help="desktop (its own window) or browser; default: desktop when "
-                                                  "its window engine is set up (litforge desktop-setup)")] = None,
+    mode: Annotated[str | None, typer.Option(help="desktop (default); browser is for developer debugging")] = None,
 ) -> None:
     """Add a LitForge icon to your apps that opens LitForge with one click."""
     import shutil
     import sys
 
-    from litforge import desktop
     from litforge.shortcut import create_shortcut
 
     if mode not in (None, "desktop", "browser"):
         raise typer.BadParameter("use desktop or browser")
-    chosen = mode or ("desktop" if desktop.engine_ready() else "browser")
+    chosen = mode or "desktop"
     exe = shutil.which("litforge") or str(Path(sys.argv[0]).resolve())
     beside = Path(exe).with_name("litforge-app.exe" if sys.platform == "win32" else "litforge-app")
     gui = shutil.which("litforge-app") or (str(beside) if beside.is_file() else None)

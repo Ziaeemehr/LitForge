@@ -107,12 +107,9 @@ def launch_desktop(explicit: Path | None = None, gui: str | None = None) -> int:
 
 def main(argv: list[str] | None = None) -> None:
     """Entry point of the windowless `litforge-app` launcher (the LitForge icon): `--workspace PATH` opens that
-    library's window; `ui` (icons made before the desktop window) opens the web interface as before."""
+    library's window. Legacy icons passing `ui` now open the desktop too; developers use `litforge ui`."""
     args = sys.argv[1:] if argv is None else argv
     if args[:1] == ["ui"]:
-        from litforge.cli import app
-
-        app(["ui"])
-        sys.exit(0)
+        args = args[1:]  # old icons used `litforge-app ui`; retain the icon but upgrade its launch mode
     workspace = Path(args[1]) if args[:1] == ["--workspace"] and len(args) > 1 else None
     sys.exit(launch_desktop(workspace))

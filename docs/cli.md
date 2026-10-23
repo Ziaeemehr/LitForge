@@ -946,23 +946,13 @@ Show recent model calls, usage, costs and status.
 
 ## App and maintenance
 
-### `litforge ui`
-
-Open the web interface in your browser (runs locally on Linux, macOS and Windows).
-
-| Option | Meaning |
-|---|---|
-| `--port` | Port (0 = pick a free one) |
-| `--host` | Interface to bind (keep 127.0.0.1) |
-| `--no-browser` | Don't open a browser window |
-
 ### `litforge shortcut`
 
 Add a LitForge icon to your apps that opens LitForge with one click.
 
 | Option | Meaning |
 |---|---|
-| `--mode` | desktop (its own window) or browser; default: desktop when its window engine is set up (litforge desktop-setup) |
+| `--mode` | desktop (default); browser is for developer debugging |
 
 ### `litforge update`
 

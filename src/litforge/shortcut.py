@@ -103,7 +103,10 @@ def _windows(home: Path, workdir: Path, exe: Path, gui_exe: Path | None, mode: s
     desktop = home / "OneDrive" / "Desktop"
     desktop = desktop if desktop.is_dir() else home / "Desktop"
     desktop.mkdir(parents=True, exist_ok=True)
-    if gui_exe is not None:  # a .lnk to the windowless launcher; only PowerShell (COM) can write one
+    command = f'"{exe}" desktop --workspace "{workdir}"' if mode == "desktop" else f'"{exe}" ui'
+    lines = ["@echo off", "chcp 65001 >nul", f'cd /d "{workdir}"', command, "if errorlevel 1 pause", ""]
+    batch = desktop / "LitForge.bat"
+    if gui_exe is not None and mode == "desktop":  # only the desktop app uses the windowless launcher
         lnk = desktop / "LitForge.lnk"
         ps = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LF_LNK); $s.TargetPath = $env:LF_EXE; "
               "$s.Arguments = $env:LF_ARGS; $s.WorkingDirectory = $env:LF_DIR; $s.Description = 'LitForge'; $s.Save()")
@@ -113,11 +116,17 @@ def _windows(home: Path, workdir: Path, exe: Path, gui_exe: Path | None, mode: s
             subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],  # noqa: S603, S607
                            env=env, check=True, capture_output=True, timeout=30)
         if lnk.exists():
+            # Upgrade our old browser launcher too; leave manually customized launchers untouched.
+            if batch.is_file():
+                with contextlib.suppress(OSError, UnicodeError):
+                    old = batch.read_text().splitlines()
+                    if (len(old) == 5 and old[:2] == ["@echo off", "chcp 65001 >nul"]
+                            and old[2].startswith('cd /d "') and old[3].endswith('" ui')
+                            and old[4] == "if errorlevel 1 pause"):
+                        _write(batch, "\r\n".join(lines), executable=False)
             return lnk
     # Fallback, with a console window. chcp 65001: read this UTF-8 file right when a path has non-ASCII letters.
-    command = f'"{exe}" desktop --workspace "{workdir}"' if mode == "desktop" else f'"{exe}" ui'
-    lines = ["@echo off", "chcp 65001 >nul", f'cd /d "{workdir}"', command, "if errorlevel 1 pause", ""]
-    return _write(desktop / "LitForge.bat", "\r\n".join(lines), executable=False)
+    return _write(batch, "\r\n".join(lines), executable=False)
 
 
 def _trust(path: Path) -> None:

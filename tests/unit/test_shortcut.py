@@ -142,11 +142,34 @@ def test_windows_desktop_mode_batch_and_link(where: tuple[Path, Path, Path], mon
     [lnk] = create_shortcut("win32", home, workdir, exe, gui_exe=exe.with_name("litforge-app.exe"), mode="desktop")
     assert lnk.name == "LitForge.lnk"
     assert seen["LF_ARGS"] == f'--workspace "{workdir}"'
-    create_shortcut("win32", home, workdir, exe, gui_exe=exe.with_name("litforge-app.exe"))
-    assert seen["LF_ARGS"] == "ui"  # browser mode keeps the old behaviour
+    [browser] = create_shortcut("win32", home, workdir, exe, gui_exe=exe.with_name("litforge-app.exe"))
+    assert browser.suffix == ".bat"  # developer browser mode uses the CLI, not the desktop launcher
+    assert f'"{exe}" ui' in browser.read_text()
 
 
-def test_the_windowless_launcher_keeps_old_browser_icons_working(monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("custom", [False, True])
+def test_windows_desktop_migrates_generated_browser_batch_only(where: tuple[Path, Path, Path],
+                                                              monkeypatch: pytest.MonkeyPatch, custom: bool) -> None:
+    home, workdir, exe = where
+    [bat] = create_shortcut("win32", home, workdir, exe, mode="browser")
+    if custom:
+        bat.write_text("@echo off\necho custom launcher\n")
+    original = bat.read_bytes()
+
+    def fake_run(*args: object, **kwargs: object) -> None:
+        (home / "Desktop/LitForge.lnk").write_bytes(b"lnk")
+
+    monkeypatch.setattr("litforge.shortcut.subprocess.run", fake_run)
+    [lnk] = create_shortcut("win32", home, workdir, exe, gui_exe=exe.with_name("litforge-app.exe"), mode="desktop")
+    assert lnk.suffix == ".lnk"
+    if custom:
+        assert bat.read_bytes() == original
+    else:
+        assert f'"{exe}" desktop --workspace "{workdir}"' in bat.read_text()
+        assert f'"{exe}" ui' not in bat.read_text()
+
+
+def test_the_windowless_launcher_upgrades_old_browser_icons_to_desktop(monkeypatch: pytest.MonkeyPatch,
                                                                 tmp_path: Path) -> None:
     import litforge.cli
     import litforge.desktop as desktop
@@ -161,10 +184,10 @@ def test_the_windowless_launcher_keeps_old_browser_icons_working(monkeypatch: py
         desktop.main(["--workspace", str(tmp_path)])
     with pytest.raises(SystemExit):
         desktop.main([])
-    assert called == [("cli", ["ui"]), ("win", tmp_path), ("win", None)]
+    assert called == [("win", None), ("win", tmp_path), ("win", None)]
 
 
-def test_shortcut_command_makes_a_desktop_icon_once_the_engine_is_ready(tmp_path: Path,
+def test_shortcut_command_defaults_to_desktop_even_before_engine_setup(tmp_path: Path,
                                                                        monkeypatch: pytest.MonkeyPatch) -> None:
     from typer.testing import CliRunner
 
@@ -177,7 +200,7 @@ def test_shortcut_command_makes_a_desktop_icon_once_the_engine_is_ready(tmp_path
     entry = tmp_path / ".local/share/applications/litforge.desktop"
     monkeypatch.setattr(desktop, "engine_ready", lambda: False)
     assert CliRunner().invoke(app, ["shortcut"]).exit_code == 0
-    assert entry.read_text().count(" ui") == 1
+    assert "--workspace" in entry.read_text() and " ui" not in entry.read_text()
     monkeypatch.setattr(desktop, "engine_ready", lambda: True)
     result = CliRunner().invoke(app, ["shortcut"])
     assert result.exit_code == 0 and "--workspace" in entry.read_text()

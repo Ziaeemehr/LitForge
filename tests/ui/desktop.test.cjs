@@ -15,7 +15,7 @@ class Element {
 
 // The Write view with one open, edited file; `save` decides what the server answers to a save.
 function setup({ running = 0, save = 'ok', confirm = true, quit } = {}) {
-  const elements = {}, calls = [], shown = [];
+  const elements = {}, calls = [], shown = [], intervals = new Map();
   const ctx = vm.createContext({
     Promise, Object, String, Math, Date, Number, URL, calls, shown,
     $: id => elements[id] ||= new Element(),
@@ -25,6 +25,9 @@ function setup({ running = 0, save = 'ok', confirm = true, quit } = {}) {
     toast: msg => calls.push(['toast', msg]),
     showStopped: () => shown.push('stopped'),
     setTimeout: () => 0, clearTimeout() {},
+    setInterval: (fn, ms) => { const id = intervals.size + 1; intervals.set(id, { fn, ms }); return id; },
+    clearInterval: id => intervals.delete(id),
+    fetch: async (...args) => { calls.push(['fetch', ...args]); return { ok: true, json: async () => ({ hash: 'h2' }) }; },
     api: async url => {
       calls.push(['GET', url]);
       if (url === '/api/running') return { running };
@@ -43,11 +46,44 @@ function setup({ running = 0, save = 'ok', confirm = true, quit } = {}) {
     },
   });
   vm.runInContext(write + desktop + '\nthis.W = W; this.prepareClose = prepareClose; this.requestClose = requestClose;' +
-    ' this.useDesktopWindow = useDesktopWindow; this.routeLink = routeLink;', ctx);
+    ' this.useDesktopWindow = useDesktopWindow; this.routeLink = routeLink; this.beforeWriteUnload = beforeWriteUnload;', ctx);
   ctx.W.doc = { id: 'd1' }; ctx.W.file = 'main.tex'; ctx.W.hash = 'h1';
   ctx.W.editor = { getText: () => 'edited text' };
-  return { ctx, calls, shown, elements };
+  return { ctx, calls, shown, elements, intervals };
 }
+
+test('only developer browser sessions send idle heartbeats; desktop mode cancels them', async () => {
+  const { ctx, intervals, calls } = setup();
+  ctx.useDesktopWindow({ desktop: true });
+  assert.equal(intervals.size, 0);
+  ctx.useDesktopWindow({ desktop: false });
+  assert.equal(intervals.size, 1);
+  const beat = [...intervals.values()][0];
+  assert.equal(beat.ms, 15000);
+  await beat.fn();
+  assert.ok(calls.some(c => c[0] === '/api/heartbeat'));
+  ctx.useDesktopWindow({ desktop: true });
+  assert.equal(intervals.size, 0);
+});
+
+test('native close uses its save handshake without a browser unload prompt or duplicate save', () => {
+  const { ctx, calls } = setup();
+  ctx.useDesktopWindow({ desktop: true });
+  ctx.W.dirty = true;
+  const ev = { prevented: false, preventDefault() { this.prevented = true; } };
+  ctx.beforeWriteUnload(ev);
+  assert.equal(ev.prevented, false);
+  assert.equal(calls.filter(c => c[0] === 'fetch').length, 0);
+});
+
+test('developer browser unload still protects unsaved editor text', () => {
+  const { ctx, calls } = setup();
+  ctx.W.dirty = true;
+  const ev = { prevented: false, preventDefault() { this.prevented = true; } };
+  ctx.beforeWriteUnload(ev);
+  assert.equal(ev.prevented, true);
+  assert.ok(calls.some(c => c[0] === 'fetch' && c[1] === '/api/write/save'));
+});
 
 test('the page knows the desktop window: the side note and Quit change, the adapter appears', () => {
   assert.match(html, /id="quit-note"/);

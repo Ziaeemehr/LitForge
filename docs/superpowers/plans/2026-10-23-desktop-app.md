@@ -312,3 +312,11 @@ A second, senior review took the user's priorities into account: light and fast,
 - [pywebview installation and platform dependencies](https://pywebview.flowrl.com/guide/installation)
 - [Electron overview, if the renderer investigation requires a fallback](https://www.electronjs.org/docs/latest)
 - [Distribution and signing considerations](https://www.electronjs.org/docs/latest/tutorial/distribution-overview)
+
+### Task 6 follow-up: desktop defaults and developer browser cleanup
+
+The user approved keeping `litforge ui` only as an explicit developer debugging tool. Normal launch,
+installers, shortcuts, shutdown text, PDF fallback and close/save lifecycle now follow desktop mode.
+Merging carries these changes but does not remove the developer command or the shared local web UI
+used by the native webview. Track the three validation rounds in the
+[release checklist](../../desktop-release-checklist.md#desktop-defaults-and-developer-browser-cleanup-2026-10-23).

@@ -839,7 +839,7 @@
         '<button class="btn small" id="btn-like" title="Start a new similar-paper search from this paper">Find similar to this</button>' +
         (d.unused ? '<button class="btn small ghost danger" id="btn-remove-paper">Remove from library</button>' : '') +
         (d.markdown ? '<button class="btn small" id="btn-full" title="Show or hide the text extracted from its PDF">Full text</button>' : '') +
-        (d.pdf_url ? '<a class="btn small" target="_blank" rel="noopener" href="' + esc(d.pdf_url) + '" title="Open the PDF in a new tab">Open PDF</a>' : '') + '</div>';
+        (d.pdf_url ? '<a class="btn small" target="_blank" rel="noopener" href="' + esc(d.pdf_url) + '" title="Open PDF">Open PDF</a>' : '') + '</div>';
       $('dhead').querySelectorAll('button[data-mark]').forEach(function (b) {
         b.onclick = function () { toggleMark(p, b.dataset.mark); };
       });
@@ -1746,11 +1746,13 @@
   }
 
   function showStopped() {
-    document.body.innerHTML = '<div class="stopped"><h2>LitForge has stopped</h2><p>You can close this tab. ' +
+    document.body.innerHTML = '<div class="stopped"><h2>LitForge has stopped</h2><p>' +
+      (desktopMode ? 'Close this window. ' : 'You can close this developer browser tab. ') +
       'To open LitForge again, use its icon in your apps.</p></div>';
   }
 
   /* ---------- Desktop window ---------- */
+  var desktopMode = false, heartbeatTimer = null;
   // In the desktop window (litforge desktop) the close button and Quit take the same steps: save the open file,
   // ask before cancelling running tasks, then stop LitForge; the window closes once the server has stopped.
   // The window asks through window.LitForgeDesktop.requestClose(); there is no other way into the page.
@@ -1819,8 +1821,21 @@
   }
 
   function useDesktopWindow(info) {
-    if (!info || !info.desktop) return;
+    desktopMode = !!(info && info.desktop);
+    if (heartbeatTimer !== null) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (!desktopMode) {
+      delete window.LitForgeDesktop;
+      $('quit-note').textContent = 'Developer browser mode: closing this page stops LitForge after about two minutes.';
+      $('write-pdf-open').title = 'Open PDF in a new browser tab';
+      heartbeatTimer = setInterval(function () {
+        return post('/api/heartbeat', {}).catch(function (e) {
+          if (e instanceof TypeError) { clearInterval(heartbeatTimer); heartbeatTimer = null; showStopped(); }
+        });
+      }, 15000);
+      return;
+    }
     $('quit-note').textContent = 'Closing this window saves your edits and stops LitForge.';
+    $('write-pdf-open').title = 'Open PDF in your PDF app';
     $('btn-quit').onclick = function () { requestClose(); };
     document.addEventListener('click', onLinkClick, true);
     window.LitForgeDesktop = { prepareClose: prepareClose, requestClose: requestClose };
@@ -2409,11 +2424,18 @@
   function showWritePdf(ready) {
     var frame = $('write-pdf'), url = '/api/write/pdf?doc=' + encodeURIComponent(W.doc.id) + '&t=' + Date.now();
     $('write-pdf-empty').hidden = !!ready;
+    $('write-pdf-open').href = url;
+    ['write-pdf-in', 'write-pdf-out', 'write-pdf-fit'].forEach(function (id) { $(id).disabled = !window.pdfjsLib; });
     if (window.pdfjsLib && ready) {  // PDF.js: pages we can click on and draw highlights over
       frame.hidden = true; frame.removeAttribute && frame.removeAttribute('src');
       $('write-pdfview').hidden = false;
-      $('write-pdf-open').href = url;
       return loadPdf(url);
+    }
+    if (ready && window.LitForgeDesktop) {
+      frame.hidden = true; frame.removeAttribute && frame.removeAttribute('src');
+      $('write-pdfview').hidden = false;
+      $('write-pdf-pages').textContent = 'PDF preview is unavailable. Use Open to read the PDF in your PDF app.';
+      return Promise.resolve();
     }
     $('write-pdfview').hidden = true;
     frame.hidden = !ready;
@@ -4520,16 +4542,19 @@
       if (e.key === 'Escape') { $('write-spell-menu').hidden = true; if (W.editor && W.editor.view) W.editor.view.focus(); }
     });
     window.addEventListener('resize', function () { if (AI.pending) placeWriteSuggestion(AI.pending.range); });
-    window.addEventListener('beforeunload', function (e) {
-      if (W.doc && W.dirty && !W.conflictHash) {  // keepalive lets the save finish while the page closes
-        fetch('/api/write/save', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ doc: W.doc.id, name: W.file, text: W.editor.getText(), hash: W.hash }) })
-          .then(function (r) { return r.ok ? r.json() : null; })
-          .then(function (r) { if (r && r.hash) { W.hash = r.hash; W.dirty = false; writeSaveState('Saved'); } })
-          .catch(function () { /* the page is closing */ });
-        e.preventDefault(); e.returnValue = '';
-      }
-    });
+    window.addEventListener('beforeunload', beforeWriteUnload);
+  }
+
+  function beforeWriteUnload(e) {
+    if (window.LitForgeDesktop) return;  // the native close handshake already waits for editor saves
+    if (W.doc && W.dirty && !W.conflictHash) {  // developer browser mode only
+      fetch('/api/write/save', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ doc: W.doc.id, name: W.file, text: W.editor.getText(), hash: W.hash }) })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (r) { if (r && r.hash) { W.hash = r.hash; W.dirty = false; writeSaveState('Saved'); } })
+        .catch(function () { /* the page is closing */ });
+      e.preventDefault(); e.returnValue = '';
+    }
   }
   /* ---------- End Write ---------- */
 
@@ -6048,13 +6073,8 @@
     initSettings();
     initLens();
     wireWrite();
-    // Each open page checks in; when none does for a while, the server stops itself (stop_when_idle).
-    // If the server is gone (it stopped while the computer slept, say), the page says so instead of failing quietly.
-    var beat = setInterval(function () {
-      post('/api/heartbeat', {}).catch(function (e) {
-        if (e instanceof TypeError) { clearInterval(beat); showStopped(); }  // fetch failed: no server answered
-      });
-    }, 15000);
+    // The native host owns desktop lifetime. Only the explicit developer browser mode starts heartbeats
+    // once /api/info identifies the runtime (useDesktopWindow).
     document.querySelectorAll('[data-mode]').forEach(function (b) { b.onclick = function () { setMode(b.dataset.mode); }; });
     $('pdfs-export').checked = store.get('pdfs-export', true);
     $('pdfs-export-scope').textContent = scopeWords();

@@ -198,24 +198,25 @@ def test_installer_skips_prompts_without_tty_and_prints_hint(tmp_path: Path) -> 
     assert "Optional tools" in result.stdout
     # Tectonic installs without a prompt
     assert log == ["sync --extra embed --extra documents --extra desktop --inexact", "run litforge desktop-setup",
-                   "run litforge shortcut", "run litforge tools install tectonic --yes"]
+                   "run litforge shortcut --mode desktop", "run litforge tools install tectonic --yes"]
 
 
 def test_installer_extras_and_failed_optional_install_are_nonfatal(tmp_path: Path) -> None:
     result, log = _run_installer(tmp_path, {"LITFORGE_EXTRAS": "mineru,pix2text", "FAIL_OPTIONAL": "pix2text"})
     assert result.returncode == 0, result.stderr
     assert log == ["sync --extra embed --extra documents --extra desktop --inexact", "run litforge desktop-setup",
-                   "run litforge shortcut", "run litforge tools install tectonic --yes",
+                   "run litforge shortcut --mode desktop", "run litforge tools install tectonic --yes",
                    "run litforge tools install mineru --yes", "run litforge tools install pix2text --yes"]
     assert "warning" in result.stderr.lower()
     assert "litforge tools install pix2text" in result.stderr
 
 
-def test_installer_continues_with_a_browser_icon_when_the_window_cannot_be_set_up(tmp_path: Path) -> None:
+def test_installer_keeps_a_desktop_icon_and_explains_failed_engine_setup(tmp_path: Path) -> None:
     result, log = _run_installer(tmp_path, {"FAIL_SETUP": "1"})
     assert result.returncode == 0, result.stderr
-    assert log[1:3] == ["run litforge desktop-setup", "run litforge shortcut"]
+    assert log[1:3] == ["run litforge desktop-setup", "run litforge shortcut --mode desktop"]
     assert "uv run litforge desktop-setup" in result.stderr  # how to retry
+    assert "browser" not in result.stderr.lower()
 
 
 def test_installer_prompts_read_from_configured_tty(tmp_path: Path) -> None:
