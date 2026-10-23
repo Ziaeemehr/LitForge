@@ -223,12 +223,16 @@ def test_shutdown_kills_job_helper_and_grandchild(paths, tmp_path, monkeypatch):
         def __init__(self, *_):
             pass
         def serve_forever(self):
-            raise KeyboardInterrupt
+            pass
         def shutdown(self):
             pass
         def server_close(self):
             pass
 
+    def ctrl_c(self, timeout=None):  # Ctrl+C reaches the main thread while serve() waits
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(server.ServerHandle, "wait", ctrl_c)
     monkeypatch.setattr(server, "App", lambda *_: app)
     monkeypatch.setattr(server, "ThreadingHTTPServer", HTTP)
     monkeypatch.setattr(server, "stop_when_idle", lambda *_: None)

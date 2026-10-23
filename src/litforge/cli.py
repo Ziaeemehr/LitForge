@@ -1317,6 +1317,53 @@ def ui(
 
 
 @app.command()
+def desktop(
+    workspace: Annotated[Path | None, typer.Option(help="Folder whose data/ holds the library (remembered)")] = None,
+    gui: Annotated[str | None, typer.Option(help="Window engine: gtk, qt, edgechromium or cocoa")] = None,
+) -> None:
+    """Open LitForge in its own window instead of a browser tab."""
+    from litforge.desktop import launch_desktop
+
+    raise typer.Exit(launch_desktop(workspace, gui))
+
+
+@app.command("desktop-server", hidden=True)
+def desktop_server(
+    ctx: typer.Context,
+    port: Annotated[int, typer.Option(help="Preferred port; a free one is used when it is taken")] = 0,
+) -> None:
+    """Serve the UI for the desktop window: print one JSON line with the URL, stop when stdin closes."""
+    import os
+    import sys
+    import threading
+
+    from litforge.ui.server import start_server
+
+    st = _state(ctx)
+    try:
+        handle = start_server(st.paths, st.config, port=port)
+    except OSError:
+        handle = start_server(st.paths, st.config, port=0)
+    print(json.dumps({"url": handle.url, "pid": os.getpid()}), flush=True)
+    closed = threading.Event()
+
+    def watch_stdin() -> None:  # the window closes our stdin when it closes, or when it dies
+        sys.stdin.read()
+        closed.set()
+
+    threading.Thread(target=watch_stdin, daemon=True, name="stdin-watch").start()
+    try:
+        while not closed.is_set() and not handle.wait(0.5):
+            pass
+    finally:
+        try:
+            handle.stop(timeout=10)
+        except TimeoutError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
+
+
+@app.command()
 def shortcut() -> None:
     """Add a LitForge icon to your apps that opens the web interface with one click."""
     import shutil
@@ -1335,10 +1382,6 @@ def shortcut() -> None:
     typer.echo(f"Open LitForge from {where}. Stop it with Quit in the page.")
     typer.echo(f"It uses the data in {Path.cwd()}, the folder you ran this command in.")
 
-
-def launch() -> None:
-    """Entry point of the windowless `litforge-app` launcher: the web interface with default options."""
-    app(["ui"])
 
 register(app, eval_app)
 register_console(app)

@@ -117,8 +117,6 @@ def test_serve_cleanup_runs_after_shutdown_without_sockets(tmp_path: Path, monke
             pass
         def serve_forever(self) -> None:
             calls.append("serve")
-            if interrupt:
-                raise KeyboardInterrupt
         def shutdown(self) -> None:
             pass
         def server_close(self) -> None:
@@ -127,6 +125,10 @@ def test_serve_cleanup_runs_after_shutdown_without_sockets(tmp_path: Path, monke
     monkeypatch.setattr(server, "ThreadingHTTPServer", Httpd)
     monkeypatch.setattr(server, "_is_litforge", lambda url: False)
     monkeypatch.setattr(server, "stop_when_idle", lambda *args: None)
+    if interrupt:  # Ctrl+C reaches the main thread while serve() waits for the server thread
+        def ctrl_c(self: Any, timeout: float | None = None) -> bool:
+            raise KeyboardInterrupt
+        monkeypatch.setattr(server.ServerHandle, "wait", ctrl_c)
     monkeypatch.setattr(application.models.server, "stop", lambda cfg: calls.append("stop-models"))
     server.serve(application.paths, cfg, open_browser=False)
     assert calls == ["serve", "stop-models", "close"]

@@ -970,6 +970,15 @@ Check for updates and print the terminal command; never install or pull.
 
 ## Other
 
+### `litforge desktop`
+
+Open LitForge in its own window instead of a browser tab.
+
+| Option | Meaning |
+|---|---|
+| `--workspace` | Folder whose data/ holds the library (remembered) |
+| `--gui` | Window engine: gtk, qt, edgechromium or cocoa |
+
 ### `litforge review`
 
 Review flagged sentences and cells.

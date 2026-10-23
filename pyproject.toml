@@ -28,13 +28,16 @@ documents = [
 # Nemotron Parse on an NVIDIA GPU (Math: high for English pages, and the structural parser): two small packages
 # on top of formulas-gpu, whose CUDA PyTorch it shares; the model itself is downloaded by the Math: high setup.
 nemotron = ["litforge[formulas-gpu]", "timm>=1.0.22", "beautifulsoup4>=4.13", "huggingface-hub>=0.34"]
+# LitForge in its own window. On Linux the window normally uses the system's WebKitGTK through a small host
+# environment made by the installer; this extra covers Windows (WebView2) and macOS (WKWebView).
+desktop = ["pywebview==6.2.1"]
 
 [project.scripts]
 litforge = "litforge.cli:app"
 
 # Windows runs gui-scripts without a console window; the desktop shortcut starts this one.
 [project.gui-scripts]
-litforge-app = "litforge.cli:launch"
+litforge-app = "litforge.desktop:main"
 
 [tool.uv.sources]
 # The CPU build of PyTorch is enough for Pix2Text and is a fraction of the size of the CUDA build.
