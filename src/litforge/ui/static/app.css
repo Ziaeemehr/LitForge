@@ -728,6 +728,8 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .write-suggestion .hunk ins { color: var(--good); background: var(--good-soft); text-decoration: none; border-radius: 3px;
   padding: 0 3px; unicode-bidi: plaintext; }
 .write-suggestion .hunk del, .write-suggestion .hunk ins { white-space: pre-wrap; }
+.write-suggestion .hunk .words { flex-basis: 100%; margin: 0; white-space: pre-wrap; unicode-bidi: plaintext; }
+.write-suggestion .hunk .words del, .write-suggestion .hunk .words ins { unicode-bidi: normal; padding: 0 1px; }
 .write-suggestion .sg-same { color: var(--muted); margin: 4px 0; }
 .write-suggestion .flag { color: var(--warn); font-size: 11px; margin: 0; flex-basis: 100%; }
 .write-suggestion .quote { font-size: 11px; color: var(--muted); margin: 4px 0 0; border-left: 2px solid var(--line);

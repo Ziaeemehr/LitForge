@@ -4277,10 +4277,22 @@
   function suggestionHunk(h) {
     var div = document.createElement('div');
     div.className = 'hunk';
-    var del = document.createElement('del'); del.textContent = h.old; del.dir = 'auto';
-    var ins = document.createElement('ins'); ins.textContent = h.new; ins.dir = 'auto';
-    if (h.old) div.appendChild(del);
-    if (h.new) div.appendChild(ins);
+    if (h.words && h.words.length) {
+      // One sentence with the changed words marked inside it; dir=auto puts a Persian sentence right to left.
+      var words = document.createElement('p'); words.className = 'words'; words.dir = 'auto';
+      h.words.forEach(function (w) {
+        var el = w.op === 'del' ? document.createElement('del') : w.op === 'ins' ? document.createElement('ins') :
+          document.createElement('span');
+        el.textContent = w.text;
+        words.appendChild(el);
+      });
+      div.appendChild(words);
+    } else {  // suggestions saved before sentence hunks
+      var del = document.createElement('del'); del.textContent = h.old; del.dir = 'auto';
+      var ins = document.createElement('ins'); ins.textContent = h.new; ins.dir = 'auto';
+      if (h.old) div.appendChild(del);
+      if (h.new) div.appendChild(ins);
+    }
     h.flags.forEach(function (f) {
       var p = document.createElement('p'); p.className = 'flag'; p.textContent = '⚠ ' + f; div.appendChild(p);
     });

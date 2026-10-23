@@ -285,6 +285,25 @@ test('AI rewrite shows hunks; flagged hunks start rejected; only accepted hunks 
   assert.deepEqual([...calls.find(c => c[0] === '/api/write/assist/decide')[1].accepted], [0]);
 });
 
+test('a sentence hunk is one line with its changed words marked, right to left for Persian', async () => {
+  const words = [{ op: 'equal', text: 'نتیجه ' }, { op: 'del', text: 'خوب' }, { op: 'ins', text: 'عالی' },
+                 { op: 'equal', text: ' است.' }];
+  const { ctx, $ } = aiSetup({ ...REPORT, original: 'نتیجه خوب است.',
+    hunks: [{ index: 0, start: 0, end: 14, old: 'نتیجه خوب است.', new: 'نتیجه عالی است.', flags: [], words }] });
+  await ctx.openWriteDoc('d1');
+  const area = $('write-cm').children[0];
+  area.value = 'نتیجه خوب است.'; area.setSelectionRange(0, 14);
+  await ctx.runWriteAi('shorter', false);
+  const hunk = $('write-suggestion-hunks').children[0];
+  const line = hunk.children[0];
+  assert.equal(line.className, 'words'); assert.equal(line.dir, 'auto');
+  assert.deepEqual(line.children.map(c => [c.tagName.toLowerCase(), c.textContent]),
+    [['span', 'نتیجه '], ['del', 'خوب'], ['ins', 'عالی'], ['span', ' است.']]);
+  assert.match(hunk.children[1].textContent, /^Accepted/);
+  await ctx.applyWriteSuggestion();
+  assert.equal(area.value, 'نتیجه عالی است.');
+});
+
 test('AI suggestion is refused when the text changed meanwhile', async () => {
   const { ctx, $, calls } = aiSetup(REPORT);
   await ctx.openWriteDoc('d1');
