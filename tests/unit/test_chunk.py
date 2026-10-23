@@ -60,3 +60,11 @@ def test_nested_section_paths() -> None:
     ])
     assert [c.section_path for c in chunk_document(doc, "k")] == [
         "2 Methods", "2 Methods > 2.1 Model", "3 Results"]
+
+
+def test_ligatures_spelled_out_with_aligned_spans() -> None:
+    doc = _doc([Section(heading="Signiﬁcance", kind="body", paragraphs=[
+        Paragraph(text="An eﬃcient ﬂow.", page=1), Paragraph(text="Deﬁnitely.", page=2)])])
+    (chunk,) = chunk_document(doc, "k")
+    assert chunk.text == "An efficient flow.\n\nDefinitely." and chunk.section_path == "Significance"
+    assert [chunk.text[s.start:s.end] for s in chunk.spans] == ["An efficient flow.", "Definitely."]

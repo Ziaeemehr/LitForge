@@ -1,0 +1,385 @@
+# sbi10: a gold benchmark on ten open-access arXiv papers (pinned in papers.txt).
+# Every target names the paper (arXiv id, quoted so YAML keeps it a string), the PDF page (1-based) and a short quote from that page.
+# Quotes are compared without case, ligatures, line-break hyphens or extra whitespace.
+# `litforge eval check` confirms every quote is in the indexed text before anything is scored.
+name: sbi10
+
+questions:
+  - id: q01
+    question: Why is the likelihood of a simulator model intractable?
+    answer: It is an integral over all latent trajectories (execution traces) of the simulator, which cannot be computed for realistic simulators.
+    relevant:
+      - {paper: "1911.01429", page: 2, contains: all possible execution traces of the simulator}
+      - {paper: "1805.07226", page: 1, contains: computationally infeasible in general}
+  - id: q02
+    question: Which forces are giving new momentum to simulation-based inference?
+    answer: Machine learning, active learning, and integrating the inference engine with the internals of the simulator.
+    relevant:
+      - {paper: "1911.01429", page: 1, contains: forces are giving new momentum}
+      - {paper: "1911.01429", page: 3, contains: three main directions of progress}
+  - id: q03
+    question: What goes wrong with ABC as the tolerance epsilon goes to zero?
+    answer: Inference becomes exact only in the limit, but the acceptance probability vanishes and the number of simulations becomes infeasible.
+    relevant:
+      - {paper: "1911.01429", page: 3, contains: for continuous data the acceptance probability vanishes}
+      - {paper: "1605.06376", page: 1, contains: These algorithms critically slow down}
+  - id: q04
+    question: What problem does SNPE-A run into with its Gaussian proposal?
+    answer: Dividing by the proposal can give a Gaussian with negative variance (non-positive-definite covariance), so the run stops; it also cannot use multimodal proposals.
+    relevant:
+      - {paper: "1805.07226", page: 2, contains: Gaussian with negative variance}
+      - {paper: "1905.07488", page: 2, contains: does not admit multimodal proposals}
+      - {paper: "1805.07226", page: 6, contains: SNPE-A fails in the second round}
+  - id: q05
+    question: Why can the importance weights of SNPE-B make training unstable?
+    answer: The weights p(theta)/proposal(theta) have high variance, giving high-variance gradients and slow or inaccurate inference.
+    relevant:
+      - {paper: "1805.07226", page: 2, contains: the weights can have high variance}
+      - {paper: "1905.07488", page: 3, contains: can lead to slow or inaccurate inference}
+  - id: q06
+    question: How does Sequential Neural Likelihood avoid the bias introduced by the proposal?
+    answer: It learns the likelihood instead of the posterior; the proposal does not bias a likelihood model asymptotically, so no correction is needed.
+    relevant:
+      - {paper: "1805.07226", page: 2, contains: avoids the bias introduced by the proposal}
+      - {paper: "1805.07226", page: 3, contains: no adjustment is necessary to account for}
+  - id: q07
+    question: Which neural density estimator does SNL use to model the likelihood?
+    answer: A conditional Masked Autoregressive Flow (MAF).
+    relevant:
+      - {paper: "1805.07226", page: 3, contains: "Autoregressive Flow [60], which has been shown"}
+      - {paper: "1805.07226", page: 1, contains: "Autoregressive Flow [60] on simulated data"}
+  - id: q08
+    question: Which MCMC method does SNL use to sample from its approximate posterior?
+    answer: Slice sampling with axis-aligned updates, with the chain persisting across rounds.
+    relevant:
+      - {paper: "1805.07226", page: 3, contains: in the form of Slice Sampling}
+  - id: q09
+    question: How many simulations per round were used for SNL in the experiments?
+    answer: 1000 simulations per round, 5% of them held out for validation.
+    relevant:
+      - {paper: "1805.07226", page: 5, contains: simulations in each round of SNL}
+  - id: q10
+    question: How does APT train with flow-based density estimators when the normalizing integral cannot be solved?
+    answer: With atomic proposals over a finite set of parameter atoms, which replace integrals by sums and turn training into multiple-choice classification.
+    relevant:
+      - {paper: "1905.07488", page: 4, contains: replacing integrals by sums}
+      - {paper: "1905.07488", page: 4, contains: multiple choice test problems}
+  - id: q11
+    question: How do APT and SNL behave when many uninformative data dimensions are added?
+    answer: At large dimension SNL's posterior is no better than the prior while APT degrades only slightly.
+    relevant:
+      - {paper: "1905.07488", page: 6, contains: APT degrades only slightly}
+  - id: q12
+    question: Can APT infer posteriors directly from raw time series or images without summary statistics?
+    answer: Yes; with an RNN on raw Lotka-Volterra time series and a CNN on 100x100 rock-paper-scissors images.
+    relevant:
+      - {paper: "1905.07488", page: 7, contains: without summary statistics on high-dimensional data}
+      - {paper: "1905.07488", page: 7, contains: convolutional neural network (CNN)}
+  - id: q13
+    question: Which families of inference algorithms does the sbi toolkit implement?
+    answer: SNPE (SNPE-C), SNLE and SNRE.
+    relevant:
+      - {paper: "2007.09114", page: 2, contains: three families of neural inference algorithms}
+  - id: q14
+    question: Which deep learning framework is sbi built on and under which license is it released?
+    answer: PyTorch; AGPLv3.
+    relevant:
+      - {paper: "2007.09114", page: 1, contains: PyTorch-based package}
+      - {paper: "2007.09114", page: 1, contains: under the AGPLv3 license}
+  - id: q15
+    question: When is it preferable to learn the likelihood ratio rather than the likelihood?
+    answer: When sampling synthetic data from the surrogate is not needed; ratio estimation is supervised classification and often simpler.
+    relevant:
+      - {paper: "1911.01429", page: 7, contains: often a simpler task}
+      - {paper: "1911.01429", page: 8, contains: rather than the likelihood allows us to}
+  - id: q16
+    question: What are the advantages of learning the likelihood instead of the posterior?
+    answer: It does not depend on the proposal, can be reused with different priors and supports frequentist inference; but it needs an extra MCMC or VI step.
+    relevant:
+      - {paper: "1805.07226", page: 8, contains: a model of the likelihood can be reused}
+      - {paper: "1911.01429", page: 7, contains: The prior independence}
+  - id: q17
+    question: How do Masked Autoregressive Flow and Inverse Autoregressive Flow differ in evaluating densities?
+    answer: MAF evaluates the density of any datapoint in one pass but samples in D passes; IAF samples in one pass but needs D passes for external datapoints.
+    relevant:
+      - {paper: "1705.07057", page: 4, contains: MAF is more suitable for density estimation}
+      - {paper: "1705.07057", page: 4, contains: IAF is suitable as a recognition model}
+  - id: q18
+    question: How does MAF compare with Real NVP on density estimation benchmarks?
+    answer: MAF outperforms Real NVP on all datasets in the paper's experiments.
+    relevant:
+      - {paper: "1705.07057", page: 8, contains: MAF outperformed Real NVP in all our experiments}
+      - {paper: "1705.07057", page: 7, contains: On all datasets, MAF outperforms Real NVP}
+  - id: q19
+    question: Which optimizer settings were used to train MAF?
+    answer: Adam with minibatch size 100 and step size 1e-4 for Real NVP and MAF (1e-3 for MADE).
+    relevant:
+      - {paper: "1705.07057", page: 6, contains: minibatch size of 100}
+  - id: q20
+    question: What problem with deeper plain networks motivated residual learning?
+    answer: The degradation problem; accuracy saturates and then degrades with depth, with higher training error not caused by overfitting.
+    relevant:
+      - {paper: "1512.03385", page: 1, contains: degradation problem has been exposed}
+      - {paper: "1512.03385", page: 2, contains: we address the degradation problem}
+  - id: q21
+    question: What top-5 error did the ResNet ensemble reach on the ImageNet test set?
+    answer: 3.57%, which won first place in ILSVRC 2015 classification.
+    relevant:
+      - {paper: "1512.03385", page: 7, contains: This leads to 3.57% top-5 error on the test set}
+      - {paper: "1512.03385", page: 1, contains: achieves 3.57% error}
+  - id: q22
+    question: What BLEU score does the Transformer reach on WMT 2014 English-to-German?
+    answer: 28.4 BLEU with the big model.
+    relevant:
+      - {paper: "1706.03762", page: 8, contains: new state-of-the-art BLEU score of 28.4}
+      - {paper: "1706.03762", page: 1, contains: 28.4 BLEU}
+  - id: q23
+    question: Why are the dot products scaled by one over the square root of d_k in attention?
+    answer: For large d_k the dot products grow large and push the softmax into regions with extremely small gradients.
+    relevant:
+      - {paper: "1706.03762", page: 4, contains: extremely small gradients}
+  - id: q24
+    question: Which default hyperparameters does the Adam paper recommend?
+    answer: alpha = 0.001, beta1 = 0.9, beta2 = 0.999, epsilon = 1e-8.
+    relevant:
+      - {paper: "1412.6980", page: 2, contains: Good default settings for the tested machine learning problems}
+  - id: q25
+    question: Why does Adam correct the bias of its moment estimates?
+    answer: The moving averages start at zero and are biased towards zero early on; without correction, beta2 close to 1 gives very large steps and instability.
+    relevant:
+      - {paper: "1412.6980", page: 2, contains: biased towards zero}
+      - {paper: "1412.6980", page: 8, contains: lead to instabilities in training when no bias correction}
+  - id: q26
+    question: How do neural ODEs train with constant memory cost?
+    answer: Gradients come from the adjoint sensitivity method, solving an augmented ODE backwards in time without storing forward intermediates.
+    relevant:
+      - {paper: "1806.07366", page: 1, contains: constant memory cost as a function of depth}
+      - {paper: "1806.07366", page: 2, contains: compute gradients using the adjoint sensitivity method}
+  - id: q27
+    question: How did the ODE-Net compare with a ResNet on MNIST?
+    answer: Around the same test error (0.42% vs 0.41%) with fewer parameters (0.22M vs 0.60M) and O(1) memory.
+    relevant:
+      - {paper: "1806.07366", page: 3, contains: can achieve around the same performance as the ResNet}
+  - id: q28
+    question: Which papers evaluate their inference method on the Lotka-Volterra predator-prey model?
+    answer: The epsilon-free inference (SNPE-A), SNL and APT papers.
+    relevant:
+      - {paper: "1605.06376", page: 6, contains: Volterra model is a stochastic Markov jump process}
+      - {paper: "1805.07226", page: 6, contains: "Volterra population model [84]"}
+      - {paper: "1905.07488", page: 6, contains: Volterra model of coupled predator}
+  - id: q29
+    question: What data summarize the M/G/1 queue model in likelihood-free inference experiments?
+    answer: Five equally spaced quantiles (percentiles) of the inter-departure times.
+    relevant:
+      - {paper: "1805.07226", page: 6, contains: 5 equally spaced quantiles}
+      - {paper: "1605.06376", page: 7, contains: equally-spaced percentiles}
+  - id: q30
+    question: Which approach does the review of simulation-based inference recommend trying in most cases?
+    answer: Training a neural network surrogate for the likelihood or the likelihood ratio.
+    relevant:
+      - {paper: "1911.01429", page: 8, contains: we recommend trying methods based on training a neural network surrogate}
+
+  # Persian questions about the same papers; each mirrors an English question above (fa01 ~ q01 and so on).
+  - id: fa01
+    lang: fa
+    question: چرا تابع درست‌نمایی در مدل‌های شبیه‌ساز محاسبه‌پذیر نیست؟
+    relevant:
+      - {paper: "1911.01429", page: 2, contains: all possible execution traces of the simulator}
+      - {paper: "1805.07226", page: 1, contains: computationally infeasible in general}
+  - id: fa06
+    lang: fa
+    question: روش SNL چگونه از سوگیری ناشی از توزیع پیشنهادی جلوگیری می‌کند؟
+    relevant:
+      - {paper: "1805.07226", page: 2, contains: avoids the bias introduced by the proposal}
+      - {paper: "1805.07226", page: 3, contains: no adjustment is necessary to account for}
+  - id: fa13
+    lang: fa
+    question: جعبه‌ابزار sbi کدام خانواده‌های الگوریتم استنباط را پیاده‌سازی می‌کند؟
+    relevant:
+      - {paper: "2007.09114", page: 2, contains: three families of neural inference algorithms}
+  - id: fa18
+    lang: fa
+    question: عملکرد MAF در برآورد چگالی در مقایسه با Real NVP چگونه است؟
+    relevant:
+      - {paper: "1705.07057", page: 8, contains: MAF outperformed Real NVP in all our experiments}
+      - {paper: "1705.07057", page: 7, contains: On all datasets, MAF outperforms Real NVP}
+  - id: fa20
+    lang: fa
+    question: چه مشکلی در شبکه‌های عصبی عمیق‌تر انگیزهٔ یادگیری باقیمانده شد؟
+    relevant:
+      - {paper: "1512.03385", page: 1, contains: degradation problem has been exposed}
+      - {paper: "1512.03385", page: 2, contains: we address the degradation problem}
+  - id: fa22
+    lang: fa
+    question: ترنسفورمر در ترجمهٔ انگلیسی به آلمانی چه امتیاز BLEU گرفت؟
+    relevant:
+      - {paper: "1706.03762", page: 8, contains: new state-of-the-art BLEU score of 28.4}
+      - {paper: "1706.03762", page: 1, contains: 28.4 BLEU}
+  - id: fa25
+    lang: fa
+    question: چرا بهینه‌ساز Adam سوگیری برآورد گشتاورها را تصحیح می‌کند؟
+    relevant:
+      - {paper: "1412.6980", page: 2, contains: biased towards zero}
+      - {paper: "1412.6980", page: 8, contains: lead to instabilities in training when no bias correction}
+  - id: fa26
+    lang: fa
+    question: معادلات دیفرانسیل معمولی عصبی چگونه با حافظهٔ ثابت آموزش داده می‌شوند؟
+    relevant:
+      - {paper: "1806.07366", page: 1, contains: constant memory cost as a function of depth}
+      - {paper: "1806.07366", page: 2, contains: compute gradients using the adjoint sensitivity method}
+
+matrix_question: How were these methods trained and released?
+matrix_columns:
+  - key: code_available
+    label: Code available
+    instruction: Does the paper state that code for the method or its experiments is publicly available?
+    type: boolean
+  - key: optimizer
+    label: Training optimizer
+    instruction: Which gradient optimizer does the paper use to train its own models? Not applicable when the paper trains no model.
+    type: categorical
+    options: [Adam, SGD, RMSProp, other]
+  - key: inference_target
+    label: Inference target
+    instruction: For likelihood-free inference papers, what does the method learn from simulations? Not applicable to papers outside likelihood-free inference.
+    type: categorical
+    options: [posterior, likelihood, likelihood_ratio, several]
+  - key: gpus_used
+    label: GPUs used
+    instruction: How many GPUs were used to train the main reported models?
+    type: number
+matrix:
+  - {paper: "1911.01429", column: code_available, status: not_reported}
+  - {paper: "2007.09114", column: code_available, status: reported, value: true, page: 1, contains: sbi is available at mackelab.org/sbi}
+  - {paper: "1905.07488", column: code_available, status: reported, value: true, page: 3, contains: Code available at github.com/mackelab/delfi}
+  - {paper: "1805.07226", column: code_available, status: reported, value: true, page: 5, contains: github.com/gpapamak/snl}
+  - {paper: "1605.06376", column: code_available, status: reported, value: true, page: 5, contains: Code for reproducing the experiments is provided}
+  - {paper: "1705.07057", column: code_available, status: reported, value: true, page: 5, contains: Code for reproducing our experiments}
+  - {paper: "1806.07366", column: code_available, status: reported, value: true, page: 3, contains: github.com/rtqichen/torchdiffeq}
+  - {paper: "1512.03385", column: code_available, status: not_reported}
+  - {paper: "1412.6980", column: code_available, status: not_reported}
+  - {paper: "1706.03762", column: code_available, status: reported, value: true, page: 10, contains: The code we used to train and evaluate our models is available}
+  - {paper: "1911.01429", column: optimizer, status: not_applicable}
+  - {paper: "2007.09114", column: optimizer, status: not_reported}
+  - {paper: "1905.07488", column: optimizer, status: not_reported}
+  - {paper: "1805.07226", column: optimizer, status: reported, value: Adam, page: 5, contains: "using Adam [35]"}
+  - {paper: "1605.06376", column: optimizer, status: reported, value: Adam, page: 4, contains: All MDNs were trained using Adam}
+  - {paper: "1705.07057", column: optimizer, status: reported, value: Adam, page: 6, contains: All models were trained with the Adam optimizer}
+  - {paper: "1806.07366", column: optimizer, status: reported, value: Adam, page: 5, contains: "using Adam (Kingma and Ba, 2014)"}
+  - {paper: "1512.03385", column: optimizer, status: reported, value: SGD, page: 4, contains: We use SGD with a mini-batch size of 256}
+  - {paper: "1706.03762", column: optimizer, status: reported, value: Adam, page: 7, contains: We used the Adam optimizer}
+  - {paper: "1911.01429", column: inference_target, status: reported, value: several, page: 7, contains: the network can either learn the posterior}
+  - {paper: "2007.09114", column: inference_target, status: reported, value: several, page: 2, contains: three families of neural inference algorithms}
+  - {paper: "1905.07488", column: inference_target, status: reported, value: posterior, page: 1, contains: new sequential neural posterior estimation method}
+  - {paper: "1805.07226", column: inference_target, status: reported, value: likelihood, page: 2, contains: learn a model of the likelihood instead of the posterior}
+  - {paper: "1605.06376", column: inference_target, status: reported, value: posterior, page: 3, contains: The proposition above suggests the following procedure for learning the posterior}
+  - {paper: "1705.07057", column: inference_target, status: not_applicable}
+  - {paper: "1806.07366", column: inference_target, status: not_applicable}
+  - {paper: "1512.03385", column: inference_target, status: not_applicable}
+  - {paper: "1412.6980", column: inference_target, status: not_applicable}
+  - {paper: "1706.03762", column: inference_target, status: not_applicable}
+  - {paper: "1706.03762", column: gpus_used, status: reported, value: 8, page: 7, contains: one machine with 8 NVIDIA P100 GPUs}
+  - {paper: "1805.07226", column: gpus_used, status: not_reported}
+  - {paper: "1905.07488", column: gpus_used, status: not_reported}
+  - {paper: "1705.07057", column: gpus_used, status: not_reported}
+  - {paper: "1412.6980", column: gpus_used, status: not_reported}
+
+criteria:
+  question: Neural-network methods for simulation-based (likelihood-free) inference of simulator parameters
+  include:
+    - Proposes, implements or reviews a method for inferring parameters of simulators whose likelihood is intractable
+  exclude:
+    - General machine learning methods (architectures, optimizers, density estimators) that are not themselves applied to likelihood-free inference
+screening:
+  - {paper: "1911.01429", relevant: true}
+  - {paper: "2007.09114", relevant: true}
+  - {paper: "1905.07488", relevant: true}
+  - {paper: "1805.07226", relevant: true}
+  - {paper: "1605.06376", relevant: true}
+  - {paper: "1705.07057", relevant: false, note: Borderline; a density estimator later used by SNL, but the paper itself does no likelihood-free inference.}
+  - {paper: "1806.07366", relevant: false}
+  - {paper: "1512.03385", relevant: false}
+  - {paper: "1412.6980", relevant: false}
+  - {paper: "1706.03762", relevant: false}
+
+# Relations are only scored between claims of different papers (the claim graph compares papers, not
+# sentences of one paper).
+claims:
+  - id: c01
+    paper: "1805.07226"
+    page: 1
+    contains: is more robust, more accurate and requires less tuning
+    text: SNL is more robust, more accurate and requires less tuning than related neural-based methods.
+  - id: c02
+    paper: "1905.07488"
+    page: 6
+    contains: APT degrades only slightly
+    text: With many uninformative data dimensions, SNL's posterior is no better than the prior while APT degrades only slightly.
+  - id: c03
+    paper: "1905.07488"
+    page: 8
+    contains: SNL and SNPE-B were considerably less accurate
+    text: On the GLM model, SNL and SNPE-B were considerably less accurate than APT.
+  - id: c04
+    paper: "1805.07226"
+    page: 7
+    contains: SNL and SNPE-A perform the best
+    text: On Lotka-Volterra, SNL and SNPE-A perform best and SNPE-B is less accurate.
+  - id: c05
+    paper: "1905.07488"
+    page: 6
+    contains: APT produced tight posteriors
+    text: On Lotka-Volterra, APT produced tight posteriors around the true parameters with fewer simulations than other methods.
+  - id: c06
+    paper: "1805.07226"
+    page: 7
+    contains: SNPE-A failed in two out of four cases
+    text: SNPE-A failed in two out of four cases and SNPE-B showed high variability.
+  - id: c07
+    paper: "1905.07488"
+    page: 2
+    contains: simple and can be highly effective
+    text: SNPE-A is simple and can be highly effective, but does not admit multimodal proposals.
+  - id: c08
+    paper: "1605.06376"
+    page: 1
+    contains: requires fewer model simulations than Monte Carlo
+    text: Learning a parametric posterior can need fewer simulations than Monte Carlo ABC needs for a single approximate sample.
+  - id: c09
+    paper: "1805.07226"
+    page: 6
+    contains: require orders of magnitude more simulations
+    text: SMC-ABC and synthetic likelihood require orders of magnitude more simulations than the sequential neural methods.
+  - id: c10
+    paper: "1911.01429"
+    page: 7
+    contains: ratio function may often be more
+    text: Learning a surrogate for the likelihood ratio may often be more efficient than learning the likelihood.
+  - id: c11
+    paper: "1805.07226"
+    page: 8
+    contains: the likelihood can often be easier than learning
+    text: Learning the likelihood can often be easier than learning the posterior.
+  - id: c12
+    paper: "1905.07488"
+    page: 8
+    contains: do not claim that directly targeting the posterior
+    text: Directly targeting the posterior will not always outperform synthetic-likelihood approaches; it depends on the problem.
+  - id: c13
+    paper: "1905.07488"
+    page: 5
+    contains: requires a large number of simulations
+    text: Classical SMC-ABC requires a large number of simulations.
+  - id: c14
+    paper: "1905.07488"
+    page: 3
+    contains: generally outperforms classical ABC approaches
+    text: SNL is accurate and efficient on many problems and generally outperforms classical ABC approaches such as SMC-ABC.
+relations:
+  - {a: c01, b: c02, relation: contradicts}
+  - {a: c01, b: c03, relation: contradicts}
+  - {a: c06, b: c07, relation: qualifies}
+  - {a: c08, b: c09, relation: supports}
+  - {a: c11, b: c12, relation: qualifies}
+  - {a: c09, b: c13, relation: supports}
+  - {a: c01, b: c14, relation: supports}

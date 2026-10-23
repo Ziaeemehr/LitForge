@@ -11,7 +11,7 @@ from dataclasses import asdict
 from pydantic import BaseModel
 
 from litforge.config import Config, Paths
-from litforge.indexing.chunk import chunk_document
+from litforge.indexing.chunk import LIGATURE_GLOB, chunk_document, plain_text
 from litforge.indexing.stopwords import STOPWORDS
 from litforge.parsing.canonical import read_canonical
 from litforge.storage.db import dumps, transaction
@@ -52,10 +52,12 @@ def current_runs(conn: sqlite3.Connection, project_id: str | None) -> list[sqlit
 def index_run(
     conn: sqlite3.Connection, paths: Paths, config: Config, run: sqlite3.Row, force: bool = False
 ) -> IndexResult:
-    existing = conn.execute(
-        "SELECT COUNT(*) FROM chunks WHERE parse_run_id=?", (run["id"],)
-    ).fetchone()[0]
-    if existing and not force:
+    existing, stale = conn.execute(
+        "SELECT COUNT(*), COUNT(*) FILTER (WHERE text GLOB ?) FROM chunks WHERE parse_run_id=?",
+        (LIGATURE_GLOB, run["id"]),
+    ).fetchone()
+    # Chunks written before ligatures were spelled out are rebuilt, so older libraries heal on the next index.
+    if existing and not stale and not force:
         return IndexResult(parse_run_id=run["id"], paper_id=run["paper_id"], outcome="cached",
                            chunks=existing)
     doc = read_canonical(paths.root / run["output_dir"])
@@ -98,7 +100,7 @@ def build_match(query: str) -> tuple[str, list[str]]:
     """Turn free text into a safe FTS5 query (implicit AND of quoted terms/phrases)."""
     parts: list[str] = []
     terms: list[str] = []
-    for phrase, word in _PHRASE_RE.findall(query):
+    for phrase, word in _PHRASE_RE.findall(plain_text(query)):
         if phrase:
             tokens = re.findall(r"\w+", phrase)
             if tokens:
@@ -116,7 +118,7 @@ def build_any_match(query: str) -> tuple[str, list[str]]:
     parts: list[str] = []
     terms: list[str] = []
     seen: set[str] = set()
-    for phrase, word in _PHRASE_RE.findall(query.lower()):
+    for phrase, word in _PHRASE_RE.findall(plain_text(query).lower()):
         tokens = re.findall(r"\w+", phrase or word)
         groups = [tokens] if phrase and tokens else [[t] for t in tokens if len(t) >= 2 and t not in STOPWORDS]
         for group in groups:
