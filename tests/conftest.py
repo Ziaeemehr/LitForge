@@ -201,3 +201,10 @@ def no_real_nemotron(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(nemotron, "gpu_free_gb", lambda: None)
     monkeypatch.setattr(nemotron, "download_model", lambda paths, progress=None: (_ for _ in ()).throw(
         RuntimeError("tests must not download Nemotron Parse")))
+
+
+@pytest.fixture(autouse=True)
+def _no_installed_model_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Questions go to the largest installed Ollama model; tests must not depend on what this computer has."""
+    from litforge.analysis.gateway import ModelGateway
+    monkeypatch.setattr(ModelGateway, "_installed_models", lambda self: [])

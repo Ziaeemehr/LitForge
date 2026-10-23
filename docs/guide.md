@@ -712,9 +712,14 @@ search terms (the `query_translate` task, local in every mode, cached per questi
 with the words as written. The answer is written in Persian and its quotes stay in the paper's English. The same
 step runs for `litforge search`, Writing Studio citations and the assistant. If the model is not available, the
 words are searched as written. On the sbi10 benchmark this raised Persian Recall@10 from 22% to 66% (English:
-67%). The small default model (`qwen3:4b`) often writes poor Persian or repeats the question (such an answer is
-replaced by a note); `qwen3:8b` answered 16 of 20 Persian questions in good Persian, so assign a larger model to
-the `ask` task if you ask in Persian.
+67%).
+
+Questions get the strongest model available: unless you assigned `ask` or `write_chat` yourself, they go to the
+cloud model when the cloud is enabled (the strong one first), otherwise to the largest text model installed in
+Ollama that fits this computer's memory (no download; embedding and image models are skipped), and to the
+configured local model when nothing larger is installed. Screening, extraction and translation stay on the
+faster local model. On the benchmark, `qwen3:8b` answered 16 of 20 Persian questions in good Persian where
+`qwen3:4b` answered 11 and often repeated the question (such an answer is replaced by a note).
 
 Ask also shows verified exact supporting quotes under each sentence (up to three, 400 characters each).
 Click a quote's paper/page chip to open its evidence with the original passage highlighted. Quotes are

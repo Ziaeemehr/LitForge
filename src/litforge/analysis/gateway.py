@@ -31,6 +31,9 @@ from litforge.storage.db import new_id, now, transaction
 from litforge.storage.recovery import owner_alive, process_started_at, repair_model_reservations
 
 LOCAL_VISION = "local_vision"  # default route for image calls: the configured local vision model
+STRONGEST_LOCAL = "strongest_local"  # the largest installed Ollama text model that fits, for questions
+# Questions in the user's own words get the strongest model available unless the user assigned the task.
+QUESTION_TASKS = frozenset({"ask", "write_chat"})
 
 
 class GatewayError(RuntimeError):
@@ -73,8 +76,13 @@ class ModelGateway:
                  provider_factory: Callable[[str, ModelProfileConfig], ProviderLike] | None = None,
                  pricing: OpenRouterPricing | None = None,
                  ensure_server: Callable[[LlamaCppServerConfig, str], bool] | None = None,
-                 progress: Callable[[str], None] | None = None) -> None:
+                 progress: Callable[[str], None] | None = None,
+                 local_models: Callable[[], list[tuple[str, int]]] | None = None) -> None:
+        """`local_models`: installed Ollama text models as (name, size in bytes) that fit this computer; by
+        default asked from Ollama, and none when providers are injected (tests and callers that fix the route)."""
         self.conn, self.config = conn, config
+        self.local_models = local_models or ((lambda: []) if providers or provider_factory else self._installed_models)
+        self._strongest: list[ModelProfileConfig | None] = []  # empty until looked up (once per gateway)
         self.providers = dict(providers or {})
         self.provider_factory = provider_factory
         database = conn.execute("PRAGMA database_list").fetchone()[2]
@@ -89,12 +97,62 @@ class ModelGateway:
     def _profiles(self) -> dict[str, ModelProfileConfig]:
         vision = ModelProfileConfig(provider="ollama", model=self.config.vision.model or "disabled",
                                     vision=self.config.vision.model is not None, timeout_s=self.config.vision.timeout_s)
-        return {LOCAL_VISION: vision, **self.config.models.profiles, "local": self.config.models.local}
+        strongest = self._strongest_local()
+        return {LOCAL_VISION: vision, **({STRONGEST_LOCAL: strongest} if strongest else {}),
+                **self.config.models.profiles, "local": self.config.models.local}
+
+    def _installed_models(self) -> list[tuple[str, int]]:
+        from litforge.llm.hardware import detect_hardware
+        from litforge.llm.local_models import fit_check
+        local = self.config.models.local
+        if local.provider != "ollama" or local.remote:
+            return []
+        url = os.environ.get("LITFORGE_OLLAMA_URL") or self.config.screening.ollama_url
+        try:
+            tags = OllamaClient(url, local.model, 3)._call("/api/tags").get("models", [])
+        except Exception:  # noqa: BLE001 - no Ollama: the configured local model is used as before
+            return []
+        hw = detect_hardware(self.data_root)
+        out = []
+        for m in tags:
+            name, size = str(m.get("name") or ""), int(m.get("size") or 0)
+            families = {str(f).lower() for f in (m.get("details") or {}).get("families") or []}
+            if not name or re.search(r"embed|vl\b|vl:|vision|llava|ocr|minicpm-v", name.lower()) or \
+                    families & {"clip", "mllama", "bert", "nomic-bert"}:
+                continue  # embeddings and image models are not question answerers
+            if size and fit_check(hw, size, context_tokens=8192)["badge"] == "fits":
+                out.append((name, size))
+        return out
+
+    def _strongest_local(self) -> ModelProfileConfig | None:
+        if not self._strongest:
+            local = self.config.models.local
+            sizes = dict(self.local_models())
+            best = max(sizes, key=lambda n: sizes[n], default=None)
+            # Compared with the configured model only once it is installed (setup pulls it on first use).
+            current = sizes.get(local.model) or sizes.get(f"{local.model}:latest") or 0
+            self._strongest = [local.model_copy(update={"model": best})
+                               if best and current and sizes[best] > current else None]
+        return self._strongest[0]
+
+    def _question_profile(self) -> str | None:
+        """A cloud model the user enabled (the strong one first), else the largest local model that fits."""
+        if self.config.privacy.allow_cloud:
+            for name in ("cloud_strong", "cloud_cheap"):
+                if name in self.config.models.profiles and self.config.models.profiles[name].remote:
+                    return name
+        return STRONGEST_LOCAL if self._strongest_local() else None
+
+    def _task_profile(self, task: str, profile: str | None, vision: bool) -> str:
+        mapping = self.config.models.tasks.get(task)
+        if profile or mapping:
+            return profile or mapping.profile  # type: ignore[union-attr]
+        if task in QUESTION_TASKS and not vision and (strong := self._question_profile()):
+            return strong
+        return (self.config.models.vision_profile or LOCAL_VISION) if vision else "local"
 
     def resolve(self, task: str, profile: str | None = None, vision: bool = False) -> tuple[str, ModelProfileConfig]:
-        mapping = self.config.models.tasks.get(task)
-        default = (self.config.models.vision_profile or LOCAL_VISION) if vision else "local"
-        name = profile or (mapping.profile if mapping else None) or default
+        name = self._task_profile(task, profile, vision)
         if name not in self._profiles():
             raise RoutingError(f"unknown profile: {name}")
         return name, self._profiles()[name]
@@ -240,8 +298,7 @@ class ModelGateway:
     def _preview(self, task: str, evidence: EvidencePacket, messages: list[dict[str, Any]],
                  profile: str | None, max_output_tokens: int | None, image_count: int,
                  schema: dict[str, Any] | None = None) -> CallPreview:
-        selected = profile or (self.config.models.tasks[task].profile if task in self.config.models.tasks else
-                               (self.config.models.vision_profile or LOCAL_VISION) if image_count else "local")
+        selected = self._task_profile(task, profile, bool(image_count))
         estimated = self._estimate(messages, max_output_tokens or 1024) + 1024 * image_count
         if selected not in self._profiles():
             return CallPreview(profile=selected, provider="", model="", remote=False,
