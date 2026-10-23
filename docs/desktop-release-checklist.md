@@ -146,8 +146,8 @@ arXiv, open-access and mailto anchors, and retained PDF/download/blocked-link be
 | Round | Evidence | Result |
 | --- | --- | --- |
 | 1 | `af3ef02`; [run 40019244324](https://github.com/Ziaeemehr/LitForge/actions/runs/40019244324). Local Cocoa RED→GREEN; Windows and full Linux suite passed. macOS 15 recorded only the second back-to-back synthetic popup; GTK provisioning was cancelled after slow Azure archive downloads and did not execute its native check. | Failed/incomplete; fixes prepared for round 2. |
-| 2 | Pending native CI stability run. | Not run |
-| 3 | Pending native CI stability run. | Not run |
+| 2 | `7704d7a`; [run 40020354594, attempt 1](https://github.com/Ziaeemehr/LitForge/actions/runs/40020354594/attempts/1). Every native engine recorded both DOI/OpenAlex handoffs, with the app URL unchanged. Full suite: 2130 passed, 4 skipped; 258 UI tests, Ruff and mypy passed. | PASS — all five jobs green. |
+| 3 | `7704d7a`; [run 40020354594, attempt 2](https://github.com/Ziaeemehr/LitForge/actions/runs/40020354594/attempts/2). Same source, fresh runners: both handoffs and every other native check passed on all targets. Full suite: 2130 passed, 4 skipped; 258 UI tests, Ruff and mypy passed. | PASS — all five jobs green. |
 
 Round 1 follow-up: keep each smoke-test anchor in the page and wait for its native browser handoff
 before clicking/removing it and starting the next one. Both Mac architectures consistently recorded
@@ -158,3 +158,17 @@ GTK's apt log showed 46.3 MB of packages arriving slowly from `azure.archive.ubu
 took seconds each; a 2.2 MB package was still downloading when cancelled). Select Ubuntu's official
 HTTPS archive in the disposable CI VM, omit recommended packages, bound network retries/timeouts and
 cap the provisioning step at eight minutes. This changes CI provisioning only, not the installer.
+
+Round 2 confirmed that serialized anchor clicks are delivered on macOS 15.7.9 Intel and ARM,
+as well as Windows Server 2022 and Ubuntu 24.04 GTK. Each individual click recorded `handed_off: true`;
+both exact URLs were received and every normal PDF/worker/close/ownership smoke check also passed.
+The GTK archive change resolved the provisioning delay. No further product change was needed after
+the native-anchor fix; round 3 is a stability execution rather than another speculative fix.
+
+The requested three-round investigation is complete. Final desktop/server test counts: Linux
+139 passed / 1 skipped; Windows 137 passed / 3 skipped; both Macs 140 passed. Every native job
+also passed 258 UI tests and recorded both exact DOI/OpenAlex URLs with `handed_off: true`,
+no extra browser requests, unchanged app URL and normal backend/lease cleanup. Independent review
+found no material issue in the product fix. The final full suite retains 43 dependency/test warnings.
+Actual publisher-page loading is outside this smoke: only the final OS-browser function is intercepted.
+Restart the desktop application to load the fixed click handler; no library migration is needed.

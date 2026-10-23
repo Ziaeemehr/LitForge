@@ -40,6 +40,13 @@ download/dialog, existing-library, running-job close, minimum-OS and sleep/wake 
 Then follow the plan's daily-use gate before Task 7's native runtime/installers. Do not mark all
 Tasks 1–6 complete merely because their automated checks passed.
 
+**Task 6 paper-link follow-up:** DOI/OpenAlex clicks in the detail panel were reproduced failing in
+real Cocoa and fixed by preserving native anchor navigation instead of script-created popups.
+Three follow-up rounds are recorded in the validation checklist; final
+[run 40020354594, attempt 2](https://github.com/Ziaeemehr/LitForge/actions/runs/40020354594/attempts/2)
+passed all five jobs, including browser-handoff checks on every native target and 2130 Python tests
+(4 skipped). Other manual interaction acceptance items remain open.
+
 ## Embedded design
 
 ### Confirmed requirement
