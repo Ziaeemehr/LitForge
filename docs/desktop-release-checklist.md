@@ -207,3 +207,30 @@ and signing/release acceptance remain separate. The user subsequently authorized
 before integration; `main` was the unchanged ancestor, allowing a fast-forward with identical product
 code. No release is published. Independent review found the old generated Windows BAT migration
 issue, which was fixed and verified; the follow-up review found no further material issue.
+
+## Local macOS check and user-reported manual tests (2026-10-24)
+
+Source `55b75e4`. `scripts/desktop_smoke.py --gui cocoa` passed on the development Mac:
+macOS 27.0.1 (26A434), Apple Silicon, pywebview 6.2.1. It found no failures. Desktop runtime, CodeMirror,
+PDF worker/text, RTL, both external-link handoffs, window activation, clean host/backend exit and lease
+release all passed.
+
+The user reported running the remaining manual macOS interaction tests and finding no problems. The
+report did not list the individual items, so the boxes above stay unchecked until each item is confirmed.
+The macOS minimum-version floor (13/14) and Windows 11 still have no machine evidence.
+
+Linux (`office`, over SSH with VPN): Ubuntu 24.04.5 LTS, kernel 6.17 OEM, x86_64, system Python 3.12.3,
+WebKitGTK 2.52.6. A fresh clone of `55b75e4` in a scratch folder was used, so the user's checkout and
+library were not touched. Both smoke runs drew on the machine's real local X11 session (`:1`), not Xvfb:
+- GTK (system WebKitGTK through a `--system-site-packages` host env): PASS, no failures.
+- Qt fallback: a first run that installed Qt by hand failed exactly as Task 1 predicted (`libxcb-cursor0`
+  missing, host abort -6). The real path then passed: `litforge desktop-setup --engine qt` with a scratch
+  `XDG_CONFIG_HOME` fetched `libxcb-cursor.so.0` without sudo and recorded it in `preload`. QtWebEngine 6.11.2
+  (Chrome 140) then passed with no failures. The smoke applied the preload with `LD_PRELOAD`; the host's own
+  `--preload` ctypes path is covered by unit tests, not by this run. WebKitGTK stayed installed, so the
+  fallback was forced with `--engine qt` rather than shown on a machine without `gir1.2-webkit2-4.1`.
+- Desktop unit/server regressions on that machine passed (1 skipped).
+- Wayland: still unverified. The machine runs an X11 session, and no headless compositor (weston) is
+  installed; installing one needs sudo.
+The user's `~/git/LitForge` checkout there was moved from the merged `feat/desktop-window` branch to `main`
+(`55b75e4`, fast-forward) and its `.venv` synced with `--inexact`, keeping the existing extras.
