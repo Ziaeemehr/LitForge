@@ -1,0 +1,72 @@
+name: installers
+
+# Runs the one-line installers for real on fresh runners: first install, then the same command again as an update.
+# The installer clones this commit (LITFORGE_REPO) instead of GitHub's main branch.
+on:
+  pull_request:
+    paths: [install.sh, install.ps1, src/litforge/shortcut.py, src/litforge/desktop/**, src/litforge/config.py, .github/workflows/install.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      LITFORGE_NO_PROMPT: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Put this commit on a branch the installer can clone and later pull
+        shell: bash
+        run: git switch -c ci-install
+      - name: Linux desktop prerequisites (WebKitGTK bindings, as on Ubuntu desktops)
+        if: runner.os == 'Linux'
+        timeout-minutes: 8
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
+      - name: Install (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export LITFORGE_REPO="$GITHUB_WORKSPACE" LITFORGE_LIBRARY="$HOME/Test Library"
+          cd "$RUNNER_TEMP" && sh "$GITHUB_WORKSPACE/install.sh"
+      - name: Install (Windows PowerShell 5.1, as in the README)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $env:LITFORGE_REPO = $env:GITHUB_WORKSPACE
+          $env:LITFORGE_LIBRARY = Join-Path $HOME 'Test Library'
+          Set-Location $env:RUNNER_TEMP
+          & "$env:GITHUB_WORKSPACE\install.ps1"
+          if (-not $?) { exit 1 }
+      - name: Check program, library, settings and icon
+        shell: bash
+        run: |
+          "$(command -v python3 || command -v python)" "$GITHUB_WORKSPACE/scripts/check_install.py"
+      - name: Run the installer again (update)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export LITFORGE_REPO="$GITHUB_WORKSPACE" LITFORGE_LIBRARY="$HOME/Test Library"
+          cd "$RUNNER_TEMP" && sh "$GITHUB_WORKSPACE/install.sh" | tee update.log
+          grep -q "Updating" update.log
+      - name: Run the installer again (update, Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $env:LITFORGE_REPO = $env:GITHUB_WORKSPACE
+          $env:LITFORGE_LIBRARY = Join-Path $HOME 'Test Library'
+          Set-Location $env:RUNNER_TEMP
+          & "$env:GITHUB_WORKSPACE\install.ps1" *>&1 | Tee-Object -FilePath update.log  # Write-Host (Say) is stream 6
+          if (-not (Select-String -Path update.log -Pattern 'Updating' -Quiet)) { exit 1 }
+      - name: Check again after the update
+        shell: bash
+        run: |
+          "$(command -v python3 || command -v python)" "$GITHUB_WORKSPACE/scripts/check_install.py"

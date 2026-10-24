@@ -1,9 +1,7 @@
 <p align="center">
-  <img src="src/litforge/ui/static/icon.svg" width="128" alt="LitForge logo">
+  <img src="docs/images/logo.svg" width="420" alt="LitForge: From Literature to Knowledge.">
 </p>
-<h1 align="center">LitForge</h1>
-<p align="center"><b>Local-First Scientific Literature Discovery, Analysis &amp; Writing</b><br>
-<i>From Literature to Knowledge.</i></p>
+<p align="center"><b>Local-First Scientific Literature Discovery, Analysis &amp; Writing</b></p>
 <p align="center">Find, screen and export scientific papers, on your own computer.<br>
 <a href="docs/install.md">Install</a> · <a href="docs/guide.md">Guide</a> · <a href="#فارسی">فارسی</a></p>
 
@@ -91,7 +89,7 @@ More: [installation](docs/install.md) · [user guide](docs/guide.md) · [command
 
 لیت‌فورج از یک مقاله، چند کلیدواژه یا یک فهرست منابع، فهرستی مرتب از مقاله‌های مرتبط می‌سازد، در
 انتخاب مقاله‌ها کمکتان می‌کند و برای مقاله‌های انتخاب‌شده یادداشت‌های Markdown با متن کامل می‌نویسد.
-در مرورگر اجرا می‌شود ولی همه‌چیز روی رایانه‌ی خودتان می‌ماند.
+در پنجره‌ی خودش اجرا می‌شود و همه‌چیز روی رایانه‌ی خودتان می‌ماند.
 
 ### هدف اصلی
 
@@ -148,6 +146,9 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Zia
 ```
 
 <div dir="rtl">
+
+نصب‌کننده خود برنامه را در پوشه‌ی برنامه‌های سیستم می‌گذارد و می‌پرسد کتابخانه‌تان کجا باشد؛ پیش‌فرض
+`~/Documents/LitForge` است و کتابخانه‌ی موجود هیچ‌وقت جابه‌جا نمی‌شود. جزئیات در [نصب](docs/install.md).
 
 از این به بعد LitForge را با آیکونش باز کنید؛ در پنجره‌ی خودش باز می‌شود. با بستن پنجره یا دکمه‌ی **⏻ Quit** بسته می‌شود و پیش از آن فایل باز شما ذخیره می‌شود.
 

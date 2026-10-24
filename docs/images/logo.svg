@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 120" width="100%" height="100%">
+  <defs>
+    <linearGradient id="card" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#16243f" />
+      <stop offset="100%" stop-color="#0b1222" />
+    </linearGradient>
+  </defs>
+  <!-- Own dark card, so the white text reads on any page or theme -->
+  <rect width="380" height="120" rx="20" fill="url(#card)" />
+  <g transform="translate(10, 0)">
+    <g filter="url(#glowFilter)">
+      <defs>
+        <linearGradient id="pGradTop" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#19e6d0" />
+          <stop offset="100%" stop-color="#14b8a6" />
+        </linearGradient>
+        <linearGradient id="pGradSide" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#14b8a6" />
+          <stop offset="100%" stop-color="#0d786c" />
+        </linearGradient>
+        <linearGradient id="sGradTop" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#14e7a1" />
+          <stop offset="100%" stop-color="#10b981" />
+        </linearGradient>
+        <linearGradient id="sGradSide" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#10b981" />
+          <stop offset="100%" stop-color="#0a7854" />
+        </linearGradient>
+        <filter id="glowFilter" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#14b8a6" flood-opacity="0.3" />
+          <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#10b981" flood-opacity="0.2" />
+        </filter>
+      </defs>
+
+      <!-- Isometric "L" monogram block -->
+      <polygon points="20,22 46,37 46,92 20,77" fill="url(#pGradSide)" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linejoin="round" />
+      <polygon points="46,37 72,22 72,77 46,92" fill="url(#pGradTop)" opacity="0.85" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linejoin="round" />
+      <polygon points="20,22 46,7 72,22 46,37" fill="#19e6d0" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linejoin="round" />
+
+      <!-- Bottom base extension (completes the L) -->
+      <polygon points="46,72 82,51 96,59 60,80" fill="url(#sGradTop)" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linejoin="round" />
+      <polygon points="60,80 96,59 96,72 60,93" fill="url(#sGradSide)" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linejoin="round" />
+
+      <!-- Isometric "F" crossbar -->
+      <polygon points="46,37 82,16 96,24 60,45" fill="url(#sGradTop)" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linejoin="round" />
+      <polygon points="60,45 96,24 96,35 60,56" fill="url(#sGradSide)" opacity="0.9" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linejoin="round" />
+
+      <!-- Spark cube at the intersection -->
+      <polygon points="46,37 58,30 70,37 58,44" fill="#ffffff" opacity="0.9" />
+      <polygon points="58,44 70,37 70,48 58,55" fill="#14e7a1" opacity="0.8" />
+    </g>
+  </g>
+  <text x="140" y="68" font-family="Inter, system-ui, sans-serif" font-weight="800" font-size="42" letter-spacing="-1" fill="#ffffff">Lit<tspan fill="#14b8a6">Forge</tspan></text>
+  <text x="142" y="90" font-family="Inter, system-ui, sans-serif" font-weight="500" font-size="12" letter-spacing="1" fill="#ffffff" opacity="0.6">From Literature to Knowledge.</text>
+</svg>
