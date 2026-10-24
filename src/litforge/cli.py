@@ -64,7 +64,7 @@ from litforge.projects import (
 )
 from litforge.screening.llm import Llm, LlmError, ollama_from_config
 from litforge.screening.run import preview_run, screen_run
-from litforge.storage.db import open_db
+from litforge.storage.db import SchemaTooNew, open_db
 from litforge.storage.recovery import repair_abandoned_runs
 from litforge.tools import install_pix2text, install_timeout_s, pix2text_install_status
 from litforge.updates import check_for_update
@@ -93,7 +93,11 @@ class State:
             conn.row_factory = sqlite3.Row
             return conn
         self.paths.ensure()
-        conn = open_db(self.paths.db)
+        try:
+            conn = open_db(self.paths.db)
+        except SchemaTooNew as exc:
+            typer.secho(str(exc), fg="red", err=True)
+            raise typer.Exit(1) from exc
         repair_abandoned_runs(conn)
         return conn
 
@@ -1360,9 +1364,13 @@ def desktop_server(
 
     st = _state(ctx)
     try:
-        handle = start_server(st.paths, st.config, port=port, desktop=True)
-    except OSError:
-        handle = start_server(st.paths, st.config, port=0, desktop=True)
+        try:
+            handle = start_server(st.paths, st.config, port=port, desktop=True)
+        except OSError:
+            handle = start_server(st.paths, st.config, port=0, desktop=True)
+    except SchemaTooNew as exc:
+        typer.secho(str(exc), fg="red", err=True)
+        raise typer.Exit(1) from exc
     print(json.dumps({"url": handle.url, "pid": os.getpid()}), flush=True)
     closed = threading.Event()
 

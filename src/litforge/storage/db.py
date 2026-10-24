@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Any
 
 _MIGRATION_RE = re.compile(r"^(\d{4})_.+\.sql$")
+_BACKUP_RE = re.compile(r"^papers-v\d+-(\d{8}T\d{12}Z)\.sqlite$")
+
+
+class SchemaTooNew(RuntimeError):
+    """The library needs a newer LitForge installation."""
 
 
 def now() -> str:
@@ -32,7 +37,11 @@ def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, isolation_level=None)  # explicit transactions only
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except BaseException:
+        conn.close()
+        raise
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
@@ -72,6 +81,39 @@ def latest_version() -> int:
     return migrations[-1][0] if migrations else 0
 
 
+def _check_schema(conn: sqlite3.Connection, db_path: Path) -> None:
+    current, latest = schema_version(conn), latest_version()
+    if current > latest:
+        raise SchemaTooNew(
+            f"This library at {db_path} was upgraded by a newer LitForge "
+            f"(database schema {current}, this version knows up to {latest}). "
+            f"Update LitForge, or restore a backup from {db_path.parent / 'backups'}."
+        )
+
+
+def _backup(conn: sqlite3.Connection, db_path: Path, version: int) -> None:
+    folder = db_path.parent / "backups"
+    folder.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    target = folder / f"papers-v{version}-{timestamp}.sqlite"
+    # Exclusive creation prevents overwriting an existing snapshot.
+    with target.open("xb"):
+        pass
+    try:
+        saved = sqlite3.connect(target)
+        try:
+            conn.backup(saved)
+        finally:
+            saved.close()
+    except BaseException:
+        target.unlink(missing_ok=True)
+        raise
+    snapshots = [(match[1], path) for path in folder.iterdir()
+                 if (match := _BACKUP_RE.fullmatch(path.name)) and path.is_file() and not path.is_symlink()]
+    for _, path in sorted(snapshots, reverse=True)[5:]:
+        path.unlink()
+
+
 def migrate(conn: sqlite3.Connection) -> list[str]:
     """Apply pending migrations; each runs in its own transaction. Returns applied names."""
     applied = []
@@ -95,9 +137,23 @@ def migrate(conn: sqlite3.Connection) -> list[str]:
 
 
 def open_db(db_path: Path) -> sqlite3.Connection:
+    # Inspect existing files before connect() can change their journal mode.
+    if str(db_path) != ":memory:" and db_path.is_file():
+        probe = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            _check_schema(probe, db_path)
+        finally:
+            probe.close()
     conn = connect(db_path)
-    migrate(conn)
-    return conn
+    try:
+        current = schema_version(conn)
+        if 0 < current < latest_version() and str(db_path) != ":memory:" and db_path.is_file():
+            _backup(conn, db_path, current)
+        migrate(conn)
+        return conn
+    except BaseException:
+        conn.close()
+        raise
 
 
 def fts5_available() -> bool:
