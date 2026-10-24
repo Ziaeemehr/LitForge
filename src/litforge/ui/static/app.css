@@ -280,6 +280,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
   padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 30;
 }
 .toast.show { opacity: .95; }
+.toast .btn { background: transparent; color: inherit; border: 1px solid currentColor; padding: 2px 6px; font-size: 12px; vertical-align: baseline; margin-left: 8px; }
+.toast.show #toast-folder { pointer-events: auto; }
 kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
 .hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
 .runhead .btn.danger { color: var(--bad); }

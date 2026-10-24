@@ -48,13 +48,15 @@
     return api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
 
-  var toastTimer;
-  function toast(msg) {
+  var toastTimer, toastAction;
+  function toast(msg, action) {
     var t = $('toast');
-    t.textContent = msg;
+    $('toast-message').textContent = msg;
+    toastAction = action;
+    $('toast-folder').hidden = !action;
     t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
+    toastTimer = setTimeout(function () { t.classList.remove('show'); $('toast-folder').hidden = true; }, action ? 10000 : 2600);
   }
 
   var SCREEN_ORDER = { include: 0, uncertain: 1, exclude: 2 };
@@ -96,6 +98,22 @@
       return loadRuns();
     });
   }
+
+  /* ---------- Reference exports ---------- */
+  function wireReferenceExports() {
+    function save(format) {
+      var project = state.project;
+      if (!project) { toast('No project yet'); return; }
+      return post('/api/review/references', { project: project, format: format, status: ['included'] }).then(function (r) {
+        toast('Saved ' + r.count + ' references to ' + r.path, function () {
+          return post('/api/open-exports', { project: project }).catch(function (e) { toast(e.message); });
+        });
+      }).catch(function (e) { toast(e.message); });
+    }
+    $('btn-export-ris').onclick = function () { return save('ris'); };
+    $('btn-export-bib').onclick = function () { return save('bib'); };
+  }
+  /* ---------- End reference exports ---------- */
 
   /* ---------- Review report ---------- */
   function sanitiseReviewSvg(text) {
@@ -6360,6 +6378,8 @@
       b.onclick = function () { bulkMark(state.view.slice(), b.dataset.bulk || null, 'papers in this list'); };
     });
 
+    $('toast-folder').onclick = function () { if (toastAction) return toastAction(); };
+    wireReferenceExports();
     wireReviewReport();
     $('screen-panel').open = store.get('screen-open', false);
     $('screen-panel').ontoggle = function () { store.set('screen-open', this.open); };

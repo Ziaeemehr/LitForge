@@ -56,6 +56,8 @@
       <option value="medium" title="Pix2Text reads every formula as LaTeX; the text stays as extracted from the PDF. About 1-5 s per page">Math: medium (fast)</option>
       <option value="high" title="Whole pages are rewritten: formulas, tables and text, also in scanned papers. On an NVIDIA GPU Nemotron Parse reads English pages (about 5 s each); a local vision model (Ollama) reads Persian pages (about 12 s on the GPU)">Math: high (best)</option>
     </select>
+    <button class="btn small" id="btn-export-ris" title="Export included papers with their screening decision as RIS">RIS</button>
+    <button class="btn small" id="btn-export-bib" title="Export included papers with their screening decision as BibTeX">BibTeX</button>
     <button class="btn accent" id="btn-export" title="Write Markdown notes to the project's output folder">Export Markdown</button>
   </div>
 </header>
@@ -867,7 +869,7 @@
   </div>
 </dialog>
 <div class="tip" id="tip" role="tooltip"></div>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast"><span id="toast-message"></span> <button class="btn small" id="toast-folder" hidden>Open export folder</button></div>
 
 <script src="/static/vendor/marked.min.js"></script>
 <script src="/static/vendor/purify.min.js"></script>

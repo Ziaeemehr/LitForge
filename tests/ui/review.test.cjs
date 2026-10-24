@@ -90,3 +90,37 @@ test('a response from the previous project cannot replace the current report', a
   await loading;
   assert.equal($('review-summary').textContent, 'Current report');
 });
+
+const references = fs.readFileSync('src/litforge/ui/static/app.js', 'utf8')
+  .split('/* ---------- Reference exports ---------- */')[1]?.split('/* ---------- End reference exports ---------- */')[0] || '';
+
+test('reference buttons save included decisions and offer opening the folder without downloads', async () => {
+  const elements = {}, calls = [], messages = [], created = [];
+  const ctx = vm.createContext({
+    $: id => elements[id] ||= {}, state: { project: 'Review' },
+    post: async (url, body) => { calls.push([url, body]); return { path: '/exports/references.' + body.format, count: 2 }; },
+    toast: (message, action) => messages.push([message, action]),
+    document: { createElement: tag => { created.push(tag); return {}; } }
+  });
+  vm.runInContext(references, ctx);
+  ctx.wireReferenceExports();
+  for (const [id, format] of [['btn-export-ris', 'ris'], ['btn-export-bib', 'bib']]) {
+    await elements[id].onclick();
+    assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ['/api/review/references', {
+      project: 'Review', format, status: ['included']
+    }]);
+    assert.match(messages.at(-1)[0], new RegExp('/exports/references.' + format));
+    await messages.at(-1)[1]();
+    assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ['/api/open-exports', { project: 'Review' }]);
+  }
+  assert.ok(!created.includes('a'));
+  assert.doesNotMatch(references, /window\.open|download/);
+  const html = fs.readFileSync('src/litforge/ui/static/index.html', 'utf8');
+  assert.match(html, /id="btn-export-ris"[^>]*title="[^"]*included[^"]*decision/);
+  assert.match(html, /id="btn-export-bib"[^>]*title="[^"]*included[^"]*decision/);
+});
+
+test('the visible toast folder action accepts pointer input', () => {
+  const css = fs.readFileSync('src/litforge/ui/static/app.css', 'utf8');
+  assert.match(css, /\.toast\.show #toast-folder\s*\{[^}]*pointer-events:\s*auto/);
+});

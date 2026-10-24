@@ -1028,3 +1028,20 @@ diagram. **Save** writes the SVG into the export folder and shows the saved path
 uncertain decisions stay separate from included papers, and confirmed versions
 count once, with other versions counted as duplicates. Papers awaiting screening,
 retrieval, or full-text assessment remain visible in the report.
+
+### Export references with screening decisions
+
+Use the header **RIS** or **BibTeX** buttons to save included primary papers with their
+final screening decisions. The saved path appears with **Open export folder**.
+Human marks take precedence over model decisions; uncertain papers are not included by default.
+
+```bash
+litforge export-refs -p NAME --format ris
+litforge export-refs -p NAME --format bib --status included --status uncertain -o references.bib --json
+```
+
+The default output is `<export folder>/references.ris` or `references.bib`. Repeat
+`--status` to select `included`, `excluded`, `uncertain`, or `unscreened`. `--json`
+prints `{"path": ..., "count": ...}` after saving. RIS notes and BibTeX notes and
+keywords carry the status, stage, source, and decision reason. BibTeX citation keys
+match the Writing Studio.

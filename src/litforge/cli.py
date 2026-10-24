@@ -818,6 +818,41 @@ def prisma(
         conn.close()
 
 
+@app.command("export-refs")
+def export_refs(
+    ctx: typer.Context,
+    project: ProjectOpt = None,
+    fmt: Annotated[str, typer.Option("--format", help="Reference format: ris or bib")] = "ris",
+    status: Annotated[
+        list[str] | None, typer.Option("--status", help="Final status (repeatable; default: included)")
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option("--out", "-o", help="Output file (default: export folder/references.ris or .bib)")
+    ] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Print saved path and count as JSON")] = False,
+) -> None:
+    """Save RIS or BibTeX references with their final screening decisions."""
+    from litforge.export.markdown import default_export_dir
+    from litforge.export.references import save_references
+
+    if fmt not in ("ris", "bib"):
+        raise typer.BadParameter("format must be ris or bib")
+    st = _state(ctx)
+    conn = st.db()
+    try:
+        name, pid = _project(st, conn, project, required=True)
+        assert name is not None and pid is not None
+        target = out or default_export_dir(conn, st.paths, name, pid) / f"references.{fmt}"
+        try:
+            saved = save_references(conn, pid, "ris" if fmt == "ris" else "bib", target,
+                                    status=status if status is not None else ("included",))
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        typer.echo(json.dumps(saved) if json_out else str(saved["path"]))
+    finally:
+        conn.close()
+
+
 @app.command()
 def export(
     ctx: typer.Context,

@@ -55,3 +55,23 @@ Final checks outside the sandbox are recorded in the commit message.
 
 - No real model run: Task 1 makes no model call.
 - No native desktop window check of this panel; it uses only DOM features already exercised by the desktop smoke.
+
+# Task 4 (RIS and BibTeX export with decisions)
+
+Codex implemented `export/references.py` test-first. `bibtex_entry` gains `extra`, and a preprint keeps one `note`
+field ("Preprint. LitForge: …"). Imports now decode `\textbraceleft{}`-style escapes and `\&`, so exports round-trip.
+Records are sorted by title, then paper id. CLI `export-refs`, route `POST /api/review/references`, and RIS/BibTeX
+buttons in the header export group, whose toast offers "Open export folder".
+
+- **Round 1:** full pytest green (3 environment skips), 269 UI tests, Ruff and mypy. Real run on a library copy: 42 RIS
+  records (included + excluded) and 20 BibTeX entries, both read back by `parse_ris`/`parse_bibtex` with titles and
+  DOIs intact. Code review found no defect.
+- **Round 2:** a real-browser screenshot showed the toast's folder button as an unreadable dark block, because `.toast`
+  inverts colours and `.btn` does not. Codex added `.toast .btn` (transparent, inherited colour, currentColor border).
+  Test-harness incident: the library copy kept the user's export folder, so one test file was written to
+  `~/Downloads/LitForge/default/references.ris`. It was deleted at once (the folder again holds only `.DS_Store`),
+  and the copy was pointed at a scratch folder.
+- **Round 3:** screenshots confirm the button is readable in both themes. 269 UI tests, 449 focused Python tests
+  (export, import, bib, writing, routes, CLI docs), Ruff and mypy green.
+- **Not done:** importing the RIS file into Zotero (installed). That would write into the user's real Zotero library,
+  so it is left as a manual acceptance check.

@@ -981,6 +981,18 @@ Choose and prepare the window engine for `litforge desktop` (the installer runs 
 |---|---|
 | `--engine` | Linux: auto, gtk (the system's WebKitGTK) or qt |
 
+### `litforge export-refs`
+
+Save RIS or BibTeX references with their final screening decisions.
+
+| Option | Meaning |
+|---|---|
+| `--project`, `-p` | Project (default: the active project) |
+| `--format` | Reference format: ris or bib |
+| `--status` | Final status (repeatable; default: included) |
+| `--out`, `-o` | Output file (default: export folder/references.ris or .bib) |
+| `--json` | Print saved path and count as JSON |
+
 ### `litforge prisma`
 
 Report PRISMA 2020 counts and save a screening flow diagram.

@@ -144,7 +144,9 @@ def _author_field(authors: list[str]) -> str:
     return " and ".join("{" + n + "}" if re.search(r"\sand\s", n, re.I) else n for n in names)
 
 
-def bibtex_entry(conn: sqlite3.Connection, paper_id: str) -> str:
+def bibtex_entry(
+    conn: sqlite3.Connection, paper_id: str, extra: dict[str, str] | None = None,
+) -> str:
     from litforge.discovery.versions import _role_for_paper
 
     row = conn.execute(
@@ -171,7 +173,13 @@ def bibtex_entry(conn: sqlite3.Connection, paper_id: str) -> str:
     if row["oa_url"]:  # URLs stay verbatim (the url package reads them raw); braces would unbalance
         fields.append(("url", _verbatim(row["oa_url"])))
     if preprint:
-        fields.append(("note", "Preprint"))
+        note = "Preprint"
+        if extra and extra.get("note"):
+            note += ". " + extra["note"]
+        fields.append(("note", escape(note)))
+    if extra:
+        fields.extend((name, escape(value)) for name, value in extra.items()
+                      if value and not (preprint and name == "note"))
     body = ",\n".join(f"  {name} = {{{value}}}" for name, value in fields)
     return f"@{kind}{{{key},\n{body}\n}}\n"
 

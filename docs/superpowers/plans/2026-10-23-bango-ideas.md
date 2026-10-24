@@ -163,6 +163,8 @@ Steps:
 
 ### Task 4: RIS and BibTeX export with decisions
 
+**Execution record:** [2026-10-24 validation](2026-10-24-bango-prisma-validation.md#task-4-ris-and-bibtex-export-with-decisions). Zotero import remains a manual check.
+
 **Files:** Create `src/litforge/export/references.py`, `tests/unit/test_export_references.py`. Modify `src/litforge/writing/bib.py` (`bibtex_entry` gains `extra`), `cli.py`, `review_routes.py`, `app.js` (two buttons in the Export dialog), `docs/guide.md`.
 
 **Interfaces:**
@@ -174,14 +176,14 @@ Steps:
 
 Steps:
 
-- [ ] **Write the failing tests.**
+- [x] **Write the failing tests.**
   - `test_ris_round_trip_keeps_doi_title_year`: export, then `parse_ris`, then compare the fields.
   - `test_bib_round_trip_with_braces_and_persian_title`.
   - `test_missing_fields_are_omitted_not_empty`.
   - `test_status_filter_uses_final_status`, which uses Task 1's `final_status`.
-- [ ] **Confirm they fail.** Run `uv run pytest tests/unit/test_export_references.py -v`.
-- [ ] **Implement the export.** Escape BibTeX special characters and leave Persian text as UTF-8.
-- [ ] **Run the tests and commit.**
+- [x] **Confirm they fail.** Run `uv run pytest tests/unit/test_export_references.py -v`.
+- [x] **Implement the export.** Escape BibTeX special characters and leave Persian text as UTF-8.
+- [x] **Run the tests and commit.**
 
 ### Task 5: Obsidian links in the Markdown export
 
