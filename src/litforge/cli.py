@@ -1392,14 +1392,45 @@ def desktop_server(
             raise typer.Exit(1) from exc
 
 
+@library_app.command("set")
+def library_set(path: Path) -> None:
+    """Choose a library workspace without moving existing data."""
+    import os
+    import sys
+
+    from litforge.desktop.workspace import WorkspaceError, resolve_workspace, save_settings, user_config_dir
+
+    try:
+        chosen = resolve_workspace(path, settings={}, install_dir=Path.cwd(), cwd=Path.cwd(), home=Path.home())
+        save_settings(user_config_dir(sys.platform, os.environ, Path.home()), {"workspace": str(chosen)})
+    except (OSError, WorkspaceError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"Library: {chosen}")
+
+
+@library_app.command("show")
+def library_show(ctx: typer.Context, as_json: Annotated[bool, typer.Option("--json")] = False) -> None:
+    """Show the effective CLI library workspace and data folder."""
+    data = _state(ctx).paths.root
+    result = {"workspace": str(data.parent), "data": str(data)}
+    if as_json:
+        typer.echo(json.dumps(result))
+    else:
+        typer.echo(f"Workspace: {data.parent}\nData: {data}")
+
+
 @app.command()
 def shortcut(
+    workspace: Annotated[Path | None, typer.Option(help="Library workspace override")] = None,
     mode: Annotated[str | None, typer.Option(help="desktop (default); browser is for developer debugging")] = None,
 ) -> None:
     """Add a LitForge icon to your apps that opens LitForge with one click."""
+    import os
     import shutil
     import sys
 
+    from litforge.desktop.workspace import load_settings, user_config_dir
     from litforge.shortcut import create_shortcut
 
     if mode not in (None, "desktop", "browser"):
@@ -1408,8 +1439,12 @@ def shortcut(
     exe = shutil.which("litforge") or str(Path(sys.argv[0]).resolve())
     beside = Path(exe).with_name("litforge-app.exe" if sys.platform == "win32" else "litforge-app")
     gui = shutil.which("litforge-app") or (str(beside) if beside.is_file() else None)
+    settings = load_settings(user_config_dir(sys.platform, os.environ, Path.home()))
+    workdir = (workspace or Path(str(settings.get("workspace") or Path.cwd()))).expanduser().resolve()
+    if chosen == "browser":
+        workdir = Path.cwd()
     icon = Path(__file__).parent / "ui" / "static" / "icon.svg"
-    written = create_shortcut(sys.platform, Path.home(), Path.cwd(), Path(exe), icon, Path(gui) if gui else None,
+    written = create_shortcut(sys.platform, Path.home(), workdir, Path(exe), icon, Path(gui) if gui else None,
                               mode="desktop" if chosen == "desktop" else "browser")
     for path in written:
         typer.echo(f"created {path}")
@@ -1417,7 +1452,7 @@ def shortcut(
              "win32": "the LitForge icon on your desktop"}.get(sys.platform, "Show Apps (pin it to the dock)")
     stop = "Closing its window stops it." if chosen == "desktop" else "Stop it with Quit in the page."
     typer.echo(f"Open LitForge from {where}. {stop}")
-    typer.echo(f"It uses the data in {Path.cwd()}, the folder you ran this command in.")
+    typer.echo(f"It uses the library in {workdir}.")
 
 
 register(app, eval_app)

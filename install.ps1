@@ -9,15 +9,36 @@ if ($env:LITFORGE_REPO) {
     $repo = $env:LITFORGE_REPO
 }
 
-# Use this checkout when no install directory is specified.
+function Is-Checkout([string]$Path) {
+    return (Test-Path -LiteralPath (Join-Path $Path '.git')) -and
+        (Test-Path -LiteralPath (Join-Path $Path 'pyproject.toml')) -and
+        (Select-String -LiteralPath (Join-Path $Path 'pyproject.toml') -Pattern '^name = "litforge"' -Quiet)
+}
+$saved = $null
+$configHome = $env:APPDATA
+if (-not $configHome) { $configHome = [Environment]::GetFolderPath('ApplicationData') }
+if (-not $configHome) { $configHome = Join-Path $HOME 'AppData\Roaming' }
+$configFile = Join-Path $configHome 'LitForge\desktop.json'
+try {
+    $settings = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
+    if ($settings.workspace -is [string]) { $saved = $settings.workspace }
+} catch { }
 if ($env:LITFORGE_DIR) {
     $dir = $env:LITFORGE_DIR
-} elseif ((Test-Path -LiteralPath 'pyproject.toml' -PathType Leaf) -and
-          (Select-String -LiteralPath 'pyproject.toml' -Pattern '^name = "litforge"' -Quiet)) {
+} elseif (Is-Checkout (Get-Location).Path) {
     $dir = (Get-Location).Path
-} else {
+} elseif (Is-Checkout (Join-Path $HOME 'LitForge')) {
     $dir = Join-Path $HOME 'LitForge'
+} elseif ($saved -and (Is-Checkout $saved)) {
+    $dir = $saved
+} else {
+    $localData = $env:LOCALAPPDATA
+    if (-not $localData) { $localData = [Environment]::GetFolderPath('LocalApplicationData') }
+    if (-not $localData) { $localData = Join-Path $HOME 'AppData\Local' }
+    $dir = Join-Path $localData 'LitForge\app'
 }
+if ($dir -eq '~') { $dir = $HOME }
+elseif ($dir.StartsWith('~/') -or $dir.StartsWith('~\')) { $dir = Join-Path $HOME $dir.Substring(2) }
 $dir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($dir)
 
 function Say([string]$Message) {
@@ -35,7 +56,7 @@ function Native([scriptblock]$Command) {
 }
 
 $gitAvailable = $null -ne (Get-Command git -ErrorAction SilentlyContinue)
-if ((Test-Path -LiteralPath (Join-Path $dir '.git') -PathType Container) -and $gitAvailable) {
+if ((Test-Path -LiteralPath (Join-Path $dir '.git') ) -and $gitAvailable) {
     Say "Updating $dir"
     Native { git -C $dir pull --ff-only }
     if ($LASTEXITCODE -ne 0) {
@@ -48,6 +69,7 @@ if ((Test-Path -LiteralPath (Join-Path $dir '.git') -PathType Container) -and $g
     Say "Using $dir as it is (not a git checkout, so it is not updated)"
 } elseif ($gitAvailable) {
     Say "Downloading LitForge to $dir"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $dir) -Force | Out-Null
     Native { git clone $repo $dir }
     if ($LASTEXITCODE -ne 0) {
         Fail "could not clone $repo to $dir"
@@ -86,6 +108,45 @@ try {
     Native { uv sync --extra embed --extra documents --extra desktop --inexact }
     if ($LASTEXITCODE -ne 0) {
         Fail 'could not install dependencies'
+    }
+    $existing = $null
+    if ($saved -and (Test-Path -LiteralPath (Join-Path $saved 'data') -PathType Container)) {
+        $existing = $saved
+    } elseif (Test-Path -LiteralPath (Join-Path $dir 'data') -PathType Container) {
+        $existing = $dir
+    }
+    $documents = [Environment]::GetFolderPath('MyDocuments')
+    if (-not $documents) { $documents = Join-Path $HOME 'Documents' }
+    $defaultLibrary = Join-Path $documents 'LitForge'
+    if ($existing) { $defaultLibrary = $existing }
+    $library = $defaultLibrary
+    if ($env:LITFORGE_LIBRARY) { $library = $env:LITFORGE_LIBRARY }
+    $canPrompt = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and
+                 $env:LITFORGE_NO_PROMPT -ne '1'
+    $attempt = 0
+    while ($true) {
+        if ($canPrompt) {
+            $library = Read-Host "Library folder [$defaultLibrary]"
+            if (-not $library) { $library = $defaultLibrary }
+        }
+        if ($library -eq '~') { $library = $HOME }
+        elseif ($library.StartsWith('~/') -or $library.StartsWith('~\')) {
+            $library = Join-Path $HOME $library.Substring(2)
+        }
+        $library = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($library)
+        Native { uv run litforge library set $library }
+        if ($LASTEXITCODE -eq 0) { break }
+        $attempt++
+        if (-not $canPrompt) { Fail "cannot use library folder $library" }
+        if ($attempt -ge 3) {
+            $library = $defaultLibrary
+            Native { uv run litforge library set $library }
+            if ($LASTEXITCODE -ne 0) { Fail "cannot use default library folder $library" }
+            break
+        }
+    }
+    if ($existing -and $library -ne $existing) {
+        Say "The old library stays at $existing. No files have been moved or copied."
     }
     # LitForge's own window uses Microsoft Edge WebView2, part of Windows 11 and of updated Windows 10.
     $webview2 = 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
@@ -137,7 +198,9 @@ try {
     Pop-Location
 }
 
-Say "LitForge is installed in $dir. Open it from the LitForge icon on your desktop."
+Say "Open LitForge from the LitForge icon on your desktop."
+Write-Host "Program: $dir"
+Write-Host "Library: $library"
 Write-Host '    Run the same command again to update.'
 Write-Host "    Optional tools: Settings > Optional tools, or run 'uv run litforge tools' in $dir."
 }

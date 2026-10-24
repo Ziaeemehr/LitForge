@@ -77,6 +77,22 @@ Permanently remove papers that belong to no project and have no cited evidence.
 | `--yes`, `-y` | Don't ask for confirmation |
 | `--paper` | Paper ID (repeatable; default: all unused) |
 
+#### `litforge library set`
+
+Choose a library workspace without moving existing data.
+
+| Option | Meaning |
+|---|---|
+| `PATH` | argument (required) |
+
+#### `litforge library show`
+
+Show the effective CLI library workspace and data folder.
+
+| Option | Meaning |
+|---|---|
+| `--json` |  |
+
 ### `litforge status`
 
 Summarize library or project state.
@@ -952,6 +968,7 @@ Add a LitForge icon to your apps that opens LitForge with one click.
 
 | Option | Meaning |
 |---|---|
+| `--workspace` | Library workspace override |
 | `--mode` | desktop (default); browser is for developer debugging |
 
 ### `litforge update`

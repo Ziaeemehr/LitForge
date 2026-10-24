@@ -197,14 +197,16 @@ def test_installer_skips_prompts_without_tty_and_prints_hint(tmp_path: Path) -> 
     assert "Install MinerU" not in result.stdout
     assert "Optional tools" in result.stdout
     # Tectonic installs without a prompt
-    assert log == ["sync --extra embed --extra documents --extra desktop --inexact", "run litforge desktop-setup",
+    assert log == ["sync --extra embed --extra documents --extra desktop --inexact",
+                   f"run litforge library set {tmp_path / 'home/Documents/LitForge'}", "run litforge desktop-setup",
                    "run litforge shortcut --mode desktop", "run litforge tools install tectonic --yes"]
 
 
 def test_installer_extras_and_failed_optional_install_are_nonfatal(tmp_path: Path) -> None:
     result, log = _run_installer(tmp_path, {"LITFORGE_EXTRAS": "mineru,pix2text", "FAIL_OPTIONAL": "pix2text"})
     assert result.returncode == 0, result.stderr
-    assert log == ["sync --extra embed --extra documents --extra desktop --inexact", "run litforge desktop-setup",
+    assert log == ["sync --extra embed --extra documents --extra desktop --inexact",
+                   f"run litforge library set {tmp_path / 'home/Documents/LitForge'}", "run litforge desktop-setup",
                    "run litforge shortcut --mode desktop", "run litforge tools install tectonic --yes",
                    "run litforge tools install mineru --yes", "run litforge tools install pix2text --yes"]
     assert "warning" in result.stderr.lower()
@@ -214,21 +216,21 @@ def test_installer_extras_and_failed_optional_install_are_nonfatal(tmp_path: Pat
 def test_installer_keeps_a_desktop_icon_and_explains_failed_engine_setup(tmp_path: Path) -> None:
     result, log = _run_installer(tmp_path, {"FAIL_SETUP": "1"})
     assert result.returncode == 0, result.stderr
-    assert log[1:3] == ["run litforge desktop-setup", "run litforge shortcut --mode desktop"]
+    assert log[2:4] == ["run litforge desktop-setup", "run litforge shortcut --mode desktop"]
     assert "uv run litforge desktop-setup" in result.stderr  # how to retry
     assert "browser" not in result.stderr.lower()
 
 
 def test_installer_prompts_read_from_configured_tty(tmp_path: Path) -> None:
     tty = tmp_path / "tty"
-    tty.write_text("y\nn\n")
+    tty.write_text("\ny\nn\n")
     result, log = _run_installer(tmp_path, {"LITFORGE_TTY": str(tty)})
     assert result.returncode == 0, result.stderr
     asked = tty.read_text()  # questions go to the terminal, not to stdout
     assert "Install MinerU for accurate PDF reading (~4 GB)? [y/N]" in asked
     assert "Install Pix2Text for better math in exports (~2 GB)? [y/N]" in asked
     assert log[-1] == "run litforge tools install mineru --yes"
-    assert len(log) == 5  # sync, window setup, shortcut, Tectonic, MinerU
+    assert len(log) == 6  # sync, window setup, shortcut, Tectonic, MinerU
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is not installed")
@@ -264,7 +266,8 @@ def test_powershell_installer_optional_tools_are_nonfatal(tmp_path: Path) -> Non
         )
         git.chmod(git.stat().st_mode | stat.S_IXUSR)
         uv.chmod(uv.stat().st_mode | stat.S_IXUSR)
-    env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}",
+    env = dict(os.environ, HOME=str(tmp_path / "home"), XDG_CONFIG_HOME=str(tmp_path / "config"),
+               PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}",
                LITFORGE_DIR=str(repo), LITFORGE_EXTRAS="mineru,pix2text", LITFORGE_TEST_LOG=str(record))
     script = Path(__file__).resolve().parents[2] / "install.ps1"
     result = subprocess.run(["pwsh", "-NoProfile", "-File", str(script)], cwd=repo, env=env,
@@ -298,12 +301,77 @@ def _run_installer(tmp_path: Path, overrides: dict[str, str]) -> tuple[Any, list
         "case \"$*\" in *\"tools install \"*)\n"
         "  case \"$*\" in *\"install mineru\"*) tool=mineru;; *) tool=pix2text;; esac\n"
         "  [ \"${FAIL_OPTIONAL:-}\" != \"$tool\" ] || exit 1;;\n"
-        "esac\nexit 0\n"
+        "esac\n"
+        "case \"$*\" in *'library set /bad/'*) [ \"${FAIL_LIBRARY:-}\" != 1 ] || exit 1;; esac\n"
+        "exit 0\n"
     )
     for executable in (git, uv):
         executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
-    env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", LITFORGE_DIR=str(repo),
+    env = dict(os.environ, HOME=str(tmp_path / "home"), XDG_CONFIG_HOME=str(tmp_path / "config"),
+               PATH=f"{bindir}:{os.environ['PATH']}", LITFORGE_DIR=str(repo),
                LITFORGE_TEST_LOG=str(record), **overrides)
     script = Path(__file__).resolve().parents[2] / "install.sh"
     result = subprocess.run(["sh", str(script)], cwd=repo, env=env, capture_output=True, text=True, timeout=20)
     return result, record.read_text().splitlines() if record.exists() else []
+
+
+def test_installer_library_override_and_summary(tmp_path: Path) -> None:
+    library = tmp_path / "my library"
+    result, log = _run_installer(tmp_path, {"LITFORGE_LIBRARY": str(library), "LITFORGE_NO_PROMPT": "1"})
+    assert result.returncode == 0, result.stderr
+    assert log[1] == f"run litforge library set {library}"
+    assert f"Program: {tmp_path / 'repo'}" in result.stdout
+    assert f"Library: {library}" in result.stdout
+
+
+def test_installer_library_prompt_expands_home(tmp_path: Path) -> None:
+    tty = tmp_path / "tty"
+    tty.write_text("~/Library with spaces\nn\nn\n")
+    result, log = _run_installer(tmp_path, {"LITFORGE_TTY": str(tty)})
+    assert result.returncode == 0, result.stderr
+    assert log[1] == f"run litforge library set {tmp_path / 'home/Library with spaces'}"
+
+
+@pytest.mark.parametrize("existing", ["fresh", "legacy", "saved"])
+def test_installer_library_code_location(tmp_path: Path, existing: str) -> None:
+    import json
+    import subprocess
+    import sys
+
+    home = tmp_path / "home"
+    config = home / "Library/Application Support/LitForge" if sys.platform == "darwin" else home / ".config/litforge"
+    program = (home / "Library/Application Support/LitForge/app" if sys.platform == "darwin"
+               else home / ".local/share/litforge/app")
+    if existing != "fresh":
+        program = home / "LitForge" if existing == "legacy" else home / "old program"
+        (program / ".git").mkdir(parents=True)
+        (program / "data").mkdir()
+        (program / "pyproject.toml").write_text('name = "litforge"\n')
+        if existing == "saved":
+            config.mkdir(parents=True)
+            (config / "desktop.json").write_text(json.dumps({"workspace": str(program)}))
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "git").write_text('#!/bin/sh\nif [ "$1" = clone ]; then mkdir -p "$3"; fi\n')
+    (bindir / "uv").write_text('#!/bin/sh\nprintf "%s\\n" "$*"\n')
+    for name in ("git", "uv"):
+        (bindir / name).chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("LITFORGE_") and not k.startswith("XDG_")}
+    env.update(HOME=str(home), PATH=f"{bindir}:{os.environ['PATH']}", LITFORGE_NO_PROMPT="1")
+    script = Path(__file__).resolve().parents[2] / "install.sh"
+    result = subprocess.run(["sh", str(script)], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert f"Program: {program}" in result.stdout
+    library = home / "Documents/LitForge" if existing == "fresh" else program
+    assert f"Library: {library}" in result.stdout
+
+
+def test_installer_library_retries_then_uses_default(tmp_path: Path) -> None:
+    tty = tmp_path / "tty"
+    tty.write_text("/bad/one\n/bad/two\n/bad/three\nn\nn\n")
+    result, log = _run_installer(tmp_path, {"LITFORGE_TTY": str(tty), "FAIL_LIBRARY": "1"})
+    assert result.returncode == 0, result.stderr
+    choices = [line for line in log if line.startswith("run litforge library set")]
+    assert choices == ["run litforge library set /bad/one", "run litforge library set /bad/two",
+                       "run litforge library set /bad/three",
+                       f"run litforge library set {tmp_path / 'home/Documents/LitForge'}"]

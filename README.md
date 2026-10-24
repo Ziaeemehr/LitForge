@@ -54,6 +54,8 @@ Each hit names its paper, section, page and a short quote. For the Markdown note
 
 ## Start
 
+The installer keeps the program in your platform’s app-data folder and asks where your library lives; see [installation and library locations](docs/install.md).
+
 Paste one line in a terminal. It installs everything and adds a **LitForge** icon to your apps:
 
 ```bash

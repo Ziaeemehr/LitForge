@@ -357,8 +357,35 @@ def load_config(path: Path | None = None, data_root: Path | None = None) -> Conf
     return cfg
 
 
+def resolve_library_data(data_dir: Path | None = None) -> Path:
+    """Resolve CLI library precedence without creating folders or changing settings."""
+    import sys
+
+    from litforge.desktop.workspace import load_settings as desktop_settings
+    from litforge.desktop.workspace import user_config_dir
+
+    if data_dir is not None:
+        return data_dir
+    env = EnvSettings()
+    if "home" in env.model_fields_set:
+        return env.home
+    cwd = Path.cwd()
+    try:
+        checkout = (cwd / ".git").exists() and 'name = "litforge"' in (cwd / "pyproject.toml").read_text()
+    except OSError:
+        checkout = False
+    if checkout and (cwd / "data").is_dir():
+        return cwd / "data"
+    settings = desktop_settings(user_config_dir(sys.platform, os.environ, Path.home()))
+    if settings.get("workspace"):
+        saved = Path(str(settings["workspace"])).expanduser() / "data"
+        if saved.is_dir():
+            return saved
+    return cwd / "data"
+
+
 def resolve_paths(data_dir: Path | None = None) -> Paths:
-    return Paths(data_dir if data_dir is not None else EnvSettings().home)
+    return Paths(resolve_library_data(data_dir))
 
 
 def load_settings(paths: Paths) -> dict[str, Any]:

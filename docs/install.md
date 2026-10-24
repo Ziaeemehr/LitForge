@@ -8,8 +8,40 @@ Run the same command again to update.
 | Linux, macOS | `curl -LsSf https://raw.githubusercontent.com/Ziaeemehr/LitForge/main/install.sh \| sh` |
 | Windows (PowerShell) | `powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/Ziaeemehr/LitForge/main/install.ps1 \| iex"` |
 
-LitForge goes to `~/LitForge` (Windows: `%USERPROFILE%\LitForge`); set `LITFORGE_DIR` to choose another
-folder. Already cloned it? Run `sh install.sh` (or `.\install.ps1`) inside the clone instead.
+Fresh installs keep the program in:
+
+| System | Program folder |
+|---|---|
+| macOS | `~/Library/Application Support/LitForge/app` |
+| Linux | `${XDG_DATA_HOME:-~/.local/share}/litforge/app` |
+| Windows | `%LOCALAPPDATA%\LitForge\app` |
+
+Set `LITFORGE_DIR` to override it. Running the installer inside a checkout uses that checkout.
+Existing `~/LitForge` checkouts and saved workspace checkouts are updated in place, never moved.
+
+The installer asks for a **library folder**. Enter keeps the existing library, when found, or accepts
+`~/Documents/LitForge` (Windows uses the known Documents folder). Type another path to create it;
+`~` expands to your home folder. The library's files live under `data/` inside that folder.
+Non-interactive installs use `LITFORGE_LIBRARY`, then the same default; `LITFORGE_NO_PROMPT=1` disables questions.
+Invalid interactive choices are retried up to three times, then the default is tried.
+No library is ever copied, moved or merged; choosing another folder leaves the old library where it is.
+
+To change the library later, run these in the program folder, then reopen LitForge:
+
+```sh
+uv run litforge library set "/path/to/My Library"
+uv run litforge shortcut --mode desktop
+uv run litforge library show --json
+```
+
+The saved choice is in the per-user `desktop.json` configuration. CLI commands use `--data-dir` first,
+then `LITFORGE_HOME`, then a LitForge checkout's existing `./data`, then the saved library's `data/`,
+then `./data`. `library show` reports the effective CLI workspace and data folder.
+
+Run the same installer again to update the program in place. To uninstall, delete the program folder
+and the LitForge icon (on macOS, `~/Applications/LitForge.app`). A separate library stays intact.
+For legacy installs with `data/` inside the program folder, keep that folder to preserve the library;
+remove the program files and icon instead. The installer never relocates that data.
 
 ## Updates
 
@@ -30,7 +62,7 @@ Click it and LitForge opens in its own window; no browser and no terminal. Click
 window forward. To stop LitForge, close the window or press **⏻ Quit** at the bottom of the sidebar: your
 open file is saved first, and running tasks are cancelled only after you confirm.
 
-The data lives in the `data/` folder of the install folder. Without the icon: `uv run --extra desktop litforge desktop` in that folder. Normal launch always uses LitForge's own window.
+The data lives in `data/` inside your chosen library folder. Without the icon: `uv run --extra desktop litforge desktop` in that folder. Normal launch always uses LitForge's own window.
 
 ### The window
 
