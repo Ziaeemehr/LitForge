@@ -64,7 +64,7 @@ jobs:
           $env:LITFORGE_REPO = $env:GITHUB_WORKSPACE
           $env:LITFORGE_LIBRARY = Join-Path $HOME 'Test Library'
           Set-Location $env:RUNNER_TEMP
-          & "$env:GITHUB_WORKSPACE\install.ps1" | Tee-Object -FilePath update.log
+          & "$env:GITHUB_WORKSPACE\install.ps1" *>&1 | Tee-Object -FilePath update.log  # Write-Host (Say) is stream 6
           if (-not (Select-String -Path update.log -Pattern 'Updating' -Quiet)) { exit 1 }
       - name: Check again after the update
         shell: bash
