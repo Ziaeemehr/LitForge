@@ -1,9 +1,7 @@
 <p align="center">
-  <img src="src/litforge/ui/static/icon.svg" width="128" alt="LitForge logo">
+  <img src="docs/images/logo.svg" width="420" alt="LitForge: From Literature to Knowledge.">
 </p>
-<h1 align="center">LitForge</h1>
-<p align="center"><b>Local-First Scientific Literature Discovery, Analysis &amp; Writing</b><br>
-<i>From Literature to Knowledge.</i></p>
+<p align="center"><b>Local-First Scientific Literature Discovery, Analysis &amp; Writing</b></p>
 <p align="center">Find, screen and export scientific papers, on your own computer.<br>
 <a href="docs/install.md">Install</a> · <a href="docs/guide.md">Guide</a> · <a href="#فارسی">فارسی</a></p>
 
