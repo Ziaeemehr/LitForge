@@ -118,12 +118,12 @@ condition in the plan is satisfied. Automated validation alone does not complete
 - [x] Native CI window flow on all listed targets, with links to passing evidence.
 - [ ] Windows 11 and proposed minimum macOS versions on actual machines.
 - [ ] Existing library and optional tools preserved through install/update.
-- [ ] Icon launch, second launch and restart after a crash on each target.
-- [ ] Dirty editor close, save failure/conflict and running-job cancel/confirmed quit in actual windows.
-- [ ] Minimize for over two minutes and sleep/wake.
-- [ ] Persian keyboard/IME, Cmd/Ctrl shortcuts, completion, clipboard, file input and drag/drop.
-- [ ] Download/save dialogs, external links and PDF export through real user interactions.
-- [ ] Linux Wayland and Linux Qt fallback end to end.
+- [ ] Icon launch, second launch and restart after a crash on each target. — macOS (Apple Silicon, macOS 27): checked by the user 2026-10-24; Windows and Linux still open.
+- [ ] Dirty editor close, save failure/conflict and running-job cancel/confirmed quit in actual windows. — macOS (Apple Silicon, macOS 27): checked by the user 2026-10-24; Windows and Linux still open.
+- [ ] Minimize for over two minutes and sleep/wake. — macOS (Apple Silicon, macOS 27): checked by the user 2026-10-24; Windows and Linux still open.
+- [ ] Persian keyboard/IME, Cmd/Ctrl shortcuts, completion, clipboard, file input and drag/drop. — macOS: checked by the user 2026-10-24, except choosing a folder in My sources, which failed (fixed on `fix/desktop-folder-picker`, see below). Windows and Linux still open.
+- [ ] Download/save dialogs, external links and PDF export through real user interactions. — macOS (Apple Silicon, macOS 27): checked by the user 2026-10-24; Windows and Linux still open.
+- [ ] Linux Wayland and Linux Qt fallback end to end. — Qt fallback passed on office over SSH (real X11, 2026-10-24); Wayland still open.
 - [ ] Task 7 runtime packaging, clean installation, update and uninstall without losing data.
 - [ ] Signing/notarization and release publication, when separately authorized and configured.
 
@@ -234,3 +234,19 @@ library were not touched. Both smoke runs drew on the machine's real local X11 s
   installed; installing one needs sudo.
 The user's `~/git/LitForge` checkout there was moved from the merged `feat/desktop-window` branch to `main`
 (`55b75e4`, fast-forward) and its `.venv` synced with `--inexact`, keeping the existing extras.
+
+## My sources folder picker (2026-10-24)
+
+The user found that "choose a folder" in New → My sources could not select a folder in the macOS window. Root cause:
+pywebview 6.2.1's Cocoa `runOpenPanelWithParameters` always opens a file panel and ignores `allowsDirectories`, so
+`<input webkitdirectory>` cannot work there. Fix (Codex, reviewed): the desktop window exposes a one-method `js_api`
+(`choose_folder`, a native folder dialog on every engine). "choose a folder" fills the existing server-side
+"Folder on this computer" field, with no browser upload of every file. Developer browser mode keeps the directory input.
+The smoke test now requires `folder_bridge` on every engine. pywebview does not expose underscore attributes, so the
+window reference stays private.
+
+- **Round 1:** review found the bridge and smoke check correct. Local Cocoa smoke passed (`folder_bridge` true). The
+  handler used the file's only `async/await`.
+- **Round 2:** rewritten as a `.then()` chain like the rest of app.js; 266 UI tests passed.
+- **Round 3:** full pytest 2146 passed, 3 skipped; 266 UI tests; Ruff; mypy; local Cocoa smoke passed. Native CI run:
+  see below. Clicking through the native folder dialog is a manual check for the user.

@@ -29,7 +29,8 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 BOOLEAN_CHECKS = ("desktop", "codemirror", "worker", "withResolvers", "structuredClone", "randomUUID",
-                  "segmenter", "cssHas", "clipboardApi", "secureContext", "external_links", "desktop_runtime")
+                  "segmenter", "cssHas", "clipboardApi", "secureContext", "external_links", "desktop_runtime",
+                  "folder_bridge")
 
 
 def check_report(report: dict[str, Any]) -> list[str]:
@@ -73,6 +74,8 @@ PAGE_CHECKS = r"""
 window.__desktopSmoke = null;
 (async function () {
   const r = {desktop: !!window.LitForgeDesktop, codemirror: !!window.LitForgeCM,
+    folder_bridge: !!(window.pywebview && window.pywebview.api &&
+      typeof window.pywebview.api.choose_folder === 'function'),
     withResolvers: typeof Promise.withResolvers === 'function',
     structuredClone: typeof structuredClone === 'function', randomUUID: !!(crypto && crypto.randomUUID),
     segmenter: typeof Intl.Segmenter === 'function', cssHas: CSS.supports('selector(:has(a))'),

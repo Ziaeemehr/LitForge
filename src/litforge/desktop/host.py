@@ -57,6 +57,22 @@ def _log(log_path: Path, text: str) -> None:
         pass
 
 
+class FolderBridge:
+    def __init__(self, log_path: Path) -> None:
+        self._log_path = log_path
+        self._window: Any = None
+
+    def choose_folder(self) -> str | None:
+        import webview
+
+        try:
+            paths = self._window.create_file_dialog(webview.FileDialog.FOLDER)
+            return str(paths[0]) if paths else None
+        except Exception as exc:  # noqa: BLE001 - report native dialog failures to the page and log
+            _log(self._log_path, f"could not choose a folder: {exc!r}")
+            raise
+
+
 def _tail(log_path: Path, since: int, limit: int = 1500) -> str:
     try:
         with open(log_path, "rb") as f:
@@ -259,8 +275,11 @@ def _run_window(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
 
     backend = Backend(backend_cmd, log_path)
     result = {"rc": 0}
-    window = webview.create_window(title, html=LOADING_HTML, width=1280, height=860, min_size=(820, 560))
+    bridge = FolderBridge(log_path)
+    window = webview.create_window(title, html=LOADING_HTML, width=1280, height=860, min_size=(820, 560),
+                                   js_api=bridge)
     assert window is not None
+    bridge._window = window
     holder["window"] = window
     coordinator = close.CloseCoordinator(window, backend.finishing, log=lambda text: _log(log_path, text))
     window.events.closing += coordinator.on_closing

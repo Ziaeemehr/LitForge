@@ -76,6 +76,7 @@ def fake_webview(close_on_navigate: bool = True) -> tuple[types.ModuleType, dict
     def create_window(title: str, html: str = "", **kw: Any) -> FakeWindow:
         seen["window"] = FakeWindow(html, close_on_navigate)
         seen["title"] = title
+        seen["js_api"] = kw.get("js_api")
         return seen["window"]
 
     def start(func: Any = None, args: Any = (), **kw: Any) -> None:
@@ -96,6 +97,8 @@ def test_window_shows_the_loading_page_first_then_navigates_to_the_backend(
     rc = host.run_desktop([sys.executable, "-c", READY], gui="gtk", title="LitForge", log_path=tmp_path / "d.log",
                           storage_path=tmp_path / "web")
     assert rc == 0
+    assert isinstance(seen["js_api"], host.FolderBridge)
+    assert seen["js_api"]._window is seen["window"]
     calls = seen["window"].calls
     assert calls[0] == ("html", host.LOADING_HTML)
     assert calls[1] == ("load_url", "http://127.0.0.1:9/")
@@ -322,3 +325,36 @@ def test_desktop_server_prints_its_url_and_stops_when_stdin_closes(tmp_path: Pat
     finally:
         if proc.poll() is None:
             proc.kill()
+
+
+@pytest.mark.parametrize("paths, expected", [(("/tmp/سلام papers", "/other"), "/tmp/سلام papers"),
+                                           (None, None), ((), None)])
+def test_folder_bridge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                       paths: tuple[str, ...] | None, expected: str | None) -> None:
+    folder = object()
+    monkeypatch.setitem(sys.modules, "webview", types.SimpleNamespace(FileDialog=types.SimpleNamespace(FOLDER=folder)))
+    calls = []
+
+    def choose(kind: object) -> tuple[str, ...] | None:
+        calls.append(kind)
+        return paths
+
+    bridge = host.FolderBridge(tmp_path / "desktop.log")
+    bridge._window = types.SimpleNamespace(create_file_dialog=choose)
+    assert [name for name in dir(bridge) if not name.startswith("_")] == ["choose_folder"]
+    assert bridge.choose_folder() == expected
+    assert calls == [folder]
+
+
+def test_folder_bridge_logs_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "webview", types.SimpleNamespace(FileDialog=types.SimpleNamespace(FOLDER=20)))
+
+    def fail(kind: object) -> None:
+        raise RuntimeError("dialog failed")
+
+    log = tmp_path / "desktop.log"
+    bridge = host.FolderBridge(log)
+    bridge._window = types.SimpleNamespace(create_file_dialog=fail)
+    with pytest.raises(RuntimeError, match="dialog failed"):
+        bridge.choose_folder()
+    assert "dialog failed" in log.read_text()

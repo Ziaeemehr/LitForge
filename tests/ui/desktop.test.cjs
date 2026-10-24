@@ -204,3 +204,54 @@ test('external paper links retain native anchor navigation; PDFs and downloads k
   assert.equal(click({ href: 'javascript:void(0)' }).prevented, true);
   assert.equal(click({ href: '#section' }).prevented, false);
 });
+
+function folderSetup(desktopMode) {
+  const elements = {}, calls = [];
+  const window = {};
+  const ctx = vm.createContext({
+    desktopMode, window,
+    $: id => elements[id] ||= {
+      value: '', click: () => calls.push(id),
+      focus: () => calls.push('focus'), scrollIntoView: () => calls.push('scroll'),
+    },
+    toast: msg => calls.push(['toast', msg]),
+  });
+  const wire = app.slice(app.indexOf('  function wirePdfs()'), app.indexOf('  /* ---------- quit ---------- */'));
+  vm.runInContext(wire + '\nwirePdfs();', ctx);
+  return { elements, calls, window, click: () => elements['pick-dir'].onclick({ preventDefault() {} }) };
+}
+
+test('desktop folder selection uses a bridge injected after wiring and shows the local path', async () => {
+  const s = folderSetup(true);
+  s.window.pywebview = { api: { choose_folder: async () => {
+    s.calls.push('bridge'); return '/Users/me/سلام papers';
+  } } };
+  await s.click();
+  assert.equal(s.elements['pdf-folder'].value, '/Users/me/سلام papers');
+  assert.deepEqual(s.calls, ['bridge', 'focus', 'scroll']);
+});
+
+test('browser mode uses the directory input even with a bridge present', async () => {
+  const s = folderSetup(false);
+  s.window.pywebview = { api: { choose_folder: () => { throw new Error('unexpected bridge'); } } };
+  await s.click();
+  assert.deepEqual(s.calls, ['dir-pdfs']);
+});
+
+test('desktop without a bridge falls back to the directory input', async () => {
+  const s = folderSetup(true);
+  await s.click();
+  assert.deepEqual(s.calls, ['dir-pdfs']);
+});
+
+test('folder cancellation preserves the existing path and errors show a message', async () => {
+  const s = folderSetup(true);
+  s.elements['pdf-folder'] = { value: '/existing' };
+  s.window.pywebview = { api: { choose_folder: async () => null } };
+  await s.click();
+  assert.equal(s.elements['pdf-folder'].value, '/existing');
+  assert.deepEqual(s.calls, []);
+  s.window.pywebview.api.choose_folder = async () => { throw new Error('dialog failed'); };
+  await s.click();
+  assert.deepEqual(s.calls, [['toast', 'dialog failed']]);
+});

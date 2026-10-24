@@ -25,7 +25,7 @@ def good_report() -> dict[str, object]:
             "desktop": True, "codemirror": True, "worker": True, "withResolvers": True,
             "structuredClone": True, "randomUUID": True, "segmenter": True, "cssHas": True,
             "clipboardApi": True, "secureContext": True, "external_links": True, "desktop_runtime": True,
-            "rtl": "rtl", "pdf_text": "LitForge probe page",
+            "folder_bridge": True, "rtl": "rtl", "pdf_text": "LitForge probe page",
         },
         "activation": "activated", "host_exit_code": 0, "window_closed": True,
         "backend_stopped": True, "lease_released": True,
@@ -38,7 +38,7 @@ def test_complete_native_report_passes(good_report: dict[str, object]) -> None:
 
 @pytest.mark.parametrize("name", ["desktop", "codemirror", "worker", "withResolvers", "structuredClone",
                                    "randomUUID", "segmenter", "cssHas", "clipboardApi", "secureContext",
-                                   "external_links", "desktop_runtime"])
+                                   "external_links", "desktop_runtime", "folder_bridge"])
 def test_missing_or_false_browser_check_fails(good_report: dict[str, object], name: str) -> None:
     checks = good_report["checks"]
     assert isinstance(checks, dict)

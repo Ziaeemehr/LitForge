@@ -1708,7 +1708,21 @@
       setPdfs(state.pdfs.concat(picked));
     }
     $('pick-pdfs').onclick = function (e) { e.preventDefault(); $('files-pdfs').click(); };
-    $('pick-dir').onclick = function (e) { e.preventDefault(); $('dir-pdfs').click(); };
+    $('pick-dir').onclick = function (e) {
+      e.preventDefault();
+      if (desktopMode && window.pywebview && window.pywebview.api && window.pywebview.api.choose_folder) {
+        return Promise.resolve().then(function () {
+          return window.pywebview.api.choose_folder();
+        }).then(function (path) {
+          if (path) {
+            var folder = $('pdf-folder');
+            folder.value = path;
+            folder.focus();
+            folder.scrollIntoView({ block: 'nearest' });
+          }
+        }).catch(function (err) { toast(err.message || String(err)); });
+      } else { $('dir-pdfs').click(); }
+    };
     $('files-pdfs').onchange = function () { add(Array.prototype.slice.call(this.files)); this.value = ''; };
     $('dir-pdfs').onchange = function () {  // a folder: PDFs and Office/EPUB documents, no hidden folders
       add(Array.prototype.filter.call(this.files, function (f) {
