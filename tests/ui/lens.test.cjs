@@ -32,7 +32,7 @@ function setup() {
     evidence: [], invalid_citations: [], flags: [] };
   const profiles = [{ name: 'local', provider: 'ollama', model: 'qwen3:4b', remote: false },
     { name: 'paid', provider: 'remote', model: 'cloud-model', remote: true }];
-  const ctx = vm.createContext({ $, state: { project: 'demo' }, store: { set() {} }, setTimeout,
+  const ctx = vm.createContext({ $, state: { project: 'demo' }, store: { get: (key, fallback) => fallback, set() {} }, setTimeout,
     toast(message) { throw Error(message); },
     document: { createElement: tag => new Element(tag),
       createTextNode: text => { const el = new Element('#text'); el.textContent = text; return el; }, querySelectorAll: selector => selector === '[data-lens-tab]' ? tabs : [] },

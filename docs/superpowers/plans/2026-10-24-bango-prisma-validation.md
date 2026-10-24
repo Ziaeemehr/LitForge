@@ -117,3 +117,30 @@ Copy and "Search with it" (at most 6 plain OpenAlex queries through the existing
   3 skipped; 278 UI tests; Ruff; mypy.
 - **Observation:** with qwen3:4b the concepts are usable but wordy ("neural network methods", "simulator calibration
   parameters"). Review the strings before using them in a database.
+
+# Task 2 (Two-stage screening of borderline papers only)
+
+Codex added `screening.borderline = (0.4, 0.7)` (validated) and `only="borderline"` in `_work`/`plan_calls`/
+`screen_fulltext`, filtered before `--top`. Explicit paper ids bypass the filter, human-marked papers are skipped,
+and `only` is recorded in the run input; S2 fingerprints are unchanged, so no rescreen. Also `screen --fulltext
+--borderline`, `fulltext --borderline`, the `/api/screen-fulltext` `only` field, and a remembered "Borderline only"
+checkbox, on by default when more than 50 papers have S1 results.
+
+**Gold-benchmark validation (plan step).** sbi10 in two scratch copies: PDFs fetched and parsed, criteria from the
+benchmark, S1 by qwen3:4b on a discovery run made by re-importing Task 4's RIS export (all 10 matched, 0 new).
+S1: 4 include (score 1.0), 5 uncertain (0 or 0.25), 1 exclude. With qwen3:4b, S1 scores cluster at 0, 0.25 and
+1.0, so the 0.4–0.7 band added no paper; the uncertain decisions alone drove the selection.
+
+| Mode | S2 calls | Time | Gold relevant included | Included or uncertain | False includes |
+|---|---|---|---|---|---|
+| all | 10 | 160 s | 4/5 | 5/5 | 0 |
+| borderline | 5 | 83 s | 4/5 | 5/5 | 0 |
+
+Pass condition met: borderline mode missed no gold-included paper that all mode found, with half the calls.
+Final statuses per paper are identical. Only the stage differs for the four confident S1 includes and the S1 exclude.
+
+- **Round 1:** full pytest 2213 passed, 3 skipped; 280 UI tests; Ruff; mypy; the gold run above. Review finding: the
+  new checkbox was the only control in its row without an explanatory title.
+- **Round 2:** Codex added the title. 280 UI tests passed.
+- **Round 3:** stability. Repeating the borderline run cached all 5 papers (0 calls). Full pytest 2213 passed,
+  3 skipped; 280 UI tests; Ruff; mypy.

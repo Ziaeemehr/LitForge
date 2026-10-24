@@ -380,6 +380,7 @@ Screen a run's top papers against the project's criteria with a local model (set
 | `--top` | How many top papers of the run to screen |
 | `--model` | Ollama model (default: screening.model) |
 | `--fulltext` |  |
+| `--borderline` | S2: only uncertain or mid-score S1 papers |
 | `--profile` |  |
 | `--approve` |  |
 | `--preview` |  |

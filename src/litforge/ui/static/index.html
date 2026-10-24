@@ -703,6 +703,7 @@
             <label for="lens-screen-profile">Full-text model profile</label>
             <select id="lens-screen-profile" aria-label="Full-text model profile"><option value="">Configured default</option></select>
             <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-screen-all-versions"> All versions</label>
+            <label class="check" title="S2 reads only papers that title/abstract screening marked uncertain or scored in the configured borderline band (default 0.4–0.7), skipping papers you marked ✓/✗; confident S1 decisions stand"><input type="checkbox" id="lens-screen-borderline"> Borderline only</label>
             <button class="btn small" id="lens-screen-fulltext" data-lens-work>Screen full text (S2)</button>
             <span class="hint" id="lens-screen-status" role="status" aria-live="polite"></span>
           </div>

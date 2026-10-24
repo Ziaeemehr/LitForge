@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections import Counter
 from functools import partial
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -93,8 +93,13 @@ type ScreeningWork = tuple[str, str, list[EvidenceSpan], list[dict[str, str]], C
 
 
 def _work(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, top: int | None,
-          profile: str | None, force: bool, paper_ids: list[str] | None, all_versions: bool = False
+          profile: str | None, force: bool, paper_ids: list[str] | None, all_versions: bool = False,
+          only: Literal["all", "borderline"] = "all", band: tuple[float, float] = (0.4, 0.7)
           ) -> tuple[list[str], list[ScreeningWork], int]:
+    if only not in ("all", "borderline"):
+        raise ValueError("only must be all or borderline")
+    if not 0 <= band[0] < band[1] <= 1:
+        raise ValueError("borderline band must satisfy 0 <= low < high <= 1")
     if top is not None and top < 1:
         raise ValueError("top must be positive")
     c = load_criteria(conn, project_id)
@@ -108,6 +113,14 @@ def _work(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, top:
               "FROM discovery_results d JOIN discovery_runs r ON r.id=d.run_id "
               "WHERE r.project_id=pp.project_id AND d.paper_id=p.id),0) DESC,p.title,p.id", (project_id,))
               if (paper_ids is None or r[0] in paper_ids) and (primary is None or r[0] in primary)]
+    if only == "borderline" and paper_ids is None:
+        eligible = {r[0] for r in conn.execute(
+            "SELECT s.paper_id FROM screening_results s WHERE s.project_id=? "
+            "AND (s.decision='uncertain' OR (s.score>=? AND s.score<?)) "
+            "AND NOT EXISTS (SELECT 1 FROM paper_marks m "
+            "WHERE m.project_id=s.project_id AND m.paper_id=s.paper_id)",
+            (project_id, *band))}
+        papers = [paper for paper in papers if paper in eligible]
     if top is not None:
         papers = papers[:top]
     needs_pdf = [p for p in papers if p not in runs]
@@ -142,22 +155,25 @@ def _work(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, top:
 
 def plan_calls(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, top: int | None = None,
                profile: str | None = None, force: bool = False, paper_ids: list[str] | None = None
-               , all_versions: bool = False
+               , all_versions: bool = False, only: Literal["all", "borderline"] = "all",
+               band: tuple[float, float] = (0.4, 0.7)
                ) -> list[CallPreview]:
     return [w[4] for w in _work(conn, gateway, project_id, top, profile, force, paper_ids,
-                                all_versions)[1] if w[4] is not None]
+                                all_versions, only, band)[1] if w[4] is not None]
 
 
 def screen_fulltext(conn: sqlite3.Connection, gateway: ModelGateway, project_id: str, top: int | None = None,
                     profile: str | None = None, approved: bool = False, force: bool = False,
-                    paper_ids: list[str] | None = None, all_versions: bool = False) -> FulltextReport:
-    run_id = start_run(conn, "screen_fulltext", project_id, {"top": top, "paper_ids": paper_ids},
+                    paper_ids: list[str] | None = None, all_versions: bool = False,
+                    only: Literal["all", "borderline"] = "all",
+                    band: tuple[float, float] = (0.4, 0.7)) -> FulltextReport:
+    run_id = start_run(conn, "screen_fulltext", project_id, {"top": top, "paper_ids": paper_ids, "only": only},
                        {"profile": profile, "force": force}, PROMPT_VERSION)
     report = FulltextReport(run_id=run_id, project_id=project_id)
     try:
         c = load_criteria(conn, project_id)
         report.needs_pdf, work, report.cached = _work(
-            conn, gateway, project_id, top, profile, force, paper_ids, all_versions)
+            conn, gateway, project_id, top, profile, force, paper_ids, all_versions, only, band)
         counts: Counter[str] = Counter()
         for paper, fp, spans, messages, preview in work:
             packet = None

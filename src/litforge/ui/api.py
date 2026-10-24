@@ -504,6 +504,7 @@ class LensRequest(BaseModel):
     force: bool = False
     paper_ids: list[str] | None = None
     all_versions: bool = False
+    only: Literal["all", "borderline"] = "all"
     max_pairs: int = Field(default=200, ge=1)
     top: int | None = Field(default=None, ge=1)
 
@@ -528,7 +529,8 @@ def lens_plan(conn: sqlite3.Connection, gateway: ModelGateway, request: LensRequ
             calls = claim_graph.plan_calls(conn, gateway, pid, request.max_pairs, request.profile, request.force)
         else:
             calls = fulltext.plan_calls(conn, gateway, pid, request.top, request.profile,
-                                        request.force, request.paper_ids, request.all_versions)
+                                        request.force, request.paper_ids, request.all_versions,
+                                        only=request.only, band=gateway.config.screening.borderline)
     else:
         calls = matrices.plan_calls(conn, gateway, request.matrix_id, request.paper_ids,
                                     request.profile, request.force, request.all_versions)

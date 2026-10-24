@@ -298,6 +298,16 @@ Nothing leaves your computer.
 Changing the criteria or the model marks earlier results as stale; screening again re-checks them,
 and unchanged papers are not sent to the model twice.
 
+For full-text S2 screening, use `litforge screen --fulltext --borderline -p NAME`
+(`--preview` previews calls; `--approve` approves them; `--json` prints the report).
+Borderline mode selects papers whose S1 decision is uncertain or whose S1 score is in
+`[0.4, 0.7)`, excluding papers with human marks. Configure the band with
+`screening.borderline: [0.4, 0.7]`; it must satisfy `0 <= low < high <= 1`.
+The score measures relevance and inclusion coverage, not calibrated confidence.
+`--top` limits the selected borderline set. Explicit paper selections bypass this filter.
+In the results view, **Borderline only** beside **Screen full text (S2)** defaults on
+when more than 50 papers have S1 results and remembers your changes. Human marks always win.
+
 ### Model gateway and cloud policy
 
 LitForge's model layer can also target an OpenAI-compatible endpoint, including a university-hosted

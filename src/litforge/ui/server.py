@@ -589,7 +589,8 @@ class App:
                     else:
                         phase2 = fulltext.screen_fulltext(conn, gateway, pid, request.top, request.profile,
                                                         request.approved, request.force, request.paper_ids,
-                                                        request.all_versions)
+                                                        request.all_versions, only=request.only,
+                                                        band=self.config.screening.borderline)
                     job.report = phase2.model_dump()
                     return phase2.run_id
                 result = matrices.extract_matrix(conn, gateway, request.matrix_id, request.paper_ids,

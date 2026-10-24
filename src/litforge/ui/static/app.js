@@ -688,6 +688,7 @@
 
   function render() {
     var d = state.data;
+    updateFulltextSelection();
     if (!d) { if (state.page === 'results') showView('new'); return; }
     if (state.page !== 'results') showView('results');
     var run = d.run, s = d.stats, params = run.params || {};
@@ -6153,6 +6154,28 @@
     }).catch(function (e) { toast(e.message); });
   }
 
+  /* ---------- Full-text selection ---------- */
+  function updateFulltextSelection() {
+    var saved = store.get('screen-borderline', null);
+    $('lens-screen-borderline').checked = saved === null
+      ? !!(state.data && state.data.stats && state.data.stats.screened > 50) : saved;
+  }
+
+  function wireFulltextScreening() {
+    updateFulltextSelection();
+    $('lens-screen-borderline').onchange = function () {
+      store.set('screen-borderline', this.checked);
+    };
+    $('lens-screen-fulltext').onclick = function () {
+      return saveCriteria().then(function () {
+        startLensTask('screen_fulltext', '/api/screen-fulltext', { profile: $('lens-screen-profile').value || null,
+          top: Number($('screen-n').value), all_versions: $('lens-screen-all-versions').checked,
+          only: $('lens-screen-borderline').checked ? 'borderline' : 'all' }, 'lens-screen-status');
+      }).catch(function (e) { toast(e.message); });
+    };
+  }
+  /* ---------- End full-text selection ---------- */
+
   function initLens() {
     $('gaps-refresh').onclick = function () { loadGaps(); };
     $('living-take').onclick = function () {
@@ -6179,12 +6202,7 @@
       startLensTask('claim_relation', '/api/claims/relate', { profile: $('lens-claims-profile').value || null,
         max_pairs: Number($('lens-claims-pairs').value) }, 'lens-claims-status');
     };
-    $('lens-screen-fulltext').onclick = function () {
-      saveCriteria().then(function () {
-        startLensTask('screen_fulltext', '/api/screen-fulltext', { profile: $('lens-screen-profile').value || null,
-          top: Number($('screen-n').value), all_versions: $('lens-screen-all-versions').checked }, 'lens-screen-status');
-      }).catch(function (e) { toast(e.message); });
-    };
+    wireFulltextScreening();
 
     refreshModelChoices();
     lensColumnEditor($('lens-columns'), true); lensColumnEditor($('lens-add-column'), false);

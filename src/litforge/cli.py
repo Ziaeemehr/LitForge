@@ -979,6 +979,7 @@ def screen(
     top: Annotated[int | None, typer.Option(help="How many top papers of the run to screen")] = None,
     model: Annotated[str | None, typer.Option(help="Ollama model (default: screening.model)")] = None,
     fulltext: Annotated[bool, typer.Option("--fulltext")] = False,
+    borderline: Annotated[bool, typer.Option("--borderline", help="S2: only uncertain or mid-score S1 papers")] = False,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
     approve: Annotated[bool, typer.Option("--approve")] = False,
     preview: Annotated[bool, typer.Option("--preview")] = False,
@@ -988,8 +989,10 @@ def screen(
     """Screen a run's top papers against the project's criteria with a local model (set criteria in the web UI)."""
     if fulltext:
         from litforge.analysis.claim_commands import fulltext as run_fulltext
-        run_fulltext(ctx, project, top, profile, approve, preview, as_json)
+        run_fulltext(ctx, project, top, profile, approve, preview, as_json, borderline)
         return
+    if borderline:
+        raise typer.BadParameter("--borderline requires --fulltext")
     st = _state(ctx)
     conn = st.db(read_only=preview)
     name, pid = _project(st, conn, project, required=True)

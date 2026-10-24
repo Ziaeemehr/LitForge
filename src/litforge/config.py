@@ -68,6 +68,15 @@ class SimilarConfig(BaseModel):
 
 
 class ScreeningConfig(BaseModel):
+    borderline: tuple[float, float] = (0.4, 0.7)
+
+    @field_validator("borderline")
+    @classmethod
+    def valid_borderline(cls, band: tuple[float, float]) -> tuple[float, float]:
+        if not 0 <= band[0] < band[1] <= 1:
+            raise ValueError("borderline must satisfy 0 <= low < high <= 1")
+        return band
+
     max_false_negative_rate: float = Field(default=0.05, ge=0, le=1)
     model: str = "qwen3:4b"  # any Ollama model; qwen3:8b is slower but more careful
     ollama_url: str = "http://localhost:11434"  # LITFORGE_OLLAMA_URL overrides

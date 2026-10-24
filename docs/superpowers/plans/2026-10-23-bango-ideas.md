@@ -120,6 +120,8 @@ Steps:
 
 ### Task 2: Two-stage screening of borderline papers only
 
+**Execution record:** [2026-10-24 validation](2026-10-24-bango-prisma-validation.md#task-2-two-stage-screening-of-borderline-papers-only): 5 instead of 10 S2 calls on sbi10, no gold paper lost.
+
 **Files:** Modify `src/litforge/screening/fulltext.py`, `src/litforge/analysis/claim_commands.py` (the `fulltext` command), `src/litforge/cli.py`, `app.js`, `docs/guide.md`. Test in `tests/unit/test_screening.py`.
 
 **Interfaces:**
@@ -130,11 +132,11 @@ Steps:
 
 Steps:
 
-- [ ] **Write the failing test.** Write `test_fulltext_borderline_selects_uncertain_and_mid_scores`, seeded with S1 results `exclude 0.2`, `uncertain 0.3`, `include 0.55`, `include 0.9`, and a marked `uncertain`. Assert the selected IDs are exactly the second and third papers. Also write `test_fulltext_borderline_preview_counts_match_run`.
-- [ ] **Confirm it fails.** Run `uv run pytest tests/unit/test_screening.py -k borderline -v`. It must fail with an unexpected-keyword error.
-- [ ] **Implement the filter.** Implement it inside `_work` before the `top` slice, so `--top` still limits the borderline set. Record `only` in the run's `start_run` parameters so the run history shows the mode.
-- [ ] **Validate the band on the gold benchmark.** Run `litforge eval screening` on the sbi10 gold benchmark in both modes with the local model. Pass condition: borderline mode misses no gold-included paper that all mode found. Record calls saved and recall in the commit message. If it fails, widen the band in the default config and repeat.
-- [ ] **Run the tests and commit.** Run the test file and `tests/integration/test_screening_flow.py`, then commit.
+- [x] **Write the failing test.** Write `test_fulltext_borderline_selects_uncertain_and_mid_scores`, seeded with S1 results `exclude 0.2`, `uncertain 0.3`, `include 0.55`, `include 0.9`, and a marked `uncertain`. Assert the selected IDs are exactly the second and third papers. Also write `test_fulltext_borderline_preview_counts_match_run`.
+- [x] **Confirm it fails.** Run `uv run pytest tests/unit/test_screening.py -k borderline -v`. It must fail with an unexpected-keyword error.
+- [x] **Implement the filter.** Implement it inside `_work` before the `top` slice, so `--top` still limits the borderline set. Record `only` in the run's `start_run` parameters so the run history shows the mode.
+- [x] **Validate the band on the gold benchmark.** Run `litforge eval screening` on the sbi10 gold benchmark in both modes with the local model. Pass condition: borderline mode misses no gold-included paper that all mode found. Record calls saved and recall in the commit message. If it fails, widen the band in the default config and repeat.
+- [x] **Run the tests and commit.** Run the test file and `tests/integration/test_screening_flow.py`, then commit.
 
 ### Task 3: Search-string builder
 
