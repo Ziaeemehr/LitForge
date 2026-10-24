@@ -81,6 +81,8 @@ These features run inside the desktop window planned in `2026-10-23-desktop-app.
 
 ### Task 1: Final status and the PRISMA 2020 diagram
 
+**Execution record:** [2026-10-24 validation](2026-10-24-bango-prisma-validation.md): three run/review/fix rounds, Codex implementing and Claude reviewing.
+
 **Files:** Create `src/litforge/screening/status.py`, `src/litforge/screening/prisma.py`, `src/litforge/ui/review_routes.py`, `tests/unit/test_screening_status.py`, `tests/unit/test_prisma.py`, `tests/ui/review.test.cjs`. Modify `src/litforge/cli.py`, `src/litforge/ui/server.py` (dispatch to `review_routes`), `app.js`, `docs/guide.md`, `docs/cli.md`.
 
 **Interfaces:**
@@ -99,22 +101,22 @@ These features run inside the desktop window planned in `2026-10-23-desktop-app.
 
 Steps:
 
-- [ ] **Write the status tests.** Write `test_screening_status.py` with these cases, each asserting the exact `PaperStatus`:
+- [x] **Write the status tests.** Write `test_screening_status.py` with these cases, each asserting the exact `PaperStatus`:
   - a human `relevant` mark wins over an S1 `exclude`;
   - an `irrelevant` mark after an S2 `include` gives `excluded/S2/human`;
   - S2 wins over S1;
   - a paper with no results is `unscreened`;
   - only the primary version counts.
-- [ ] **Write the PRISMA tests.** Write `test_prisma.py` on a seeded library: one search run with 5 hits from `openalex` and 3 from `crossref`, where 2 are the same paper; one import of 2 records.
+- [x] **Write the PRISMA tests.** Write `test_prisma.py` on a seeded library: one search run with 5 hits from `openalex` and 3 from `crossref`, where 2 are the same paper; one import of 2 records.
   - Assert `identified_by_source == {"openalex":5,"crossref":3,"import":2}`, `duplicates_removed == 2`, and that `screened + awaiting_screening` equals the number of unique primary papers.
   - Seed more cases: the same search run twice (counts unchanged), one citation hit and one manual paper (both in `identified_other`), and one paper removed from the project (not counted). Assert the invariant `sum(identified_by_source) + sum(identified_other) - duplicates_removed == unique primary papers in the project`.
   - Assert `sought - not_retrieved == assessed + awaiting_fulltext`, where `awaiting_fulltext` covers papers that have a PDF but no S2 result yet.
   - Assert the reasons in `excluded_s2_by_reason` sum to the S2 exclusions.
   - Assert the SVG parses with `xml.etree.ElementTree` and contains every count as text.
-- [ ] **Confirm the tests fail.** Run `uv run pytest tests/unit/test_screening_status.py tests/unit/test_prisma.py -v`. The failures must be import errors for the missing modules.
-- [ ] **Implement `status.py` and `prisma.py`.** "Sought" means the papers whose S1 status is `included` or `uncertain`. "Not retrieved" means sought papers with no parse run (`paper_runs`). Draw the SVG in the PRISMA 2020 layout: four rows, identification boxes on the left, exclusion boxes on the right. Lay text out with fixed widths and wrap long reasons at 40 characters.
-- [ ] **Add the CLI, routes and UI.** Add the CLI command, the routes and a **Review report** panel that shows the SVG inline (sanitised, since it is our own SVG) with a **Save** button. In `tests/ui/review.test.cjs`, test that the panel renders the counts and that Save calls the save route instead of using `<a download>`.
-- [ ] **Run the tests.** Run `uv run pytest tests/unit/test_screening_status.py tests/unit/test_prisma.py tests/integration/test_screening_flow.py -v` and `node --test tests/ui/review.test.cjs`. All must pass. Commit.
+- [x] **Confirm the tests fail.** Run `uv run pytest tests/unit/test_screening_status.py tests/unit/test_prisma.py -v`. The failures must be import errors for the missing modules.
+- [x] **Implement `status.py` and `prisma.py`.** "Sought" means the papers whose S1 status is `included` or `uncertain`. "Not retrieved" means sought papers with no parse run (`paper_runs`). Draw the SVG in the PRISMA 2020 layout: four rows, identification boxes on the left, exclusion boxes on the right. Lay text out with fixed widths and wrap long reasons at 40 characters.
+- [x] **Add the CLI, routes and UI.** Add the CLI command, the routes and a **Review report** panel that shows the SVG inline (sanitised, since it is our own SVG) with a **Save** button. In `tests/ui/review.test.cjs`, test that the panel renders the counts and that Save calls the save route instead of using `<a download>`.
+- [x] **Run the tests.** Run `uv run pytest tests/unit/test_screening_status.py tests/unit/test_prisma.py tests/integration/test_screening_flow.py -v` and `node --test tests/ui/review.test.cjs`. All must pass. Commit.
 
 ### Task 2: Two-stage screening of borderline papers only
 

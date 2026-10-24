@@ -788,6 +788,37 @@ def status(ctx: typer.Context, project: Annotated[str | None, typer.Option("--pr
 
 
 @app.command()
+def prisma(
+    ctx: typer.Context,
+    project: ProjectOpt = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Print PRISMA counts as JSON")] = False,
+    out: Annotated[
+        Path | None, typer.Option("--out", "-o", help="SVG path (default: export folder/prisma.svg)")
+    ] = None,
+) -> None:
+    """Report PRISMA 2020 counts and save a screening flow diagram."""
+    from litforge.export.markdown import default_export_dir
+    from litforge.screening.prisma import prisma_counts, prisma_svg
+
+    st = _state(ctx)
+    conn = st.db()
+    try:
+        name, pid = _project(st, conn, project, required=True)
+        assert name is not None and pid is not None
+        counts = prisma_counts(conn, pid)
+        if out is not None or not json_out:
+            target = out or default_export_dir(conn, st.paths, name, pid) / "prisma.svg"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(prisma_svg(counts, name), encoding="utf-8")
+            if not json_out:
+                typer.echo(str(target.resolve()))
+        if json_out:
+            typer.echo(counts.model_dump_json())
+    finally:
+        conn.close()
+
+
+@app.command()
 def export(
     ctx: typer.Context,
     project: ProjectOpt = None,

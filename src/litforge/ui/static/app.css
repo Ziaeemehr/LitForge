@@ -297,16 +297,19 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .badge.scr.exclude { background: var(--bad-soft); color: var(--bad); }
 .badge.scr.stale { opacity: .55; text-decoration: line-through; }
 /* AI screening: an optional, one-line strip that opens into the criteria form. */
-#screen-panel { margin-bottom: 12px; }
-#screen-panel summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; padding: 9px 12px; font-size: 13px; }
-#screen-panel summary::-webkit-details-marker { display: none; }
-#screen-panel summary:hover { background: var(--chip); border-radius: var(--radius); }
-#screen-panel .chev { color: var(--muted); transition: transform .15s; display: inline-block; width: 10px; }
-#screen-panel[open] .chev { transform: rotate(90deg); }
-#screen-panel .tag { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
-#screen-panel summary b { white-space: nowrap; }
-#screen-panel summary .meta { color: var(--muted); font-size: 12px; margin-left: auto; text-align: right; }
-#screen-panel .screen-body { padding: 0 14px 14px; border-top: 1px solid var(--line); }
+#screen-panel, #review-report { margin-bottom: 12px; }
+#screen-panel summary, #review-report summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; padding: 9px 12px; font-size: 13px; }
+#screen-panel summary::-webkit-details-marker, #review-report summary::-webkit-details-marker { display: none; }
+#screen-panel summary:hover, #review-report summary:hover { background: var(--chip); border-radius: var(--radius); }
+#screen-panel .chev, #review-report .chev { color: var(--muted); transition: transform .15s; display: inline-block; width: 10px; }
+#screen-panel[open] .chev, #review-report[open] .chev { transform: rotate(90deg); }
+#screen-panel .tag, #review-report .tag { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+#screen-panel summary b, #review-report summary b { white-space: nowrap; }
+#screen-panel summary .meta, #review-report summary .meta { color: var(--muted); font-size: 12px; margin-left: auto; text-align: right; }
+#screen-panel .screen-body, #review-report .screen-body { padding: 0 14px 14px; border-top: 1px solid var(--line); }
+#review-counts { white-space: pre-line; margin: 10px 0; }
+#review-svg { background: white; padding: 8px; border-radius: var(--radius); overflow-x: auto; }
+#review-svg svg { max-width: 100%; height: auto; display: block; }
 #screen-panel textarea { width: 100%; box-sizing: border-box; font: inherit; }
 .crit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 700px) { .crit-grid { grid-template-columns: 1fr; } }
@@ -388,8 +391,8 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 /* narrow screens: rules that must come after the ones they override */
 @media (max-width: 900px) {
   .export-group { flex-wrap: wrap; flex: 1 1 100%; }
-  #screen-panel summary { flex-wrap: wrap; }
-  #screen-panel summary .meta { flex-basis: 100%; text-align: left; margin-left: 18px; }
+  #screen-panel summary, #review-report summary { flex-wrap: wrap; }
+  #screen-panel summary .meta, #review-report summary .meta { flex-basis: 100%; text-align: left; margin-left: 18px; }
   .bulk .hint { display: none; }
 }
 

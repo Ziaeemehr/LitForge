@@ -97,6 +97,65 @@
     });
   }
 
+  /* ---------- Review report ---------- */
+  function sanitiseReviewSvg(text) {
+    var parsed = new DOMParser().parseFromString(text, 'image/svg+xml');
+    if (parsed.querySelector('parsererror') || parsed.documentElement.tagName !== 'svg') throw Error('Invalid review diagram');
+    var root = parsed.documentElement;
+    [root].concat(Array.from(root.querySelectorAll('*'))).forEach(function (el) {
+      if (/^(script|foreignObject|style|image|use|a|animate|animateTransform|set)$/i.test(el.tagName)) { el.remove(); return; }
+      Array.from(el.attributes).forEach(function (attr) {
+        if (/^on|href$|^style$/i.test(attr.name) || /url\s*\(/i.test(attr.value || '')) el.removeAttribute(attr.name);
+      });
+    });
+    return document.importNode(root, true);
+  }
+
+  function wireReviewReport() {
+    var panel = $('review-report');
+    panel.open = store.get('review-open', false);
+    panel.ontoggle = function () {
+      store.set('review-open', this.open);
+      if (this.open) return loadReviewReport();
+    };
+    $('review-save').onclick = saveReviewReport;
+    $('review-folder').onclick = function () {
+      return post('/api/open-exports', { project: state.project }).catch(function (e) { toast(e.message); });
+    };
+  }
+
+  function loadReviewReport() {
+    var project = state.project;
+    $('review-summary').textContent = '';
+    $('review-counts').textContent = '';
+    $('review-svg').replaceChildren();
+    $('review-path').textContent = '';
+    if (!project) return Promise.resolve();
+    return api('/api/review/prisma?project=' + encodeURIComponent(project)).then(function (r) {
+      if (project !== state.project) return;
+      var c = r.counts;
+      function total(values) { return Object.keys(values || {}).reduce(function (sum, key) { return sum + values[key]; }, 0); }
+      var records = total(c.identified_by_source) + total(c.identified_other);
+      $('review-summary').textContent = records + ' records · ' + c.screened + ' screened · ' + c.included + ' included';
+      $('review-counts').textContent = [
+        'Identification: ' + records + ' records · ' + (c.duplicates_removed || 0) + ' duplicates removed',
+        'Screening: ' + c.screened + ' screened · ' + (c.excluded_s1 || 0) + ' excluded · ' + (c.awaiting_screening || 0) + ' awaiting screening',
+        'Eligibility / Retrieval: ' + (c.sought || 0) + ' sought · ' + (c.not_retrieved || 0) + ' not retrieved · ' +
+          (c.assessed || 0) + ' assessed · ' + total(c.excluded_s2_by_reason) + ' excluded · ' + (c.awaiting_fulltext || 0) + ' awaiting full text',
+        'Included: ' + c.included + ' · uncertain: ' + c.uncertain
+      ].join('\n');
+      $('review-svg').replaceChildren(sanitiseReviewSvg(r.svg));
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function saveReviewReport() {
+    var project = state.project;
+    return post('/api/review/prisma/save', { project: project }).then(function (r) {
+      if (project === state.project) $('review-path').textContent = r.path;
+    }).catch(function (e) { toast(e.message); });
+  }
+  /* ---------- End review report ---------- */
+
   function renderSideProjects() {
     var el = $('side-projects');
     el.innerHTML = state.projects.length ? '' : '<div class="none">No projects yet</div>';
@@ -127,6 +186,7 @@
     store.set('project', name);
     syncProjectFields();
     renderSideProjects();
+    if ($('review-report').open) loadReviewReport();
     if (state.page === 'write') closeWriteDoc(false);
   }
 
@@ -559,6 +619,7 @@
     renderBars($('chart-channels'), s.channels.map(function (c) { return [c[0], CHANNEL_LABEL[c[0]] || c[0], c[1]]; }), true);
     renderBars($('chart-venues'), s.venues.map(function (v) { return [v[0], v[0], v[1]]; }), false);
     if (state.criteria && state.criteriaFor === state.project) showCriteria(state.criteria); else loadCriteria();
+    if ($('review-report').open) loadReviewReport();
     renderList();
   }
 
@@ -6299,6 +6360,7 @@
       b.onclick = function () { bulkMark(state.view.slice(), b.dataset.bulk || null, 'papers in this list'); };
     });
 
+    wireReviewReport();
     $('screen-panel').open = store.get('screen-open', false);
     $('screen-panel').ontoggle = function () { store.set('screen-open', this.open); };
     $('btn-help').onclick = openGuide;

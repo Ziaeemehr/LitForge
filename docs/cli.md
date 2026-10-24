@@ -981,6 +981,16 @@ Choose and prepare the window engine for `litforge desktop` (the installer runs 
 |---|---|
 | `--engine` | Linux: auto, gtk (the system's WebKitGTK) or qt |
 
+### `litforge prisma`
+
+Report PRISMA 2020 counts and save a screening flow diagram.
+
+| Option | Meaning |
+|---|---|
+| `--project`, `-p` | Project (default: the active project) |
+| `--json` | Print PRISMA counts as JSON |
+| `--out`, `-o` | SVG path (default: export folder/prisma.svg) |
+
 ### `litforge review`
 
 Review flagged sentences and cells.

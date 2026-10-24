@@ -1014,3 +1014,17 @@ unchanged: download the new version and replace the program files, keeping your 
 `litforge update --check` exits **0** when up to date (including a checkout that is only ahead),
 **10** when an update is available, and **1** for errors, non-Git installs or diverged histories.
 CLI checks also bypass disabled automatic checks. Git commands have a combined 10-second timeout.
+
+### PRISMA review report
+
+Run `litforge prisma -p NAME` to write a standalone PRISMA 2020 diagram to the
+project's export folder as `prisma.svg`; the command prints its path. Use
+`litforge prisma -p NAME -o report.svg` for a custom path, or `--json` for counts
+without writing a file (`--json -o report.svg` does both).
+
+In a project's recent searches view, open **Review report** to see the counts and
+diagram. **Save** writes the SVG into the export folder and shows the saved path;
+**Open folder** opens that folder. Human screening marks override model decisions,
+uncertain decisions stay separate from included papers, and confirmed versions
+count once, with other versions counted as duplicates. Papers awaiting screening,
+retrieval, or full-text assessment remain visible in the report.

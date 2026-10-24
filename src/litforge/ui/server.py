@@ -101,7 +101,7 @@ from litforge.tools import (
     nemotron_install_status,
     pix2text_install_status,
 )
-from litforge.ui import api, writing_routes
+from litforge.ui import api, review_routes, writing_routes
 from litforge.updates import UpdateChecker, automatic_enabled
 from litforge.writing import documents as wd
 from litforge.writing.compile import engine_status
@@ -1211,6 +1211,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(mineru_status(app.paths, app.config.parsing))
                 if path == "/api/tools":
                     return self._json(app.optional_tools_status())
+                if path.startswith("/api/review/"):
+                    return self._json(review_routes.get(app, conn, path, query))
                 if path.startswith("/api/write/"):
                     result = writing_routes.get(app, conn, path, query)
                     if isinstance(result, tuple):
@@ -1330,6 +1332,12 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     body = self._body()
                 except BodyTooLarge as exc:
                     return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
+                if url.path.startswith("/api/review/"):
+                    conn = app.db()
+                    try:
+                        return self._json(review_routes.post(app, conn, url.path, body))
+                    finally:
+                        conn.close()
                 if url.path.startswith("/api/write/"):
                     return self._write_post(url.path, body)
                 if m := re.fullmatch(r"/api/jobs/(\w+)/stop", url.path):
