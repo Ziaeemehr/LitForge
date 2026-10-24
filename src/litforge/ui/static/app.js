@@ -1698,8 +1698,10 @@
   // Which papers an export covers, from the Export menu in the header.
   function exportSelection() {
     var scope = $('export-scope').value;
-    if (scope === 'visible' && state.data) return { paper_ids: state.view.map(function (p) { return p.id; }) };
-    return { only: scope === 'visible' ? 'all' : scope };
+    var selection = { obsidian: $('export-obsidian').checked };
+    if (scope === 'visible' && state.data) selection.paper_ids = state.view.map(function (p) { return p.id; });
+    else selection.only = scope === 'visible' ? 'all' : scope;
+    return selection;
   }
 
   // Upload the chosen files one by one (the server keeps them only until they are in the library),
@@ -6305,6 +6307,8 @@
     $('export-scope').onchange = function () { store.set('export-scope', this.value); $('pdfs-export-scope').textContent = scopeWords(); };
     $('export-fetch').checked = store.get('export-fetch', false);
     $('export-fetch').onchange = function () { store.set('export-fetch', this.checked); };
+    $('export-obsidian').checked = store.get('export-obsidian', false);
+    $('export-obsidian').onchange = function () { store.set('export-obsidian', this.checked); };
     $('export-all-versions').checked = store.get('export-all-versions', false);
     $('export-all-versions').onchange = function () { store.set('export-all-versions', this.checked); };
     $('export-math').value = store.get('export-math', store.get('export-vision', false) ? 'high' : 'off');
@@ -6313,6 +6317,7 @@
       if (!state.project) { toast('No project yet'); return; }
       var scope = $('export-scope').value, body = { project: state.project };
       body.all_versions = $('export-all-versions').checked;
+      body.obsidian = $('export-obsidian').checked;
       if ($('project-name').value.trim() === state.project) body.export_dir = $('export-dir').value.trim();
       if (scope === 'visible' && !state.data) { toast('Open a run first'); return; }
       Object.assign(body, exportSelection());

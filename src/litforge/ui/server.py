@@ -897,7 +897,8 @@ class App:
             try:
                 out, count = export_markdown(c, self.paths, project, pid, only=str(export.get("only") or "all"),
                                              config=self.config,
-                                             paper_ids=paper_ids)
+                                             paper_ids=paper_ids, obsidian=export.get("obsidian") is True,
+                                             all_versions=export.get("all_versions") is True)
             except OSError as exc:  # the PDFs are in; say why the notes are not, and keep the job done
                 job.report["export_error"] = str(exc)
                 job.messages += [f"warning: export failed: {exc}", f"done: {summary}"]
@@ -1044,7 +1045,8 @@ class App:
                                                                  if vis.pages_rejected else ""))
                 if export:
                     out, count = export_markdown(c, self.paths, project, pid, only=only, paper_ids=paper_ids,
-                                                 config=self.config, all_versions=body.get("all_versions") is True)
+                                                 config=self.config, all_versions=body.get("all_versions") is True,
+                                                 obsidian=body.get("obsidian") is True)
                     job.messages.append(f"done: exported {count} papers to {out}")
             finally:
                 c.close()
@@ -1546,7 +1548,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         pid = app.ensure_project(conn, body["project"], body.get("export_dir"))
                         out, count = export_markdown(conn, app.paths, body["project"], pid, config=app.config,
                                                      only=body.get("only", "all"), paper_ids=body.get("paper_ids"),
-                                                     all_versions=bool(body.get("all_versions", False)))
+                                                     all_versions=bool(body.get("all_versions", False)),
+                                                     obsidian=body.get("obsidian") is True)
                     finally:
                         conn.close()
                     return self._json({"path": str(out), "papers": count})

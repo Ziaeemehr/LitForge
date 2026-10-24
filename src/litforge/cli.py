@@ -865,6 +865,8 @@ def export(
         bool, typer.Option("--fetch", help="First download open-access PDFs of these papers (full-text notes)")
     ] = False,
     all_versions: Annotated[bool, typer.Option("--all-versions", help="Export non-primary versions too")] = False,
+    obsidian: Annotated[bool, typer.Option("--obsidian", help="Add Obsidian tags, aliases and wiki links")] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="Print export path and paper count as JSON")] = False,
 ) -> None:
     """Export a project's papers as Markdown with relative asset links."""
     st = _state(ctx)
@@ -887,10 +889,10 @@ def export(
         typer.echo(export_bibtex(conn, ids), nl=False)
         return
     if with_pdfs:
-        _fetch(st, conn, pid, only)
+        _fetch(st, conn, pid, only, err=json_out)
     out, count = export_markdown(conn, st.paths, name, pid, only=only, config=st.config,
-                                 all_versions=all_versions)
-    typer.echo(f"exported {count} papers to {out}")
+                                 all_versions=all_versions, obsidian=obsidian)
+    typer.echo(json.dumps({"path": str(out), "papers": count}) if json_out else f"exported {count} papers to {out}")
 
 
 # ---- discovery ------------------------------------------------------------
@@ -1119,15 +1121,16 @@ def fetch(
     _fetch(st, conn, pid, only)
 
 
-def _fetch(st: State, conn: sqlite3.Connection, pid: str, only: str) -> None:
+def _fetch(st: State, conn: sqlite3.Connection, pid: str, only: str, *, err: bool = False) -> None:
     http = HttpClient(cache_dir=st.paths.http_cache,
                       cache_ttl_s=st.config.discovery.cache_ttl_days * 86400)
     report = fetch_open_access(conn, st.paths, st.config, http, pid, only, log=st.log,
-                               progress=typer.echo, mailto=contact_email(st.paths, st.config))
+                               progress=lambda message: typer.echo(message, err=err),
+                               mailto=contact_email(st.paths, st.config))
     typer.echo(f"downloaded {report.downloaded} of {report.candidates} papers without a PDF, "
-               f"{report.parsed} with full text; {report.no_source} have no open-access copy")
-    for err in report.failed:
-        typer.secho(f"  failed: {err}", fg="yellow")
+               f"{report.parsed} with full text; {report.no_source} have no open-access copy", err=err)
+    for failure in report.failed:
+        typer.secho(f"  failed: {failure}", fg="yellow", err=err)
 
 
 def _show_versions(conn: sqlite3.Connection, project_id: str | None) -> None:

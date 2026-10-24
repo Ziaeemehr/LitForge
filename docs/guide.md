@@ -31,6 +31,8 @@ uv run litforge export
   Model-written answers arrive in phase 1.
 - `export` writes Markdown notes to `~/Downloads/LitForge/my-review/markdown/` and each paper's PDF under a readable name to `~/Downloads/LitForge/my-review/pdfs/` (set `LITFORGE_EXPORT_ROOT` to change the base folder, or pick a folder per project in the web UI); `--only relevant` keeps just the papers marked ✓ (`--only not-irrelevant` drops the ✗ ones).
 
+For an Obsidian vault, run `uv run litforge export --obsidian` (or select **Obsidian links** in the export header). Notes gain `litforge/<status>` tags and title aliases; the README and related notes use `[[slug]]` links. Related notes cite each other or share at least three references, and links stay within the exported selection. Add `--json` to print the export path and paper count as JSON. Without `--obsidian`, the Markdown export stays unchanged.
+
 ## Settings, keys and cloud-light
 
 Open **⚙ Settings** in the sidebar footer, or use **`,`** outside a text field.

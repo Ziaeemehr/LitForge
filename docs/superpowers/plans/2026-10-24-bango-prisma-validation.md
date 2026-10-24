@@ -75,3 +75,23 @@ buttons in the header export group, whose toast offers "Open export folder".
   (export, import, bib, writing, routes, CLI docs), Ruff and mypy green.
 - **Not done:** importing the RIS file into Zotero (installed). That would write into the user's real Zotero library,
   so it is left as a manual acceptance check.
+
+# Task 5 (Obsidian links in the Markdown export)
+
+Codex added `export_markdown(obsidian=True)`: front matter `tags: [litforge/<status>]` (Task 1's final status) and
+`aliases`, a `## Links in this export` section built from citations (`paper_relations`) and from papers sharing at
+least 3 references (`paper_references.ref_id`), limited to exported notes, and `[[slug]]` links in README.
+Flag `litforge export --obsidian` (plus `--json`), an "Obsidian links" checkbox in the header export group, and
+the flag on all three server export paths. The fetch-then-export job now also honours "all versions", which it
+used to ignore. A fixture keeps the default export byte-identical.
+
+- **Round 1:** full pytest green, 271 UI tests, Ruff and mypy. Real export of the 59-paper library copy: 59 notes,
+  11 with links, 93 `[[…]]` links in notes and README, 0 broken. Review finding: the link pass recomputed each
+  note's slug with a copy of the loop's formula, so the two could drift apart and break links silently.
+  (Harness note: the first export attempt failed because the copy lacked the parsed folder. It was not a code
+  defect, and the code before this task failed the same way on that copy.)
+- **Round 2:** Codex extracted `_note_title_and_slug()`, used by both passes. Byte-identical default export and
+  the Obsidian tests passed.
+- **Round 3:** full pytest 2173 passed, 3 skipped; 271 UI tests; Ruff; mypy. The real export again gave 59 notes and
+  93 links, 0 broken.
+- **Not done:** opening the folder as an Obsidian vault by hand (the Milestone A acceptance check).

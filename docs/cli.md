@@ -810,6 +810,8 @@ Export a project's papers as Markdown with relative asset links.
 | `--only` | Which papers: all, relevant (marked ✓) or not-irrelevant (all but ✗) |
 | `--fetch` | First download open-access PDFs of these papers (full-text notes) |
 | `--all-versions` | Export non-primary versions too |
+| `--obsidian` | Add Obsidian tags, aliases and wiki links |
+| `--json` | Print export path and paper count as JSON |
 
 ## Models
 
