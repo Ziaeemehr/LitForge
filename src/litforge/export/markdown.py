@@ -20,11 +20,17 @@ from litforge.parsing.formulas import FORMULAS
 from litforge.parsing.markitdown_parser import DOCUMENT_SUFFIXES
 from litforge.parsing.vision import VISION, read_page_markdown
 from litforge.projects import MARK_SCOPES
+from litforge.screening.status import final_status
 
 
 def slugify(text: str, max_len: int = 60) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return slug[:max_len].rstrip("-") or "paper"
+
+
+def _note_title_and_slug(row: sqlite3.Row) -> tuple[str, str]:
+    title = row["title"] or f"Untitled ({(row['sha256'] or row['id'])[:8]})"
+    return title, f"{slugify(title)}-{row['id'][:8]}"
 
 
 def default_export_dir(conn: sqlite3.Connection, paths: Paths, project: str, project_id: str) -> Path:
@@ -42,6 +48,7 @@ def export_markdown(
     paper_ids: Collection[str] | None = None,
     config: Config | None = None,
     all_versions: bool = False,
+    obsidian: bool = False,
 ) -> tuple[Path, int]:
     """Write <export folder>/markdown/{README.md, knowledge_base/*.md, assets/<slug>/...} and
     <export folder>/pdfs/<slug>.pdf; returns (root, papers) with root the markdown folder. Each paper's
@@ -83,6 +90,11 @@ def export_markdown(
     parse_hint = parser_install_hint((r["status"] for r in rows), paths, config or load_config(data_root=paths.root))
     previous = _previous_slugs(root / "manifest.json")
     written: dict[str, str] = {}  # paper id -> slug
+    statuses = final_status(conn, project_id) if obsidian else {}
+    slugs = {}
+    if obsidian:
+        for row in rows:
+            _, slugs[row["id"]] = _note_title_and_slug(row)
     index_lines = [
         f"# {project}\n",
         "> Private export: contains full extracted text and figure crops.\n",
@@ -91,9 +103,8 @@ def export_markdown(
     ]
     for row in rows:
         check_cancelled()  # a stopped export stops between papers
-        title = row["title"] or f"Untitled ({(row['sha256'] or row['id'])[:8]})"
+        title, slug = _note_title_and_slug(row)
         version_label = format_version_label(row["version"] or "unknown", row["source_url"], row["version_label"])
-        slug = f"{slugify(title)}-{row['id'][:8]}"
         written[row["id"]] = slug
         math = "raw"
         if row["output_dir"]:
@@ -124,6 +135,11 @@ def export_markdown(
             "math": math,
             "pdf_sha256": row["sha256"],
         }
+        if obsidian:
+            status = statuses.get(row["id"])
+            front["tags"] = [f"litforge/{status.status if status else 'unscreened'}"]
+            if row["title"]:
+                front["aliases"] = [row["title"]]
         if row["status"] == "needs_docling" and parse_hint:
             front["parse_hint"] = parse_hint
         if row["s_decision"]:
@@ -155,10 +171,16 @@ def export_markdown(
             body = f"> Source version: **{version_label}**\n\n" + body
         if links:
             body += "\n## Links\n\n" + "\n".join(links) + "\n"
+        if obsidian:
+            related = _linked_papers(conn, row["id"])
+            targets = sorted({slugs[pid] for pid in related if pid in slugs and pid != row["id"]})
+            if targets:
+                body += "\n## Links in this export\n\n" + "\n".join(f"[[{target}]]" for target in targets) + "\n"
         header = "---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n\n"
         (kb / f"{slug}.md").write_text(header + body, encoding="utf-8")
+        note_link = f"[[{slug}]]" if obsidian else f"[{title.replace('|', '/')}](knowledge_base/{slug}.md)"
         index_lines.append(
-            f"| [{title.replace('|', '/')}](knowledge_base/{slug}.md) | {row['year'] or ''} "
+            f"| {note_link} | {row['year'] or ''} "
             f"| {version_label or ''} | {parse_status_label(front['parse_status'])}"
             + (f"; {parse_hint}" if row["status"] == "needs_docling" and parse_hint else "")
             + f" | {f'[{file_label}](../pdfs/{pdf.name})' if pdf else ''} |"
@@ -205,3 +227,14 @@ def _previous_slugs(manifest: Path) -> set[str]:
     except (OSError, ValueError):
         return set()
     return {e["slug"] for e in entries if isinstance(e, dict) and re.fullmatch(r"[a-z0-9-]+", str(e.get("slug")))}
+
+
+def _linked_papers(conn: sqlite3.Connection, paper_id: str) -> set[str]:
+    related = {r[0] for r in conn.execute(
+        "SELECT cited_id FROM paper_relations WHERE citing_id=? "
+        "UNION SELECT citing_id FROM paper_relations WHERE cited_id=?", (paper_id, paper_id))}
+    related.update(r[0] for r in conn.execute(
+        "SELECT b.paper_id FROM paper_references a JOIN paper_references b ON b.ref_id=a.ref_id "
+        "WHERE a.paper_id=? AND b.paper_id != ? GROUP BY b.paper_id HAVING COUNT(*) >= 3",
+        (paper_id, paper_id)))
+    return related

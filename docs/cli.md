@@ -396,6 +396,7 @@ Screen a run's top papers against the project's criteria with a local model (set
 | `--top` | How many top papers of the run to screen |
 | `--model` | Ollama model (default: screening.model) |
 | `--fulltext` |  |
+| `--borderline` | S2: only uncertain or mid-score S1 papers |
 | `--profile` |  |
 | `--approve` |  |
 | `--preview` |  |
@@ -826,6 +827,8 @@ Export a project's papers as Markdown with relative asset links.
 | `--only` | Which papers: all, relevant (marked ✓) or not-irrelevant (all but ✗) |
 | `--fetch` | First download open-access PDFs of these papers (full-text notes) |
 | `--all-versions` | Export non-primary versions too |
+| `--obsidian` | Add Obsidian tags, aliases and wiki links |
+| `--json` | Print export path and paper count as JSON |
 
 ## Models
 
@@ -998,6 +1001,28 @@ Choose and prepare the window engine for `litforge desktop` (the installer runs 
 |---|---|
 | `--engine` | Linux: auto, gtk (the system's WebKitGTK) or qt |
 
+### `litforge export-refs`
+
+Save RIS or BibTeX references with their final screening decisions.
+
+| Option | Meaning |
+|---|---|
+| `--project`, `-p` | Project (default: the active project) |
+| `--format` | Reference format: ris or bib |
+| `--status` | Final status (repeatable; default: included) |
+| `--out`, `-o` | Output file (default: export folder/references.ris or .bib) |
+| `--json` | Print saved path and count as JSON |
+
+### `litforge prisma`
+
+Report PRISMA 2020 counts and save a screening flow diagram.
+
+| Option | Meaning |
+|---|---|
+| `--project`, `-p` | Project (default: the active project) |
+| `--json` | Print PRISMA counts as JSON |
+| `--out`, `-o` | SVG path (default: export folder/prisma.svg) |
+
 ### `litforge review`
 
 Review flagged sentences and cells.
@@ -1028,6 +1053,18 @@ Review flagged sentences and cells.
 |---|---|
 | `TARGET_ID` | argument (required) |
 | `--reason` |  |
+
+### `litforge strategy`
+
+Build database search strings from saved screening criteria, caching concepts and queries.
+
+| Option | Meaning |
+|---|---|
+| `--project`, `-p` | Project (default: the active project) |
+| `--db` | Database; repeat for multiple databases |
+| `--preview` |  |
+| `--approve` |  |
+| `--json` |  |
 
 ### `litforge workflow`
 

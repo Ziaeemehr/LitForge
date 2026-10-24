@@ -68,6 +68,15 @@ class SimilarConfig(BaseModel):
 
 
 class ScreeningConfig(BaseModel):
+    borderline: tuple[float, float] = (0.4, 0.7)
+
+    @field_validator("borderline")
+    @classmethod
+    def valid_borderline(cls, band: tuple[float, float]) -> tuple[float, float]:
+        if not 0 <= band[0] < band[1] <= 1:
+            raise ValueError("borderline must satisfy 0 <= low < high <= 1")
+        return band
+
     max_false_negative_rate: float = Field(default=0.05, ge=0, le=1)
     model: str = "qwen3:4b"  # any Ollama model; qwen3:8b is slower but more careful
     ollama_url: str = "http://localhost:11434"  # LITFORGE_OLLAMA_URL overrides
@@ -99,7 +108,7 @@ ReasoningMode = Literal["off", "on", "auto"]
 TASK_NAMES = ("ask", "audit", "matrix_extract", "claim_extract", "claim_relation", "screen", "screen_fulltext",
               "asset_analyze", "equation_compare", "gap_design", "console_plan", "page_rewrite",
               "write_fix", "write_rewrite", "write_cite", "write_chat", "write_summary", "write_image",
-              "query_translate")
+              "query_translate", "search_strategy")
 
 
 def reasoning_mode(value: Any) -> Any:

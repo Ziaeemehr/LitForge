@@ -81,6 +81,8 @@ These features run inside the desktop window planned in `2026-10-23-desktop-app.
 
 ### Task 1: Final status and the PRISMA 2020 diagram
 
+**Execution record:** [2026-10-24 validation](2026-10-24-bango-prisma-validation.md): three run/review/fix rounds, Codex implementing and Claude reviewing.
+
 **Files:** Create `src/litforge/screening/status.py`, `src/litforge/screening/prisma.py`, `src/litforge/ui/review_routes.py`, `tests/unit/test_screening_status.py`, `tests/unit/test_prisma.py`, `tests/ui/review.test.cjs`. Modify `src/litforge/cli.py`, `src/litforge/ui/server.py` (dispatch to `review_routes`), `app.js`, `docs/guide.md`, `docs/cli.md`.
 
 **Interfaces:**
@@ -99,24 +101,26 @@ These features run inside the desktop window planned in `2026-10-23-desktop-app.
 
 Steps:
 
-- [ ] **Write the status tests.** Write `test_screening_status.py` with these cases, each asserting the exact `PaperStatus`:
+- [x] **Write the status tests.** Write `test_screening_status.py` with these cases, each asserting the exact `PaperStatus`:
   - a human `relevant` mark wins over an S1 `exclude`;
   - an `irrelevant` mark after an S2 `include` gives `excluded/S2/human`;
   - S2 wins over S1;
   - a paper with no results is `unscreened`;
   - only the primary version counts.
-- [ ] **Write the PRISMA tests.** Write `test_prisma.py` on a seeded library: one search run with 5 hits from `openalex` and 3 from `crossref`, where 2 are the same paper; one import of 2 records.
+- [x] **Write the PRISMA tests.** Write `test_prisma.py` on a seeded library: one search run with 5 hits from `openalex` and 3 from `crossref`, where 2 are the same paper; one import of 2 records.
   - Assert `identified_by_source == {"openalex":5,"crossref":3,"import":2}`, `duplicates_removed == 2`, and that `screened + awaiting_screening` equals the number of unique primary papers.
   - Seed more cases: the same search run twice (counts unchanged), one citation hit and one manual paper (both in `identified_other`), and one paper removed from the project (not counted). Assert the invariant `sum(identified_by_source) + sum(identified_other) - duplicates_removed == unique primary papers in the project`.
   - Assert `sought - not_retrieved == assessed + awaiting_fulltext`, where `awaiting_fulltext` covers papers that have a PDF but no S2 result yet.
   - Assert the reasons in `excluded_s2_by_reason` sum to the S2 exclusions.
   - Assert the SVG parses with `xml.etree.ElementTree` and contains every count as text.
-- [ ] **Confirm the tests fail.** Run `uv run pytest tests/unit/test_screening_status.py tests/unit/test_prisma.py -v`. The failures must be import errors for the missing modules.
-- [ ] **Implement `status.py` and `prisma.py`.** "Sought" means the papers whose S1 status is `included` or `uncertain`. "Not retrieved" means sought papers with no parse run (`paper_runs`). Draw the SVG in the PRISMA 2020 layout: four rows, identification boxes on the left, exclusion boxes on the right. Lay text out with fixed widths and wrap long reasons at 40 characters.
-- [ ] **Add the CLI, routes and UI.** Add the CLI command, the routes and a **Review report** panel that shows the SVG inline (sanitised, since it is our own SVG) with a **Save** button. In `tests/ui/review.test.cjs`, test that the panel renders the counts and that Save calls the save route instead of using `<a download>`.
-- [ ] **Run the tests.** Run `uv run pytest tests/unit/test_screening_status.py tests/unit/test_prisma.py tests/integration/test_screening_flow.py -v` and `node --test tests/ui/review.test.cjs`. All must pass. Commit.
+- [x] **Confirm the tests fail.** Run `uv run pytest tests/unit/test_screening_status.py tests/unit/test_prisma.py -v`. The failures must be import errors for the missing modules.
+- [x] **Implement `status.py` and `prisma.py`.** "Sought" means the papers whose S1 status is `included` or `uncertain`. "Not retrieved" means sought papers with no parse run (`paper_runs`). Draw the SVG in the PRISMA 2020 layout: four rows, identification boxes on the left, exclusion boxes on the right. Lay text out with fixed widths and wrap long reasons at 40 characters.
+- [x] **Add the CLI, routes and UI.** Add the CLI command, the routes and a **Review report** panel that shows the SVG inline (sanitised, since it is our own SVG) with a **Save** button. In `tests/ui/review.test.cjs`, test that the panel renders the counts and that Save calls the save route instead of using `<a download>`.
+- [x] **Run the tests.** Run `uv run pytest tests/unit/test_screening_status.py tests/unit/test_prisma.py tests/integration/test_screening_flow.py -v` and `node --test tests/ui/review.test.cjs`. All must pass. Commit.
 
 ### Task 2: Two-stage screening of borderline papers only
+
+**Execution record:** [2026-10-24 validation](2026-10-24-bango-prisma-validation.md#task-2-two-stage-screening-of-borderline-papers-only): 5 instead of 10 S2 calls on sbi10, no gold paper lost.
 
 **Files:** Modify `src/litforge/screening/fulltext.py`, `src/litforge/analysis/claim_commands.py` (the `fulltext` command), `src/litforge/cli.py`, `app.js`, `docs/guide.md`. Test in `tests/unit/test_screening.py`.
 
@@ -128,13 +132,15 @@ Steps:
 
 Steps:
 
-- [ ] **Write the failing test.** Write `test_fulltext_borderline_selects_uncertain_and_mid_scores`, seeded with S1 results `exclude 0.2`, `uncertain 0.3`, `include 0.55`, `include 0.9`, and a marked `uncertain`. Assert the selected IDs are exactly the second and third papers. Also write `test_fulltext_borderline_preview_counts_match_run`.
-- [ ] **Confirm it fails.** Run `uv run pytest tests/unit/test_screening.py -k borderline -v`. It must fail with an unexpected-keyword error.
-- [ ] **Implement the filter.** Implement it inside `_work` before the `top` slice, so `--top` still limits the borderline set. Record `only` in the run's `start_run` parameters so the run history shows the mode.
-- [ ] **Validate the band on the gold benchmark.** Run `litforge eval screening` on the sbi10 gold benchmark in both modes with the local model. Pass condition: borderline mode misses no gold-included paper that all mode found. Record calls saved and recall in the commit message. If it fails, widen the band in the default config and repeat.
-- [ ] **Run the tests and commit.** Run the test file and `tests/integration/test_screening_flow.py`, then commit.
+- [x] **Write the failing test.** Write `test_fulltext_borderline_selects_uncertain_and_mid_scores`, seeded with S1 results `exclude 0.2`, `uncertain 0.3`, `include 0.55`, `include 0.9`, and a marked `uncertain`. Assert the selected IDs are exactly the second and third papers. Also write `test_fulltext_borderline_preview_counts_match_run`.
+- [x] **Confirm it fails.** Run `uv run pytest tests/unit/test_screening.py -k borderline -v`. It must fail with an unexpected-keyword error.
+- [x] **Implement the filter.** Implement it inside `_work` before the `top` slice, so `--top` still limits the borderline set. Record `only` in the run's `start_run` parameters so the run history shows the mode.
+- [x] **Validate the band on the gold benchmark.** Run `litforge eval screening` on the sbi10 gold benchmark in both modes with the local model. Pass condition: borderline mode misses no gold-included paper that all mode found. Record calls saved and recall in the commit message. If it fails, widen the band in the default config and repeat.
+- [x] **Run the tests and commit.** Run the test file and `tests/integration/test_screening_flow.py`, then commit.
 
 ### Task 3: Search-string builder
+
+**Execution record:** [2026-10-24 validation](2026-10-24-bango-prisma-validation.md#task-3-search-string-builder).
 
 **Files:** Create `src/litforge/analysis/search_strategy.py`, `tests/unit/test_search_strategy.py`. Modify `config.py` (`TASK_NAMES` += `"search_strategy"`), `cli.py`, `review_routes.py`, `app.js` (a card under the criteria form), `docs/guide.md`, `docs/cli.md`.
 
@@ -150,16 +156,18 @@ Steps:
 
 Steps:
 
-- [ ] **Write the failing tests.**
+- [x] **Write the failing tests.**
   - `test_assemble_queries_per_database`: given fixed concepts, assert the exact PubMed, Scopus and WoS strings. For example, the concepts `[("graph neural network", ["GNN","graph neural networks"]), ("epilepsy", ["seizure"])]` give, for PubMed, `("graph neural network"[tiab] OR GNN[tiab] OR "graph neural networks"[tiab]) AND (epilepsy[tiab] OR seizure[tiab])`.
   - `test_validate_query_flags_unbalanced_and_unknown_tag`.
   - `test_model_reply_with_extra_text_is_rejected`, using a fake gateway that returns 9 synonyms. Assert the list is trimmed to 8 and a warning is added.
   - `test_empty_criteria_raises`.
-- [ ] **Confirm they fail.** Run `uv run pytest tests/unit/test_search_strategy.py -v`.
-- [ ] **Implement the module.** Quote multi-word terms and leave single words bare. The prompt receives the research question and the criteria only; it never receives paper text. Cache the result through `start_run` and `finish_run`, keyed by `criteria_hash`, so reopening the card costs no call.
-- [ ] **Run the tests and commit.** Run the tests and the UI test for the card's Copy and Search buttons, then commit.
+- [x] **Confirm they fail.** Run `uv run pytest tests/unit/test_search_strategy.py -v`.
+- [x] **Implement the module.** Quote multi-word terms and leave single words bare. The prompt receives the research question and the criteria only; it never receives paper text. Cache the result through `start_run` and `finish_run`, keyed by `criteria_hash`, so reopening the card costs no call.
+- [x] **Run the tests and commit.** Run the tests and the UI test for the card's Copy and Search buttons, then commit.
 
 ### Task 4: RIS and BibTeX export with decisions
+
+**Execution record:** [2026-10-24 validation](2026-10-24-bango-prisma-validation.md#task-4-ris-and-bibtex-export-with-decisions). Zotero import remains a manual check.
 
 **Files:** Create `src/litforge/export/references.py`, `tests/unit/test_export_references.py`. Modify `src/litforge/writing/bib.py` (`bibtex_entry` gains `extra`), `cli.py`, `review_routes.py`, `app.js` (two buttons in the Export dialog), `docs/guide.md`.
 
@@ -172,16 +180,18 @@ Steps:
 
 Steps:
 
-- [ ] **Write the failing tests.**
+- [x] **Write the failing tests.**
   - `test_ris_round_trip_keeps_doi_title_year`: export, then `parse_ris`, then compare the fields.
   - `test_bib_round_trip_with_braces_and_persian_title`.
   - `test_missing_fields_are_omitted_not_empty`.
   - `test_status_filter_uses_final_status`, which uses Task 1's `final_status`.
-- [ ] **Confirm they fail.** Run `uv run pytest tests/unit/test_export_references.py -v`.
-- [ ] **Implement the export.** Escape BibTeX special characters and leave Persian text as UTF-8.
-- [ ] **Run the tests and commit.**
+- [x] **Confirm they fail.** Run `uv run pytest tests/unit/test_export_references.py -v`.
+- [x] **Implement the export.** Escape BibTeX special characters and leave Persian text as UTF-8.
+- [x] **Run the tests and commit.**
 
 ### Task 5: Obsidian links in the Markdown export
+
+**Execution record:** [2026-10-24 validation](2026-10-24-bango-prisma-validation.md#task-5-obsidian-links-in-the-markdown-export).
 
 **Files:** Modify `src/litforge/export/markdown.py`, `cli.py` (`export --obsidian`), the export dialog in `app.js`. Test in `tests/unit/test_export_obsidian.py`.
 
@@ -194,10 +204,10 @@ Steps:
 
 Steps:
 
-- [ ] **Write the failing tests.** Write `test_obsidian_links_only_to_exported_notes` (a cited paper outside the selection gives no link), `test_obsidian_off_output_unchanged` (byte-identical to the current export for a fixture project) and `test_status_tag_in_front_matter`.
-- [ ] **Confirm, implement, pass and commit.** Run `uv run pytest tests/unit/test_export_obsidian.py -v` and confirm it fails. Implement, run until it passes, then commit.
+- [x] **Write the failing tests.** Write `test_obsidian_links_only_to_exported_notes` (a cited paper outside the selection gives no link), `test_obsidian_off_output_unchanged` (byte-identical to the current export for a fixture project) and `test_status_tag_in_front_matter`.
+- [x] **Confirm, implement, pass and commit.** Run `uv run pytest tests/unit/test_export_obsidian.py -v` and confirm it fails. Implement, run until it passes, then commit.
 
-**Milestone A acceptance:** On a real project, the PRISMA numbers match a hand count from the review queue; a borderline S2 run costs fewer calls than the same `--top`; the RIS file imports into Zotero; the export folder opens as an Obsidian vault with working links.
+**Milestone A acceptance** ([record](2026-10-24-bango-prisma-validation.md#milestone-a-acceptance): PRISMA hand count and borderline savings done; Zotero import and opening the vault in Obsidian are left for the user): On a real project, the PRISMA numbers match a hand count from the review queue; a borderline S2 run costs fewer calls than the same `--top`; the RIS file imports into Zotero; the export folder opens as an Obsidian vault with working links.
 
 ## Milestone B: Evidence and integrations (package 2)
 

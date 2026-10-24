@@ -121,12 +121,15 @@ def queue(ctx: typer.Context, project: Project = None, n: Annotated[int, typer.O
 
 
 def fulltext(ctx: typer.Context, project: str | None, top: int | None, profile: str | None,
-             approved: bool, preview: bool, as_json: bool) -> None:
+             approved: bool, preview: bool, as_json: bool, borderline: bool = False) -> None:
     with _context(ctx, project) as (st, conn, pid):
         gateway = ModelGateway(conn, st.config)
         project_id = _required(pid)
-        check_plan(gateway, plan_calls(conn, gateway, project_id, top, profile), approved, preview)
-        result = screen_fulltext(conn, gateway, project_id, top, profile, approved)
+        only: Literal["all", "borderline"] = "borderline" if borderline else "all"
+        band = st.config.screening.borderline
+        check_plan(gateway, plan_calls(conn, gateway, project_id, top, profile, only=only, band=band),
+                   approved, preview)
+        result = screen_fulltext(conn, gateway, project_id, top, profile, approved, only=only, band=band)
         typer.echo(result.model_dump_json(indent=1) if as_json else
                    f"S2: {result.screened} screened; {result.cached} cached; {len(result.needs_pdf)} need PDF; "
                    f"{result.counts}" + ("; stopped at budget" if result.budget_stopped else ""))

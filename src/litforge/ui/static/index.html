@@ -51,11 +51,14 @@
     </select>
     <label class="check" id="fetch-wrap" title="Slower: before exporting, download open-access PDFs (arXiv, publisher copies) of the chosen papers that have none, so their notes contain the full text"><input type="checkbox" id="export-fetch"> with PDFs</label>
     <label class="check" title="Include non-primary versions as separate notes"><input type="checkbox" id="export-all-versions"> all versions</label>
+    <label class="check" title="Add screening tags, title aliases and [[links]] between exported notes"><input type="checkbox" id="export-obsidian"> Obsidian links</label>
     <select id="export-math" title="Better math: how the pages with equations, tables or broken text are rewritten before exporting. Results are kept, so raising the level later only processes what is new.">
       <option value="off" title="The text extracted from the PDF; equations often come out garbled">Math: as extracted</option>
       <option value="medium" title="Pix2Text reads every formula as LaTeX; the text stays as extracted from the PDF. About 1-5 s per page">Math: medium (fast)</option>
       <option value="high" title="Whole pages are rewritten: formulas, tables and text, also in scanned papers. On an NVIDIA GPU Nemotron Parse reads English pages (about 5 s each); a local vision model (Ollama) reads Persian pages (about 12 s on the GPU)">Math: high (best)</option>
     </select>
+    <button class="btn small" id="btn-export-ris" title="Export included papers with their screening decision as RIS">RIS</button>
+    <button class="btn small" id="btn-export-bib" title="Export included papers with their screening decision as BibTeX">BibTeX</button>
     <button class="btn accent" id="btn-export" title="Write Markdown notes to the project's output folder">Export Markdown</button>
   </div>
 </header>
@@ -683,12 +686,12 @@
           <p class="hint">A local model reads each paper's title and abstract and checks it against these criteria. It only
             suggests include / uncertain / exclude; your ✓/✗ marks decide. Title/abstract screening uses the local model; full-text screening uses the selected profile.</p>
           <label class="f" for="crit-question">Research question</label>
-          <textarea id="crit-question" rows="2" placeholder="e.g. How does network directionality affect synchronization of excitatory neurons?"></textarea>
+          <textarea id="crit-question" dir="auto" rows="2" placeholder="e.g. How does network directionality affect synchronization of excitatory neurons?"></textarea>
           <div class="crit-grid">
             <div><label class="f" for="crit-include">Include if <small>(one criterion per line)</small></label>
-              <textarea id="crit-include" rows="3" placeholder="studies spiking neuron networks&#10;reports a synchronization measure"></textarea></div>
+              <textarea id="crit-include" dir="auto" rows="3" placeholder="studies spiking neuron networks&#10;reports a synchronization measure"></textarea></div>
             <div><label class="f" for="crit-exclude">Exclude if <small>(one criterion per line)</small></label>
-              <textarea id="crit-exclude" rows="3" placeholder="purely experimental, no model&#10;review article"></textarea></div>
+              <textarea id="crit-exclude" dir="auto" rows="3" placeholder="purely experimental, no model&#10;review article"></textarea></div>
           </div>
           <div class="screen-actions">
             <button class="btn small" id="btn-crit-save" title="Keep these criteria for the project without screening">Save criteria</button>
@@ -700,8 +703,60 @@
             <label for="lens-screen-profile">Full-text model profile</label>
             <select id="lens-screen-profile" aria-label="Full-text model profile"><option value="">Configured default</option></select>
             <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-screen-all-versions"> All versions</label>
+            <label class="check" title="S2 reads only papers that title/abstract screening marked uncertain or scored in the configured borderline band (default 0.4–0.7), skipping papers you marked ✓/✗; confident S1 decisions stand"><input type="checkbox" id="lens-screen-borderline"> Borderline only</label>
             <button class="btn small" id="lens-screen-fulltext" data-lens-work>Screen full text (S2)</button>
             <span class="hint" id="lens-screen-status" role="status" aria-live="polite"></span>
+          </div>
+          <div class="card" id="search-strategy">
+            <h3>Search strings</h3>
+            <fieldset id="strategy-databases"><legend>Databases</legend>
+              <label class="check"><input type="checkbox" name="strategy-db" value="pubmed" checked> PubMed</label>
+              <label class="check"><input type="checkbox" name="strategy-db" value="scopus" checked> Scopus</label>
+              <label class="check"><input type="checkbox" name="strategy-db" value="wos"> Web of Science</label>
+              <label class="check"><input type="checkbox" name="strategy-db" value="arxiv"> arXiv</label>
+              <label class="check"><input type="checkbox" name="strategy-db" value="openalex" checked> OpenAlex</label>
+            </fieldset>
+            <button class="btn small" id="strategy-build">Build</button>
+            <p class="hint" id="strategy-status" dir="auto" role="status"></p>
+            <div id="strategy-pubmed-row" hidden>
+              <label for="strategy-pubmed">PubMed</label>
+              <textarea id="strategy-pubmed" rows="3" readonly dir="auto"></textarea>
+              <button class="btn small" id="strategy-pubmed-copy" title="Copy the PubMed string" aria-label="Copy the PubMed string">Copy</button>
+            </div>
+            <div id="strategy-scopus-row" hidden>
+              <label for="strategy-scopus">Scopus</label>
+              <textarea id="strategy-scopus" rows="3" readonly dir="auto"></textarea>
+              <button class="btn small" id="strategy-scopus-copy" title="Copy the Scopus string" aria-label="Copy the Scopus string">Copy</button>
+            </div>
+            <div id="strategy-wos-row" hidden>
+              <label for="strategy-wos">Web of Science</label>
+              <textarea id="strategy-wos" rows="3" readonly dir="auto"></textarea>
+              <button class="btn small" id="strategy-wos-copy" title="Copy the Web of Science string" aria-label="Copy the Web of Science string">Copy</button>
+            </div>
+            <div id="strategy-arxiv-row" hidden>
+              <label for="strategy-arxiv">arXiv</label>
+              <textarea id="strategy-arxiv" rows="3" readonly dir="auto"></textarea>
+              <button class="btn small" id="strategy-arxiv-copy" title="Copy the arXiv string" aria-label="Copy the arXiv string">Copy</button>
+            </div>
+            <div id="strategy-openalex-row" hidden>
+              <label for="strategy-openalex">OpenAlex</label>
+              <textarea id="strategy-openalex" rows="3" readonly dir="auto"></textarea>
+              <button class="btn small" id="strategy-openalex-copy" title="Copy the OpenAlex string" aria-label="Copy the OpenAlex string">Copy</button>
+              <button class="btn small" id="strategy-search">Search with it</button>
+            </div>
+          </div>
+        </div>
+      </details>
+      <details class="card" id="review-report">
+        <summary><span class="chev">▸</span><b>Review report</b> <span class="tag">PRISMA 2020</span>
+          <span class="meta" id="review-summary"></span></summary>
+        <div class="screen-body">
+          <div id="review-counts" dir="auto"></div>
+          <div id="review-svg"></div>
+          <div class="screen-actions">
+            <button class="btn small" id="review-save">Save</button>
+            <button class="btn small" id="review-folder">Open folder</button>
+            <span class="hint" id="review-path" dir="auto"></span>
           </div>
         </div>
       </details>
@@ -854,7 +909,7 @@
   </div>
 </dialog>
 <div class="tip" id="tip" role="tooltip"></div>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast"><span id="toast-message"></span> <button class="btn small" id="toast-folder" hidden>Open export folder</button></div>
 
 <script src="/static/vendor/marked.min.js"></script>
 <script src="/static/vendor/purify.min.js"></script>

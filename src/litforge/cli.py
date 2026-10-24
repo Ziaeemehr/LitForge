@@ -792,6 +792,72 @@ def status(ctx: typer.Context, project: Annotated[str | None, typer.Option("--pr
 
 
 @app.command()
+def prisma(
+    ctx: typer.Context,
+    project: ProjectOpt = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Print PRISMA counts as JSON")] = False,
+    out: Annotated[
+        Path | None, typer.Option("--out", "-o", help="SVG path (default: export folder/prisma.svg)")
+    ] = None,
+) -> None:
+    """Report PRISMA 2020 counts and save a screening flow diagram."""
+    from litforge.export.markdown import default_export_dir
+    from litforge.screening.prisma import prisma_counts, prisma_svg
+
+    st = _state(ctx)
+    conn = st.db()
+    try:
+        name, pid = _project(st, conn, project, required=True)
+        assert name is not None and pid is not None
+        counts = prisma_counts(conn, pid)
+        if out is not None or not json_out:
+            target = out or default_export_dir(conn, st.paths, name, pid) / "prisma.svg"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(prisma_svg(counts, name), encoding="utf-8")
+            if not json_out:
+                typer.echo(str(target.resolve()))
+        if json_out:
+            typer.echo(counts.model_dump_json())
+    finally:
+        conn.close()
+
+
+@app.command("export-refs")
+def export_refs(
+    ctx: typer.Context,
+    project: ProjectOpt = None,
+    fmt: Annotated[str, typer.Option("--format", help="Reference format: ris or bib")] = "ris",
+    status: Annotated[
+        list[str] | None, typer.Option("--status", help="Final status (repeatable; default: included)")
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option("--out", "-o", help="Output file (default: export folder/references.ris or .bib)")
+    ] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Print saved path and count as JSON")] = False,
+) -> None:
+    """Save RIS or BibTeX references with their final screening decisions."""
+    from litforge.export.markdown import default_export_dir
+    from litforge.export.references import save_references
+
+    if fmt not in ("ris", "bib"):
+        raise typer.BadParameter("format must be ris or bib")
+    st = _state(ctx)
+    conn = st.db()
+    try:
+        name, pid = _project(st, conn, project, required=True)
+        assert name is not None and pid is not None
+        target = out or default_export_dir(conn, st.paths, name, pid) / f"references.{fmt}"
+        try:
+            saved = save_references(conn, pid, "ris" if fmt == "ris" else "bib", target,
+                                    status=status if status is not None else ("included",))
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        typer.echo(json.dumps(saved) if json_out else str(saved["path"]))
+    finally:
+        conn.close()
+
+
+@app.command()
 def export(
     ctx: typer.Context,
     project: ProjectOpt = None,
@@ -803,6 +869,8 @@ def export(
         bool, typer.Option("--fetch", help="First download open-access PDFs of these papers (full-text notes)")
     ] = False,
     all_versions: Annotated[bool, typer.Option("--all-versions", help="Export non-primary versions too")] = False,
+    obsidian: Annotated[bool, typer.Option("--obsidian", help="Add Obsidian tags, aliases and wiki links")] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="Print export path and paper count as JSON")] = False,
 ) -> None:
     """Export a project's papers as Markdown with relative asset links."""
     st = _state(ctx)
@@ -825,10 +893,10 @@ def export(
         typer.echo(export_bibtex(conn, ids), nl=False)
         return
     if with_pdfs:
-        _fetch(st, conn, pid, only)
+        _fetch(st, conn, pid, only, err=json_out)
     out, count = export_markdown(conn, st.paths, name, pid, only=only, config=st.config,
-                                 all_versions=all_versions)
-    typer.echo(f"exported {count} papers to {out}")
+                                 all_versions=all_versions, obsidian=obsidian)
+    typer.echo(json.dumps({"path": str(out), "papers": count}) if json_out else f"exported {count} papers to {out}")
 
 
 # ---- discovery ------------------------------------------------------------
@@ -915,6 +983,7 @@ def screen(
     top: Annotated[int | None, typer.Option(help="How many top papers of the run to screen")] = None,
     model: Annotated[str | None, typer.Option(help="Ollama model (default: screening.model)")] = None,
     fulltext: Annotated[bool, typer.Option("--fulltext")] = False,
+    borderline: Annotated[bool, typer.Option("--borderline", help="S2: only uncertain or mid-score S1 papers")] = False,
     profile: Annotated[str | None, typer.Option("--profile")] = None,
     approve: Annotated[bool, typer.Option("--approve")] = False,
     preview: Annotated[bool, typer.Option("--preview")] = False,
@@ -924,8 +993,10 @@ def screen(
     """Screen a run's top papers against the project's criteria with a local model (set criteria in the web UI)."""
     if fulltext:
         from litforge.analysis.claim_commands import fulltext as run_fulltext
-        run_fulltext(ctx, project, top, profile, approve, preview, as_json)
+        run_fulltext(ctx, project, top, profile, approve, preview, as_json, borderline)
         return
+    if borderline:
+        raise typer.BadParameter("--borderline requires --fulltext")
     st = _state(ctx)
     conn = st.db(read_only=preview)
     name, pid = _project(st, conn, project, required=True)
@@ -1057,15 +1128,16 @@ def fetch(
     _fetch(st, conn, pid, only)
 
 
-def _fetch(st: State, conn: sqlite3.Connection, pid: str, only: str) -> None:
+def _fetch(st: State, conn: sqlite3.Connection, pid: str, only: str, *, err: bool = False) -> None:
     http = HttpClient(cache_dir=st.paths.http_cache,
                       cache_ttl_s=st.config.discovery.cache_ttl_days * 86400)
     report = fetch_open_access(conn, st.paths, st.config, http, pid, only, log=st.log,
-                               progress=typer.echo, mailto=contact_email(st.paths, st.config))
+                               progress=lambda message: typer.echo(message, err=err),
+                               mailto=contact_email(st.paths, st.config))
     typer.echo(f"downloaded {report.downloaded} of {report.candidates} papers without a PDF, "
-               f"{report.parsed} with full text; {report.no_source} have no open-access copy")
-    for err in report.failed:
-        typer.secho(f"  failed: {err}", fg="yellow")
+               f"{report.parsed} with full text; {report.no_source} have no open-access copy", err=err)
+    for failure in report.failed:
+        typer.secho(f"  failed: {failure}", fg="yellow", err=err)
 
 
 def _show_versions(conn: sqlite3.Connection, project_id: str | None) -> None:
@@ -1457,6 +1529,42 @@ def shortcut(
 
 register(app, eval_app)
 register_console(app)
+
+@app.command()
+def strategy(
+    ctx: typer.Context,
+    project: ProjectOpt = None,
+    db: Annotated[list[str] | None, typer.Option("--db", help="Database; repeat for multiple databases")] = None,
+    preview: Annotated[bool, typer.Option("--preview")] = False,
+    approve: Annotated[bool, typer.Option("--approve")] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Build database search strings from saved screening criteria, caching concepts and queries."""
+    from litforge.analysis.commands import check_plan
+    from litforge.analysis.search_strategy import build_strategy, cached_strategy, preview_strategy
+    st = _state(ctx)
+    with st.db() as conn:
+        _, pid = _project(st, conn, project)
+        if pid is None:
+            raise typer.BadParameter("Choose a project with -p")
+        databases = db or ["pubmed", "scopus", "openalex"]
+        try:
+            result = cached_strategy(conn, pid, databases)
+            if result is None:
+                gateway = ModelGateway(conn, st.config)
+                check_plan(gateway, [preview_strategy(conn, gateway, pid, databases)], approve, preview)
+                result = build_strategy(conn, gateway, pid, databases, approved=approve)
+        except (ValueError, RoutingError, BudgetExceeded, GatewayError, LlmError) as exc:
+            typer.echo(" ".join(str(exc).splitlines()), err=True)
+            raise typer.Exit(1) from exc
+    if as_json or preview:
+        typer.echo(result.model_dump_json(indent=2))
+    else:
+        for database, query in result.queries.items():
+            typer.echo(f"{database}: {query}")
+        for warning in result.warnings:
+            typer.echo(f"Warning: {warning}", err=True)
+
 
 if __name__ == "__main__":
     app()

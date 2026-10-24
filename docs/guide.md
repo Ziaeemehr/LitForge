@@ -31,6 +31,8 @@ uv run litforge export
   Model-written answers arrive in phase 1.
 - `export` writes Markdown notes to `~/Downloads/LitForge/my-review/markdown/` and each paper's PDF under a readable name to `~/Downloads/LitForge/my-review/pdfs/` (set `LITFORGE_EXPORT_ROOT` to change the base folder, or pick a folder per project in the web UI); `--only relevant` keeps just the papers marked ✓ (`--only not-irrelevant` drops the ✗ ones).
 
+For an Obsidian vault, run `uv run litforge export --obsidian` (or select **Obsidian links** in the export header). Notes gain `litforge/<status>` tags and title aliases; the README and related notes use `[[slug]]` links. Related notes cite each other or share at least three references, and links stay within the exported selection. Add `--json` to print the export path and paper count as JSON. Without `--obsidian`, the Markdown export stays unchanged.
+
 ## Settings, keys and cloud-light
 
 Open **⚙ Settings** in the sidebar footer, or use **`,`** outside a text field.
@@ -295,6 +297,16 @@ Nothing leaves your computer.
 
 Changing the criteria or the model marks earlier results as stale; screening again re-checks them,
 and unchanged papers are not sent to the model twice.
+
+For full-text S2 screening, use `litforge screen --fulltext --borderline -p NAME`
+(`--preview` previews calls; `--approve` approves them; `--json` prints the report).
+Borderline mode selects papers whose S1 decision is uncertain or whose S1 score is in
+`[0.4, 0.7)`, excluding papers with human marks. Configure the band with
+`screening.borderline: [0.4, 0.7]`; it must satisfy `0 <= low < high <= 1`.
+The score measures relevance and inclusion coverage, not calibrated confidence.
+`--top` limits the selected borderline set. Explicit paper selections bypass this filter.
+In the results view, **Borderline only** beside **Screen full text (S2)** defaults on
+when more than 50 papers have S1 results and remembers your changes. Human marks always win.
 
 ### Model gateway and cloud policy
 
@@ -1022,3 +1034,57 @@ unchanged: download the new version and replace the program files, keeping your 
 `litforge update --check` exits **0** when up to date (including a checkout that is only ahead),
 **10** when an update is available, and **1** for errors, non-Git installs or diverged histories.
 CLI checks also bypass disabled automatic checks. Git commands have a combined 10-second timeout.
+
+### PRISMA review report
+
+Run `litforge prisma -p NAME` to write a standalone PRISMA 2020 diagram to the
+project's export folder as `prisma.svg`; the command prints its path. Use
+`litforge prisma -p NAME -o report.svg` for a custom path, or `--json` for counts
+without writing a file (`--json -o report.svg` does both).
+
+In a project's recent searches view, open **Review report** to see the counts and
+diagram. **Save** writes the SVG into the export folder and shows the saved path;
+**Open folder** opens that folder. Human screening marks override model decisions,
+uncertain decisions stay separate from included papers, and confirmed versions
+count once, with other versions counted as duplicates. Papers awaiting screening,
+retrieval, or full-text assessment remain visible in the report.
+
+### Export references with screening decisions
+
+Use the header **RIS** or **BibTeX** buttons to save included primary papers with their
+final screening decisions. The saved path appears with **Open export folder**.
+Human marks take precedence over model decisions; uncertain papers are not included by default.
+
+```bash
+litforge export-refs -p NAME --format ris
+litforge export-refs -p NAME --format bib --status included --status uncertain -o references.bib --json
+```
+
+The default output is `<export folder>/references.ris` or `references.bib`. Repeat
+`--status` to select `included`, `excluded`, `uncertain`, or `unscreened`. `--json`
+prints `{"path": ..., "count": ...}` after saving. RIS notes and BibTeX notes and
+keywords carry the status, stage, source, and decision reason. BibTeX citation keys
+match the Writing Studio.
+
+### Search strings from screening criteria
+
+Save a research question and inclusion/exclusion criteria in **AI screening**, then use
+**Search strings** to select databases and **Build**. The model extracts concepts only;
+LitForge formats PubMed, Scopus, Web of Science, arXiv and OpenAlex queries itself.
+Each readonly query has **Copy**; if clipboard access is unavailable, select and copy
+it manually. OpenAlex's **Search with it** starts the existing search flow with up to
+six plain queries combining each concept's first two terms.
+
+```bash
+litforge strategy -p my-review --db pubmed --db scopus --preview
+litforge strategy -p my-review --db pubmed --db scopus --approve --json
+```
+
+The default databases are PubMed, Scopus and OpenAlex. The `search_strategy` task
+uses the local model unless assigned another profile in settings. Preview shows the
+route and approval requirements without calling the model. Only the question and
+include/exclude criteria are sent, never paper text. Results are cached by criteria
+hash and database selection; reopening or rebuilding unchanged criteria costs no
+model call. Changing criteria or databases builds a fresh strategy. Warnings report
+trimmed concepts/synonyms and sanitised or dropped terms. Review the strings before
+using them in an external database.

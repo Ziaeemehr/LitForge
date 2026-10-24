@@ -101,7 +101,7 @@ from litforge.tools import (
     nemotron_install_status,
     pix2text_install_status,
 )
-from litforge.ui import api, writing_routes
+from litforge.ui import api, review_routes, writing_routes
 from litforge.updates import UpdateChecker, automatic_enabled
 from litforge.writing import documents as wd
 from litforge.writing.compile import engine_status
@@ -589,7 +589,8 @@ class App:
                     else:
                         phase2 = fulltext.screen_fulltext(conn, gateway, pid, request.top, request.profile,
                                                         request.approved, request.force, request.paper_ids,
-                                                        request.all_versions)
+                                                        request.all_versions, only=request.only,
+                                                        band=self.config.screening.borderline)
                     job.report = phase2.model_dump()
                     return phase2.run_id
                 result = matrices.extract_matrix(conn, gateway, request.matrix_id, request.paper_ids,
@@ -897,7 +898,8 @@ class App:
             try:
                 out, count = export_markdown(c, self.paths, project, pid, only=str(export.get("only") or "all"),
                                              config=self.config,
-                                             paper_ids=paper_ids)
+                                             paper_ids=paper_ids, obsidian=export.get("obsidian") is True,
+                                             all_versions=export.get("all_versions") is True)
             except OSError as exc:  # the PDFs are in; say why the notes are not, and keep the job done
                 job.report["export_error"] = str(exc)
                 job.messages += [f"warning: export failed: {exc}", f"done: {summary}"]
@@ -1044,7 +1046,8 @@ class App:
                                                                  if vis.pages_rejected else ""))
                 if export:
                     out, count = export_markdown(c, self.paths, project, pid, only=only, paper_ids=paper_ids,
-                                                 config=self.config, all_versions=body.get("all_versions") is True)
+                                                 config=self.config, all_versions=body.get("all_versions") is True,
+                                                 obsidian=body.get("obsidian") is True)
                     job.messages.append(f"done: exported {count} papers to {out}")
             finally:
                 c.close()
@@ -1211,6 +1214,9 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     return self._json(mineru_status(app.paths, app.config.parsing))
                 if path == "/api/tools":
                     return self._json(app.optional_tools_status())
+                if path.startswith("/api/review/"):
+                    result = review_routes.get(app, conn, path, query)
+                    return self._json(*result) if isinstance(result, tuple) else self._json(result)
                 if path.startswith("/api/write/"):
                     result = writing_routes.get(app, conn, path, query)
                     if isinstance(result, tuple):
@@ -1330,6 +1336,13 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                     body = self._body()
                 except BodyTooLarge as exc:
                     return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, str(exc))
+                if url.path.startswith("/api/review/"):
+                    conn = app.db()
+                    try:
+                        result = review_routes.post(app, conn, url.path, body)
+                        return self._json(*result) if isinstance(result, tuple) else self._json(result)
+                    finally:
+                        conn.close()
                 if url.path.startswith("/api/write/"):
                     return self._write_post(url.path, body)
                 if m := re.fullmatch(r"/api/jobs/(\w+)/stop", url.path):
@@ -1538,7 +1551,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                         pid = app.ensure_project(conn, body["project"], body.get("export_dir"))
                         out, count = export_markdown(conn, app.paths, body["project"], pid, config=app.config,
                                                      only=body.get("only", "all"), paper_ids=body.get("paper_ids"),
-                                                     all_versions=bool(body.get("all_versions", False)))
+                                                     all_versions=bool(body.get("all_versions", False)),
+                                                     obsidian=body.get("obsidian") is True)
                     finally:
                         conn.close()
                     return self._json({"path": str(out), "papers": count})

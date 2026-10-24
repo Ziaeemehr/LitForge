@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
+from litforge.analysis.gateway import ModelGateway
 from litforge.screening.criteria import Criteria, criteria_hash
 from litforge.screening.decide import decide, failed_decision
+from litforge.screening.llm import FakeLlm
 from litforge.screening.prompt import PROMPT_VERSION, build_messages, fingerprint, response_schema
 
 ABSTRACT = "We fit a Jansen-Rit neural mass model to EEG recordings with simulation-based inference."
@@ -128,3 +132,128 @@ def test_verified_title_quote_does_not_override_missing_abstract() -> None:
     answer = raw(exc=("violated",))
     answer["exclusion"][0]["evidence"] = "Title"
     assert decide(answer, C, "Title", None).decision == "uncertain"
+
+
+@pytest.fixture()
+def borderline_library(conn: sqlite3.Connection) -> tuple[ModelGateway, FakeLlm]:
+    from lens_fakes import gateway, seed
+
+    from litforge.screening.criteria import save_criteria
+
+    for paper, decision, score in [
+        ("a", "exclude", 0.2), ("b", "uncertain", 0.3), ("c", "include", 0.55),
+        ("d", "include", 0.9), ("e", "uncertain", 0.5),
+    ]:
+        seed(conn, paper)
+        conn.execute(
+            "INSERT INTO screening_results(project_id,paper_id,decision,score,result_json,model,"
+            "prompt_version,criteria_hash,fingerprint,screened_at) VALUES ('proj',?,?,?,'{}','fake','v','h','f','now')",
+            (paper, decision, score),
+        )
+    seed(conn, "unscreened")
+    conn.execute("INSERT INTO paper_marks VALUES ('proj','e','irrelevant','now')")
+    save_criteria(conn, "proj", Criteria(question="gain"))
+    return gateway(conn, {"relevance": 3, "inclusion": [], "exclusion": [], "reason": "ok"})
+
+
+def test_fulltext_borderline_selects_uncertain_and_mid_scores(
+    conn: sqlite3.Connection, borderline_library: tuple[ModelGateway, FakeLlm]
+) -> None:
+    from litforge.screening.fulltext import screen_fulltext
+
+    gw, _ = borderline_library
+    result = screen_fulltext(conn, gw, "proj", only="borderline")
+    assert result.screened == 2
+    assert {r[0] for r in conn.execute("SELECT paper_id FROM fulltext_screening")} == {"b", "c"}
+    assert conn.execute("SELECT mark FROM paper_marks WHERE paper_id='e'").fetchone()[0] == "irrelevant"
+
+
+def test_fulltext_borderline_preview_counts_match_run(
+    conn: sqlite3.Connection, borderline_library: tuple[ModelGateway, FakeLlm]
+) -> None:
+    from litforge.screening.fulltext import plan_calls, screen_fulltext
+
+    gw, fake = borderline_library
+    assert len(plan_calls(conn, gw, "proj", only="borderline")) == 2
+    assert fake.calls == 0
+    assert screen_fulltext(conn, gw, "proj", only="borderline").screened == 2
+    assert fake.calls == 2
+    assert plan_calls(conn, gw, "proj", only="borderline") == []
+    assert screen_fulltext(conn, gw, "proj", only="borderline").cached == 2
+
+
+def test_fulltext_borderline_explicit_paper_ids_ignore_filter(
+    conn: sqlite3.Connection, borderline_library: tuple[ModelGateway, FakeLlm]
+) -> None:
+    from litforge.screening.fulltext import screen_fulltext
+
+    gw, _ = borderline_library
+    assert screen_fulltext(conn, gw, "proj", only="borderline", paper_ids=["a", "e"]).screened == 2
+    assert {r[0] for r in conn.execute("SELECT paper_id FROM fulltext_screening")} == {"a", "e"}
+    assert conn.execute("SELECT mark FROM paper_marks WHERE paper_id='e'").fetchone()[0] == "irrelevant"
+
+
+def test_fulltext_borderline_top_limits_filtered_set(
+    conn: sqlite3.Connection, borderline_library: tuple[ModelGateway, FakeLlm]
+) -> None:
+    from litforge.screening.fulltext import plan_calls, screen_fulltext
+
+    gw, _ = borderline_library
+    assert len(plan_calls(conn, gw, "proj", only="borderline", top=1)) == 1
+    assert screen_fulltext(conn, gw, "proj", only="borderline", top=1).screened == 1
+    assert [r[0] for r in conn.execute("SELECT paper_id FROM fulltext_screening")] == ["b"]
+
+
+def test_fulltext_borderline_recorded_in_start_run_input(
+    conn: sqlite3.Connection, borderline_library: tuple[ModelGateway, FakeLlm]
+) -> None:
+    from litforge.analysis.runs import input_hash
+    from litforge.screening.fulltext import screen_fulltext
+
+    gw, _ = borderline_library
+    result = screen_fulltext(conn, gw, "proj", only="borderline")
+    row = conn.execute("SELECT input_hash FROM analysis_runs WHERE id=?", (result.run_id,)).fetchone()
+    assert row[0] == input_hash({"top": None, "paper_ids": None, "only": "borderline"})
+
+
+def test_fulltext_borderline_custom_band(
+    conn: sqlite3.Connection, borderline_library: tuple[ModelGateway, FakeLlm]
+) -> None:
+    from litforge.screening.fulltext import screen_fulltext
+
+    gw, _ = borderline_library
+    screen_fulltext(conn, gw, "proj", only="borderline", band=(0.7, 1.0))
+    assert {r[0] for r in conn.execute("SELECT paper_id FROM fulltext_screening")} == {"b", "d"}
+
+
+@pytest.mark.parametrize("band", [(-0.1, 0.7), (0.4, 1.1), (0.7, 0.4), (0.5, 0.5)])
+def test_borderline_config_rejects_invalid_band(band: tuple[float, float]) -> None:
+    from litforge.config import ScreeningConfig
+
+    with pytest.raises(ValueError, match="borderline"):
+        ScreeningConfig(borderline=band)
+
+
+def test_fulltext_borderline_api_preview_uses_configured_band(
+    conn: sqlite3.Connection, borderline_library: tuple[ModelGateway, FakeLlm]
+) -> None:
+    from litforge.ui.api import LensRequest, lens_plan
+
+    gw, _ = borderline_library
+    gw.config.screening.borderline = (0.85, 0.95)
+    request = LensRequest(task="screen_fulltext", project="demo", only="borderline")
+    assert lens_plan(conn, gw, request)["number_of_calls"] == 2
+    with pytest.raises(ValueError):
+        LensRequest(task="screen_fulltext", project="demo", only="invalid")
+
+
+def test_fulltext_borderline_band_includes_low_excludes_high(
+    conn: sqlite3.Connection, borderline_library: tuple[ModelGateway, FakeLlm]
+) -> None:
+    from litforge.screening.fulltext import screen_fulltext
+
+    gw, _ = borderline_library
+    conn.execute("UPDATE screening_results SET score=0.4 WHERE paper_id='a'")
+    conn.execute("UPDATE screening_results SET score=0.7 WHERE paper_id='d'")
+    screen_fulltext(conn, gw, "proj", only="borderline")
+    assert {r[0] for r in conn.execute("SELECT paper_id FROM fulltext_screening")} == {"a", "b", "c"}

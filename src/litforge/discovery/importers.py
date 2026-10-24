@@ -16,7 +16,13 @@ _LATEX_CMDS = re.compile(r"\\[a-zA-Z]+\s*|[{}]")
 
 
 def _clean_tex(value: str) -> str:
-    return re.sub(r"\s+", " ", _LATEX_CMDS.sub("", value)).strip()
+    literals = {r"\textbraceleft{}": "\ue000", r"\textbraceright{}": "\ue001",
+                r"\textbackslash{}": "\ue002", r"\textasciitilde{}": "~", r"\textasciicircum{}": "^"}
+    for command, literal in literals.items():
+        value = value.replace(command, literal)
+    value = re.sub(r"\\([&%$#_])", r"\1", value)
+    value = re.sub(r"\s+", " ", _LATEX_CMDS.sub("", value)).strip()
+    return value.replace("\ue000", "{").replace("\ue001", "}").replace("\ue002", "\\")
 
 
 def _year(value: str | None) -> int | None:
