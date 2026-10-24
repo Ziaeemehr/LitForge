@@ -11,6 +11,13 @@ Run the same command again to update.
 LitForge goes to `~/LitForge` (Windows: `%USERPROFILE%\LitForge`); set `LITFORGE_DIR` to choose another
 folder. Already cloned it? Run `sh install.sh` (or `.\install.ps1`) inside the clone instead.
 
+## Updates
+
+Before upgrading an existing library schema, LitForge saves a database backup in
+`data/library/backups` (or `library/backups` inside your custom data folder), keeping the five newest
+automatic backups. An older LitForge refuses to open a newer library; update LitForge or restore
+a compatible backup with LitForge closed.
+
 ## Open and stop
 
 | System | The icon |

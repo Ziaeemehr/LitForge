@@ -988,6 +988,11 @@ Conservative choices where Phase 3 leaves details open:
 
 ## Update notices
 
+Before upgrading an existing library schema, LitForge saves a database backup in
+`data/library/backups` (or `library/backups` inside your custom data folder), keeping the five newest
+automatic backups. An older LitForge refuses to open a newer library; update LitForge or restore
+a compatible backup with LitForge closed.
+
 **Settings → Updates** checks whether the imported LitForge installation is behind `origin/main`.
 Automatic checks are enabled by default and run at most once every 24 hours while the UI is open.
 The check contacts GitHub using `git fetch` (or the checkout's configured `origin` remote).

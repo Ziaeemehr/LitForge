@@ -127,6 +127,13 @@ def run_checks(paths: Paths, config: Config | None = None) -> list[Check]:
     conn = connect(paths.db)
     current, latest = schema_version(conn), latest_version()
     conn.close()
+    if current > latest:
+        checks.append(Check(
+            name="database", level="error",
+            detail=f"schema v{current} is newer than this LitForge (v{latest}); "
+                   f"update LitForge or restore a backup from {paths.db.parent / 'backups'}",
+        ))
+        return checks
     checks.append(Check(
         name="database", level="ok" if current == latest else "warn",
         detail=f"schema v{current} (latest v{latest})" + ("" if current == latest else "; run any command to migrate"),
