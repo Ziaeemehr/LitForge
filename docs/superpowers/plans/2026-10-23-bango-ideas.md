@@ -341,6 +341,14 @@ Steps:
 - **Zotero:** reading works against a real Zotero 7.
 - **Translation:** an English Ask question finds a Persian paper through its translation.
 
+## Documentation after the plan
+
+Run this after the last task of this plan lands. Docs audit of 2026-10-24 found these still to do:
+
+- [ ] **`docs/Guide_Fa.md`.** The status line in section 0 says full-text screening and deep analysis are planned; both now exist. Bring the status in line with the code and update the version and date in its header.
+- [ ] **`README.md` features.** Add the systematic-review features (full-text screening, PRISMA report, RIS/BibTeX export, search strings) and those of Milestone B to the English and Persian feature lists.
+- [ ] **`docs/guide.md` and `docs/cli.md`.** Check the "Status and limitations" section of the guide and the CLI reference against the features this plan added.
+
 ## Verification for every task
 
 - **Tests:** before each commit, run `uv run pytest`, `uv run ruff check .`, `uv run mypy` and `node --test tests/ui/`. Before starting, record a baseline so pre-existing failures are not attributed to this work.

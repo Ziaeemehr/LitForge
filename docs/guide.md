@@ -28,7 +28,7 @@ uv run litforge export
 - `ask "your question" --evidence-only` retrieves evidence cards with stable IDs, section and page.
   It stores full chunk snapshots and an analysis run; reindexing preserves the evidence. Add `--json`
   for the run ID and spans, `-k 8` to set the number of cards, or `-p NAME` to choose a project.
-  Model-written answers arrive in phase 1.
+  Without `--evidence-only`, a model writes a cited answer and an audit checks it (`--no-audit` skips the audit).
 - `export` writes Markdown notes to `~/Downloads/LitForge/my-review/markdown/` and each paper's PDF under a readable name to `~/Downloads/LitForge/my-review/pdfs/` (set `LITFORGE_EXPORT_ROOT` to change the base folder, or pick a folder per project in the web UI); `--only relevant` keeps just the papers marked ✓ (`--only not-irrelevant` drops the ✗ ones).
 
 For an Obsidian vault, run `uv run litforge export --obsidian` (or select **Obsidian links** in the export header). Notes gain `litforge/<status>` tags and title aliases; the README and related notes use `[[slug]]` links. Related notes cite each other or share at least three references, and links stay within the exported selection. Add `--json` to print the export path and paper count as JSON. Without `--obsidian`, the Markdown export stays unchanged.
@@ -556,12 +556,15 @@ Write view says "partial sandbox" then, so compile only documents you trust.
 
 ## Where things are stored
 
-All data lives in `./data` (git-ignored). Use `--data-dir PATH` or `LITFORGE_HOME=PATH` to move it.
+All data lives in `data/` inside the library folder chosen at install time (`litforge library set` changes
+it, `litforge library show` reports it). CLI commands use `--data-dir PATH` first, then `LITFORGE_HOME=PATH`,
+then a checkout's existing `./data`, then the saved library; see [install.md](install.md).
 
 ```text
 data/
 ├── library/              shared by all projects
 │   ├── papers.sqlite     metadata, sections, search index
+│   ├── backups/          database backups made before schema upgrades
 │   ├── pdfs/             original PDFs, named by SHA256
 │   └── parsed/           per-PDF output: canonical.json, paper.md, assets/
 └── projects/<name>/      project settings
@@ -698,9 +701,10 @@ To keep the virtual environment outside the repository, set `UV_PROJECT_ENVIRONM
 
 ## Status and limitations
 
-Implemented: import, parsing, search, Markdown export, paper discovery (OpenAlex,
-Crossref, arXiv, citation chaining, reference-list import) and title/abstract screening with a
-local model. Planned: full-text screening and deep analysis of selected papers.
+Implemented: import of PDFs, other documents and links, parsing, search, Markdown and Obsidian
+export, paper discovery (OpenAlex, Crossref, arXiv, citation chaining, reference-list import),
+title/abstract and full-text screening, cited answers, study matrices, claims, figure and gap
+analysis, living reviews, PRISMA reports, RIS/BibTeX export and search strings for databases.
 
 Known limitations of the fast parser:
 
