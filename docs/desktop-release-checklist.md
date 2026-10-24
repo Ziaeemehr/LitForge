@@ -248,5 +248,6 @@ window reference stays private.
 - **Round 1:** review found the bridge and smoke check correct. Local Cocoa smoke passed (`folder_bridge` true). The
   handler used the file's only `async/await`.
 - **Round 2:** rewritten as a `.then()` chain like the rest of app.js; 266 UI tests passed.
-- **Round 3:** full pytest 2146 passed, 3 skipped; 266 UI tests; Ruff; mypy; local Cocoa smoke passed. Native CI run:
-  see below. Clicking through the native folder dialog is a manual check for the user.
+- **Round 3:** full pytest 2146 passed, 3 skipped; 266 UI tests; Ruff; mypy; local Cocoa smoke passed. Native CI:
+  [run 40070137806](https://github.com/Ziaeemehr/LitForge/actions/runs/40070137806) passed all five jobs (GTK, WebView2,
+  Intel and ARM Cocoa with `folder_bridge` on each, full Linux suite). Clicking through the native folder dialog is a manual check for the user.
