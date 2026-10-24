@@ -25,7 +25,7 @@ function setup() {
   class DOMParser { parseFromString() { return { documentElement: svg, querySelector: () => null }; } }
   const ctx = vm.createContext({ $, state: { project: 'Review' }, DOMParser, store: { get: () => false, set() {} },
     document: { createElement(tag) { created.push(tag); return new Element(tag); }, importNode: node => node },
-    api: async url => { calls.push([url]); return { counts: { identified_by_source: { openalex: 59 }, identified_other: {}, screened: 0, included: 3, uncertain: 2 }, svg: '<svg/>' }; },
+    api: async url => { calls.push([url]); return { counts: { identified_by_source: { openalex: 59 }, identified_other: {}, screened: 0, included_at_s1: 2, included: 3, uncertain: 2 }, svg: '<svg/>' }; },
     post: async (url, body) => { calls.push([url, body]); return { path: '/exports/Review/prisma.svg' }; },
     toast: message => { throw Error(message); } });
   vm.runInContext(source, ctx);
@@ -37,6 +37,7 @@ test('panel renders counts and saves on the server without a download anchor', a
   ctx.wireReviewReport();
   await ctx.loadReviewReport();
   assert.match($('review-counts').textContent, /Included: 3/);
+  assert.match($('review-counts').textContent.split('\n')[2], /Included at S1 without full-text review: 2/);
   assert.equal($('review-summary').textContent, '59 records · 0 screened · 3 included');
   assert.equal($('review-counts').textContent.split('\n').length, 4);
   assert.match($('review-counts').textContent, /uncertain: 2/);

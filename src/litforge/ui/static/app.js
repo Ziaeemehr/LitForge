@@ -244,7 +244,7 @@
         'Identification: ' + records + ' records · ' + (c.duplicates_removed || 0) + ' duplicates removed',
         'Screening: ' + c.screened + ' screened · ' + (c.excluded_s1 || 0) + ' excluded · ' + (c.awaiting_screening || 0) + ' awaiting screening',
         'Eligibility / Retrieval: ' + (c.sought || 0) + ' sought · ' + (c.not_retrieved || 0) + ' not retrieved · ' +
-          (c.assessed || 0) + ' assessed · ' + total(c.excluded_s2_by_reason) + ' excluded · ' + (c.awaiting_fulltext || 0) + ' awaiting full text',
+          (c.assessed || 0) + ' assessed · ' + total(c.excluded_s2_by_reason) + ' excluded · ' + (c.awaiting_fulltext || 0) + ' awaiting full text · Included at S1 without full-text review: ' + (c.included_at_s1 || 0),
         'Included: ' + c.included + ' · uncertain: ' + c.uncertain
       ].join('\n');
       $('review-svg').replaceChildren(sanitiseReviewSvg(r.svg));

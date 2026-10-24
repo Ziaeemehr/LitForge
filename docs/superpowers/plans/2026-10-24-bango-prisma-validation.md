@@ -144,3 +144,18 @@ Final statuses per paper are identical. Only the stage differs for the four conf
 - **Round 2:** Codex added the title. 280 UI tests passed.
 - **Round 3:** stability. Repeating the borderline run cached all 5 papers (0 calls). Full pytest 2213 passed,
   3 skipped; 280 UI tests; Ruff; mypy.
+
+# Milestone A acceptance
+
+| Check | Result |
+|---|---|
+| PRISMA numbers match a hand count | Done on three real workspaces after one fix (below). Borderline sbi10: 9 sought = 5 assessed + 4 included at S1; 1 + 1 exclusions; 4 included, 4 uncertain. All-mode sbi10: 10 sought = 10 assessed. 59-paper library copy: 25 sought = 20 included at S1 + 5 not retrieved. |
+| A borderline S2 run costs fewer calls than the same `--top` | Done: 5 instead of 10 on sbi10 with qwen3:4b, gold recall unchanged. |
+| The RIS file imports into Zotero | Not done: it would write into the user's real Zotero library. RIS read-back through LitForge's own importer matched all 10 sbi10 papers. |
+| The export folder opens as an Obsidian vault with working links | Partly: 93 wiki links, 0 broken, checked by script; not opened in Obsidian by hand. |
+
+**Hand-count fix.** Confident S1 includes, whose S2 was skipped in borderline mode, were counted both as "awaiting full
+text" and as "included". Codex added `included_at_s1` and took those papers out of `awaiting_fulltext` and
+`not_retrieved`. New invariant: sought = assessed + awaiting full text + not retrieved + included at S1. Shown in the
+SVG and the panel. Papers added from the user's own PDFs now read "own files" instead of the run kind "pdfs".
+Checks: 2224 passed, 3 skipped; 280 UI tests; Ruff; mypy.

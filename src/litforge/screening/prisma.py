@@ -29,6 +29,7 @@ class Prisma(BaseModel):
     sought: int
     not_retrieved: int
     assessed: int
+    included_at_s1: int
     excluded_s2_by_reason: dict[str, int]
     included: int
     uncertain: int
@@ -59,6 +60,7 @@ def prisma_counts(conn: sqlite3.Connection, project_id: str) -> Prisma:
             key = "citations"
         else:
             key = "similar" if relation in {"related", "keywords", "neighbours"} else kind
+            key = {"pdfs": "own files"}.get(key, key.replace("_", " ").replace("-", " "))
         record = (key, h["paper_id"])
         seen.add(h["paper_id"])
         if record not in records:
@@ -71,6 +73,9 @@ def prisma_counts(conn: sqlite3.Connection, project_id: str) -> Prisma:
     sought = {pid for pid, s in statuses.items() if s.stage != "none" and
               not (s.status == "excluded" and s.stage == "S1")}
     assessed = {pid for pid in sought if statuses[pid].stage == "S2"}
+    included_at_s1 = {pid for pid in sought - assessed
+                      if statuses[pid].status == "included" and statuses[pid].stage == "S1"}
+    pending = sought - assessed - included_at_s1
     parsed = set(paper_runs(conn, project_id))
     return Prisma(
         identified_by_source=dict(sorted(databases.items())), identified_other=dict(sorted(other.items())),
@@ -78,8 +83,9 @@ def prisma_counts(conn: sqlite3.Connection, project_id: str) -> Prisma:
         screened=sum(s.stage != "none" for s in statuses.values()),
         awaiting_screening=sum(s.stage == "none" for s in statuses.values()),
         excluded_s1=sum(s.status == "excluded" and s.stage == "S1" for s in statuses.values()),
-        sought=len(sought), assessed=len(assessed), not_retrieved=len(sought - assessed - parsed),
-        awaiting_fulltext=len((sought - assessed) & parsed),
+        sought=len(sought), assessed=len(assessed), not_retrieved=len(pending - parsed),
+        included_at_s1=len(included_at_s1),
+        awaiting_fulltext=len(pending & parsed),
         excluded_s2_by_reason=dict(sorted(Counter(s.reason for s in statuses.values()
                                                   if s.status == "excluded" and s.stage == "S2").items())),
         included=sum(s.status == "included" for s in statuses.values()),
@@ -106,7 +112,8 @@ def prisma_svg(p: Prisma, title: str) -> str:
          [f"Excluded at S1: {p.excluded_s1}"]),
         ("Eligibility / Retrieval", [f"Reports sought: {p.sought}", f"Reports assessed: {p.assessed}",
                                      f"Awaiting full text: {p.awaiting_fulltext}"],
-         [f"Not retrieved: {p.not_retrieved}", "Excluded at S2: " + str(sum(p.excluded_s2_by_reason.values()))] +
+         [f"Included at S1 without full-text review: {p.included_at_s1}",
+          f"Not retrieved: {p.not_retrieved}", "Excluded at S2: " + str(sum(p.excluded_s2_by_reason.values()))] +
          [f"{k}: {v}" for k, v in p.excluded_s2_by_reason.items()]),
         ("Included", [f"Included: {p.included}"], [f"Uncertain (all stages): {p.uncertain}"]),
     ]

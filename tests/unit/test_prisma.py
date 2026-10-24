@@ -1,6 +1,7 @@
 """PRISMA provenance, retrieval conservation and safe SVG output."""
 import xml.etree.ElementTree as ET
 
+import pytest
 from test_screening_status import mark, paper, project, result, versions
 
 from litforge.discovery.versions import primary_paper_ids
@@ -30,7 +31,7 @@ def invariant(conn, p):
     assert sum(p.identified_by_source.values()) + sum(p.identified_other.values()) - p.duplicates_removed == len(
         primary_paper_ids(conn, "p"))
     assert p.screened + p.awaiting_screening == len(primary_paper_ids(conn, "p"))
-    assert p.sought - p.not_retrieved == p.assessed + p.awaiting_fulltext
+    assert p.sought == p.assessed + p.awaiting_fulltext + p.not_retrieved + p.included_at_s1
 
 
 def parsed(conn, pid, current=1):
@@ -80,7 +81,7 @@ def test_linked_versions_count_one_primary(conn):
 def test_retrieval_final_totals_and_reasons(conn):
     seed(conn)
     result(conn, "0", "exclude")
-    result(conn, "1", "include")  # sought, missing
+    result(conn, "1", "include")  # final S1 include, no full-text review
     result(conn, "2", "uncertain")
     parsed(conn, "2")  # awaiting full text
     result(conn, "3", "include", "S2")
@@ -92,7 +93,7 @@ def test_retrieval_final_totals_and_reasons(conn):
     parsed(conn, "6", current=0)
     p = prisma_counts(conn, "p")
     assert (p.screened, p.awaiting_screening, p.excluded_s1, p.sought) == (7, 1, 1, 6)
-    assert (p.assessed, p.not_retrieved, p.awaiting_fulltext, p.included, p.uncertain) == (3, 2, 1, 2, 2)
+    assert (p.assessed, p.not_retrieved, p.awaiting_fulltext, p.included, p.uncertain) == (3, 1, 1, 2, 2)
     assert sum(p.excluded_s2_by_reason.values()) == 2
     assert p.excluded_s2_by_reason["excluded by reviewer"] == 1
     invariant(conn, p)
@@ -105,3 +106,41 @@ def test_retrieval_final_totals_and_reasons(conn):
             assert str(count) in text
     assert not any(el.tag.endswith(("script", "foreignObject")) for el in root.iter())
     assert not any("href" in key or key.startswith("on") for el in root.iter() for key in el.attrib)
+
+
+@pytest.mark.parametrize("has_parse", [False, True])
+def test_confident_s1_include_is_not_waiting_for_fulltext(conn, has_parse):
+    project(conn)
+    paper(conn, "confident")
+    result(conn, "confident", "include")
+    conn.execute("UPDATE screening_results SET score=0.99 WHERE paper_id='confident'")
+    if has_parse:
+        parsed(conn, "confident")
+    p = prisma_counts(conn, "p")
+    assert (p.sought, p.assessed, p.included_at_s1, p.included) == (1, 0, 1, 1)
+    assert (p.awaiting_fulltext, p.not_retrieved) == (0, 0)
+    invariant(conn, p)
+    text = " ".join(ET.fromstring(prisma_svg(p, "Review")).itertext())
+    assert "Included at S1 without full-text review: 1" in text
+
+
+@pytest.mark.parametrize("kind,key", [
+    ("pdfs", "own files"), ("links", "links"), ("similar", "similar"),
+    ("citations", "citations"), ("manual_upload", "manual upload"),
+    ("file-import", "file import"),
+])
+def test_other_method_names_are_readable(conn, kind, key):
+    project(conn)
+    paper(conn, "a")
+    hit(conn, "a", source="local", relation="file", kind=kind)
+    p = prisma_counts(conn, "p")
+    assert p.identified_other == {key: 1}
+    invariant(conn, p)
+
+
+@pytest.mark.parametrize("source", ["openalex", "crossref", "arxiv"])
+def test_database_names_stay_stable(conn, source):
+    project(conn)
+    paper(conn, "a")
+    hit(conn, "a", source=source)
+    assert prisma_counts(conn, "p").identified_by_source == {source: 1}

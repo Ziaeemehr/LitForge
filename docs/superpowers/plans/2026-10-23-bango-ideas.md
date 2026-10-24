@@ -207,7 +207,7 @@ Steps:
 - [x] **Write the failing tests.** Write `test_obsidian_links_only_to_exported_notes` (a cited paper outside the selection gives no link), `test_obsidian_off_output_unchanged` (byte-identical to the current export for a fixture project) and `test_status_tag_in_front_matter`.
 - [x] **Confirm, implement, pass and commit.** Run `uv run pytest tests/unit/test_export_obsidian.py -v` and confirm it fails. Implement, run until it passes, then commit.
 
-**Milestone A acceptance:** On a real project, the PRISMA numbers match a hand count from the review queue; a borderline S2 run costs fewer calls than the same `--top`; the RIS file imports into Zotero; the export folder opens as an Obsidian vault with working links.
+**Milestone A acceptance** ([record](2026-10-24-bango-prisma-validation.md#milestone-a-acceptance): PRISMA hand count and borderline savings done; Zotero import and opening the vault in Obsidian are left for the user): On a real project, the PRISMA numbers match a hand count from the review queue; a borderline S2 run costs fewer calls than the same `--top`; the RIS file imports into Zotero; the export folder opens as an Obsidian vault with working links.
 
 ## Milestone B: Evidence and integrations (package 2)
 
