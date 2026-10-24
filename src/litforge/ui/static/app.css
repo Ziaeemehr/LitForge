@@ -839,3 +839,12 @@ kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; 
 .mode-card input { grid-row: span 2; margin-top: 3px; }
 .mode-card span { color: var(--muted); font-size: 12px; line-height: 1.35; }
 .mode-card:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+
+#search-strategy { margin-top: 14px; padding: 12px; }
+#strategy-databases { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; }
+#search-strategy textarea { margin: 6px 0; }
+#search-strategy [id$="-row"] { margin-top: 12px; }
+
+#strategy-databases { border: 0; padding: 0; margin: 0 0 10px; display: flex; flex-wrap: wrap; gap: 6px 12px; }
+#strategy-databases legend { padding: 0; margin: 10px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+#strategy-databases .check { margin: 0; font-size: 12px; white-space: nowrap; }

@@ -115,6 +115,91 @@
   }
   /* ---------- End reference exports ---------- */
 
+  /* ---------- Search strings ---------- */
+  var strategyDatabases = ['pubmed', 'scopus', 'wos', 'arxiv', 'openalex'];
+  var strategyResult = null, strategyProject = null, strategyRequest = 0;
+
+  function selectedStrategyDatabases() {
+    return Array.prototype.map.call(document.querySelectorAll('input[name=strategy-db]:checked'), function (c) { return c.value; });
+  }
+  function renderSearchStrategy(result, project) {
+    if (project !== state.project) return;
+    strategyResult = result; strategyProject = project;
+    strategyDatabases.forEach(function (db) {
+      $('strategy-' + db + '-row').hidden = !result.queries[db];
+      $('strategy-' + db).value = result.queries[db] || '';
+    });
+    $('strategy-status').textContent = (result.warnings || []).join(' · ');
+  }
+  function strategyApproval(plan) {
+    return confirmLensPreview({ profiles: [plan.profile], providers: [plan.provider], models: [plan.model],
+      number_of_calls: 1, evidence_ids_count: (plan.evidence_ids || []).length,
+      estimated_input_tokens: plan.estimated_input_tokens, max_cost_usd: plan.max_cost_usd,
+      remote: plan.remote, requires_approval: plan.requires_approval, model_notices: [] }, false);
+  }
+  async function loadSearchStrategy() {
+    var project = state.project, request = ++strategyRequest;
+    strategyResult = null; strategyProject = null;
+    strategyDatabases.forEach(function (db) { $('strategy-' + db + '-row').hidden = true; });
+    if (!project) return;
+    try {
+      var result = await api('/api/review/strategy?project=' + encodeURIComponent(project) +
+        '&db=' + encodeURIComponent(selectedStrategyDatabases().join(',')));
+      if (request === strategyRequest) renderSearchStrategy(result, project);
+    } catch (e) {
+      if (project === state.project && request === strategyRequest)
+        $('strategy-status').textContent = e.preview ? 'Build search strings from these criteria.' : e.message;
+    }
+  }
+  function searchStrategyCriteriaSaved() {
+    return loadSearchStrategy();
+  }
+  function wireSearchStrategy() {
+    strategyDatabases.forEach(function (db) {
+      $('strategy-' + db + '-copy').onclick = async function () {
+        var field = $('strategy-' + db);
+        try {
+          await navigator.clipboard.writeText(field.value);
+          toast('Copied');
+        } catch (_) {
+          field.focus(); field.select(); toast('Select and copy the search string manually.');
+        }
+      };
+    });
+    $('strategy-databases').onchange = loadSearchStrategy;
+    $('strategy-build').onclick = async function () {
+      if (!state.project || state.criteriaFor !== state.project) return;
+      var project = state.project;
+      $('strategy-build').disabled = true;
+      try {
+        await saveCriteria();
+        if (project !== state.project) return;
+        var request = ++strategyRequest;
+        var body = { project: project, databases: selectedStrategyDatabases(), approved: false };
+        var result;
+        try { result = await post('/api/review/strategy', body); }
+        catch (e) {
+          if (!e.preview || e.preview.blocked_reason || !e.preview.requires_approval) throw e;
+          if (!await strategyApproval(e.preview) || project !== state.project || request !== strategyRequest) return;
+          body.approved = true;
+          result = await post('/api/review/strategy', body);
+        }
+        if (request === strategyRequest) renderSearchStrategy(result, project);
+      } catch (e) { if (project === state.project) toast(e.message); }
+      finally { $('strategy-build').disabled = false; }
+    };
+    $('strategy-search').onclick = async function () {
+      if (!strategyResult || strategyProject !== state.project) return;
+      setBusy(true);
+      try {
+        var job = await post('/api/search', Object.assign(common(), { project: strategyProject,
+          queries: strategyResult.openalex_queries, sources: ['openalex'] }));
+        poll(job);
+      } catch (e) { setBusy(false); toast(e.message); }
+    };
+  }
+  /* ---------- End search strings ---------- */
+
   /* ---------- Review report ---------- */
   function sanitiseReviewSvg(text) {
     var parsed = new DOMParser().parseFromString(text, 'image/svg+xml');
@@ -661,6 +746,7 @@
       state.criteria = null;  // a different project: replace the form's text
       showCriteria(c);
       criteriaReady(true);
+      loadSearchStrategy();
     }).catch(function (e) { toast(e.message); }).then(function () {
       if (state.criteriaLoading === project) state.criteriaLoading = null;
     });
@@ -694,9 +780,10 @@
     var project = state.project;
     return post('/api/criteria', { project: project, question: $('crit-question').value,
       include: $('crit-include').value, exclude: $('crit-exclude').value }).then(function (c) {
+      if (project !== state.project) return c;
       state.criteriaFor = project;
       showCriteria(c);
-      return c;
+      return searchStrategyCriteriaSaved().then(function () { return c; });
     });
   }
 
@@ -4784,7 +4871,8 @@
     gap_design: 'Design research gaps', console_plan: 'Plan console workflows', page_rewrite: 'Rewrite pages',
     write_fix: 'Write: fix errors', write_rewrite: 'Write: rewrite and translate', write_cite: 'Write: suggest citations',
     write_chat: 'Write: assistant', write_summary: 'Write: title and abstract', write_image: 'Write: LaTeX from an image',
-    query_translate: 'Translate Persian questions for search'
+    query_translate: 'Translate Persian questions for search',
+    search_strategy: 'Build database search strings'
   };
   function taskLabel(task) { return modelTaskLabels[task] || task.replace(/_/g, ' '); }
 
@@ -5081,7 +5169,7 @@
   }
   var TASK_GROUPS = [
     ['Library and analysis', ['ask', 'audit', 'matrix_extract', 'claim_extract', 'claim_relation', 'asset_analyze',
-      'equation_compare', 'gap_design', 'console_plan', 'page_rewrite', 'query_translate']],
+      'equation_compare', 'gap_design', 'console_plan', 'page_rewrite', 'query_translate', 'search_strategy']],
     ['Screening', ['screen', 'screen_fulltext']],
     ['Writing', ['write_fix', 'write_rewrite', 'write_cite', 'write_chat', 'write_summary', 'write_image']]];
 
@@ -6386,6 +6474,7 @@
     $('toast-folder').onclick = function () { if (toastAction) return toastAction(); };
     wireReferenceExports();
     wireReviewReport();
+    wireSearchStrategy();
     $('screen-panel').open = store.get('screen-open', false);
     $('screen-panel').ontoggle = function () { store.set('screen-open', this.open); };
     $('btn-help').onclick = openGuide;

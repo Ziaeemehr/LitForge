@@ -95,3 +95,25 @@ used to ignore. A fixture keeps the default export byte-identical.
 - **Round 3:** full pytest 2173 passed, 3 skipped; 271 UI tests; Ruff; mypy. The real export again gave 59 notes and
   93 links, 0 broken.
 - **Not done:** opening the folder as an Obsidian vault by hand (the Milestone A acceptance check).
+
+# Task 3 (Search-string builder)
+
+Codex added `analysis/search_strategy.py`. The model (task `search_strategy`, local by default) returns concepts
+only. PubMed, Scopus, Web of Science, arXiv and OpenAlex strings are assembled deterministically from `SYNTAX` and
+checked by `validate_query`. Results are cached in `analysis_runs`, keyed by criteria hash and database set. Adds the
+CLI `litforge strategy`, `GET/POST /api/review/strategy`, and a "Search strings" card in the AI screening panel with
+Copy and "Search with it" (at most 6 plain OpenAlex queries through the existing search).
+
+- **Round 1:** full pytest 2186 passed, 3 skipped; 277 UI tests; Ruff; mypy. Real model run (qwen3:4b, sbi10
+  criteria, 3 attempts): same concepts every time, all five strings valid. Review probes found three cleaner defects:
+  apostrophes removed ("Parkinson's disease" → "Parkinson s disease"); any word before a colon deleted
+  ("COVID-19: severe cases" → "severe cases"); and one concept with fewer than 3 usable synonyms aborting the build.
+- **Round 2:** Codex fixed all three test-first. Apostrophes are kept and quoted, only known field-tag prefixes are
+  removed, and a weak concept is dropped with a warning (fewer than 2 concepts still fails). Probes confirmed
+  `validate_query` finds no problems.
+- **Round 3:** a real-browser check with a real Build through the UI filled the PubMed, Scopus and OpenAlex strings.
+  Defect: the databases showed internal ids ("pubmed", "wos") and a heavy default fieldset. Codex switched to proper
+  names and compact styling. A reload showed the cached strings without a model call. Final: 2201 passed,
+  3 skipped; 278 UI tests; Ruff; mypy.
+- **Observation:** with qwen3:4b the concepts are usable but wordy ("neural network methods", "simulator calibration
+  parameters"). Review the strings before using them in a database.

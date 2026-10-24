@@ -138,6 +138,8 @@ Steps:
 
 ### Task 3: Search-string builder
 
+**Execution record:** [2026-10-24 validation](2026-10-24-bango-prisma-validation.md#task-3-search-string-builder).
+
 **Files:** Create `src/litforge/analysis/search_strategy.py`, `tests/unit/test_search_strategy.py`. Modify `config.py` (`TASK_NAMES` += `"search_strategy"`), `cli.py`, `review_routes.py`, `app.js` (a card under the criteria form), `docs/guide.md`, `docs/cli.md`.
 
 **Interfaces:**
@@ -152,14 +154,14 @@ Steps:
 
 Steps:
 
-- [ ] **Write the failing tests.**
+- [x] **Write the failing tests.**
   - `test_assemble_queries_per_database`: given fixed concepts, assert the exact PubMed, Scopus and WoS strings. For example, the concepts `[("graph neural network", ["GNN","graph neural networks"]), ("epilepsy", ["seizure"])]` give, for PubMed, `("graph neural network"[tiab] OR GNN[tiab] OR "graph neural networks"[tiab]) AND (epilepsy[tiab] OR seizure[tiab])`.
   - `test_validate_query_flags_unbalanced_and_unknown_tag`.
   - `test_model_reply_with_extra_text_is_rejected`, using a fake gateway that returns 9 synonyms. Assert the list is trimmed to 8 and a warning is added.
   - `test_empty_criteria_raises`.
-- [ ] **Confirm they fail.** Run `uv run pytest tests/unit/test_search_strategy.py -v`.
-- [ ] **Implement the module.** Quote multi-word terms and leave single words bare. The prompt receives the research question and the criteria only; it never receives paper text. Cache the result through `start_run` and `finish_run`, keyed by `criteria_hash`, so reopening the card costs no call.
-- [ ] **Run the tests and commit.** Run the tests and the UI test for the card's Copy and Search buttons, then commit.
+- [x] **Confirm they fail.** Run `uv run pytest tests/unit/test_search_strategy.py -v`.
+- [x] **Implement the module.** Quote multi-word terms and leave single words bare. The prompt receives the research question and the criteria only; it never receives paper text. Cache the result through `start_run` and `finish_run`, keyed by `criteria_hash`, so reopening the card costs no call.
+- [x] **Run the tests and commit.** Run the tests and the UI test for the card's Copy and Search buttons, then commit.
 
 ### Task 4: RIS and BibTeX export with decisions
 

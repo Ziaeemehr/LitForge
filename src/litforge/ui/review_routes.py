@@ -4,8 +4,18 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
+from litforge.analysis.gateway import GatewayError
+from litforge.analysis.search_strategy import (
+    build_strategy,
+    cached_strategy,
+    openalex_queries,
+    preview_strategy,
+)
 from litforge.export.markdown import default_export_dir
 from litforge.export.references import save_references
+from litforge.llm.base import LlmError
+from litforge.llm.budget import BudgetExceeded
+from litforge.llm.router import RoutingError
 from litforge.projects import get_project_id
 from litforge.screening.prisma import prisma_counts, prisma_svg
 
@@ -14,6 +24,9 @@ if TYPE_CHECKING:
 
 
 def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) -> Any:
+    if path == "/api/review/strategy":
+        return strategy_response(app, conn, query.get("project", ""),
+                                 query.get("db", "pubmed,scopus,openalex").split(","), build=False)
     if path != "/api/review/prisma":
         raise LookupError("not found")
     project = query.get("project", "")
@@ -23,6 +36,12 @@ def get(app: App, conn: sqlite3.Connection, path: str, query: dict[str, str]) ->
 
 
 def post(app: App, conn: sqlite3.Connection, path: str, body: dict[str, Any]) -> Any:
+    if path == "/api/review/strategy":
+        databases = body.get("databases", ["pubmed", "scopus", "openalex"])
+        if not isinstance(databases, list) or any(not isinstance(db, str) for db in databases):
+            raise ValueError("databases must be a list of database names")
+        return strategy_response(app, conn, str(body.get("project") or ""), databases,
+                                 build=True, approved=body.get("approved") is True)
     if path == "/api/review/references":
         project = str(body.get("project") or "")
         pid = get_project_id(conn, project)
@@ -43,3 +62,21 @@ def post(app: App, conn: sqlite3.Connection, path: str, body: dict[str, Any]) ->
     target = folder / "prisma.svg"
     target.write_text(prisma_svg(prisma_counts(conn, pid), project), encoding="utf-8")
     return {"path": str(target.resolve())}
+
+
+def strategy_response(app: App, conn: sqlite3.Connection, project: str, databases: list[str], *,
+                      build: bool, approved: bool = False) -> Any:
+    pid = get_project_id(conn, project)
+    result = cached_strategy(conn, pid, databases)
+    if result is None:
+        gateway = app.make_gateway(conn)
+        try:
+            preview = preview_strategy(conn, gateway, pid, databases)
+            if not build or preview.blocked_reason or (preview.requires_approval and not approved):
+                return {"error": preview.blocked_reason or "Search strings need a model call",
+                        "needs_model_call": True, "needs_approval": preview.requires_approval,
+                        "preview": preview.model_dump()}, 409
+            result = build_strategy(conn, gateway, pid, databases, approved=approved)
+        except (RoutingError, BudgetExceeded, GatewayError, LlmError) as exc:
+            return {"error": str(exc)}, 400
+    return {**result.model_dump(), "openalex_queries": openalex_queries(result)}

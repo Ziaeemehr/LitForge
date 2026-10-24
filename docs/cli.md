@@ -1036,6 +1036,18 @@ Review flagged sentences and cells.
 | `TARGET_ID` | argument (required) |
 | `--reason` |  |
 
+### `litforge strategy`
+
+Build database search strings from saved screening criteria, caching concepts and queries.
+
+| Option | Meaning |
+|---|---|
+| `--project`, `-p` | Project (default: the active project) |
+| `--db` | Database; repeat for multiple databases |
+| `--preview` |  |
+| `--approve` |  |
+| `--json` |  |
+
 ### `litforge workflow`
 
 Run built-in typed workflow templates.

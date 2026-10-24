@@ -1214,7 +1214,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 if path == "/api/tools":
                     return self._json(app.optional_tools_status())
                 if path.startswith("/api/review/"):
-                    return self._json(review_routes.get(app, conn, path, query))
+                    result = review_routes.get(app, conn, path, query)
+                    return self._json(*result) if isinstance(result, tuple) else self._json(result)
                 if path.startswith("/api/write/"):
                     result = writing_routes.get(app, conn, path, query)
                     if isinstance(result, tuple):
@@ -1337,7 +1338,8 @@ def make_handler(app: App) -> type[BaseHTTPRequestHandler]:
                 if url.path.startswith("/api/review/"):
                     conn = app.db()
                     try:
-                        return self._json(review_routes.post(app, conn, url.path, body))
+                        result = review_routes.post(app, conn, url.path, body)
+                        return self._json(*result) if isinstance(result, tuple) else self._json(result)
                     finally:
                         conn.close()
                 if url.path.startswith("/api/write/"):

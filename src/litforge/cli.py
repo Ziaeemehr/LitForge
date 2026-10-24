@@ -1484,5 +1484,41 @@ def shortcut(
 register(app, eval_app)
 register_console(app)
 
+@app.command()
+def strategy(
+    ctx: typer.Context,
+    project: ProjectOpt = None,
+    db: Annotated[list[str] | None, typer.Option("--db", help="Database; repeat for multiple databases")] = None,
+    preview: Annotated[bool, typer.Option("--preview")] = False,
+    approve: Annotated[bool, typer.Option("--approve")] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Build database search strings from saved screening criteria, caching concepts and queries."""
+    from litforge.analysis.commands import check_plan
+    from litforge.analysis.search_strategy import build_strategy, cached_strategy, preview_strategy
+    st = _state(ctx)
+    with st.db() as conn:
+        _, pid = _project(st, conn, project)
+        if pid is None:
+            raise typer.BadParameter("Choose a project with -p")
+        databases = db or ["pubmed", "scopus", "openalex"]
+        try:
+            result = cached_strategy(conn, pid, databases)
+            if result is None:
+                gateway = ModelGateway(conn, st.config)
+                check_plan(gateway, [preview_strategy(conn, gateway, pid, databases)], approve, preview)
+                result = build_strategy(conn, gateway, pid, databases, approved=approve)
+        except (ValueError, RoutingError, BudgetExceeded, GatewayError, LlmError) as exc:
+            typer.echo(" ".join(str(exc).splitlines()), err=True)
+            raise typer.Exit(1) from exc
+    if as_json or preview:
+        typer.echo(result.model_dump_json(indent=2))
+    else:
+        for database, query in result.queries.items():
+            typer.echo(f"{database}: {query}")
+        for warning in result.warnings:
+            typer.echo(f"Warning: {warning}", err=True)
+
+
 if __name__ == "__main__":
     app()

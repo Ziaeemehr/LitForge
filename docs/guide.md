@@ -1047,3 +1047,26 @@ The default output is `<export folder>/references.ris` or `references.bib`. Repe
 prints `{"path": ..., "count": ...}` after saving. RIS notes and BibTeX notes and
 keywords carry the status, stage, source, and decision reason. BibTeX citation keys
 match the Writing Studio.
+
+### Search strings from screening criteria
+
+Save a research question and inclusion/exclusion criteria in **AI screening**, then use
+**Search strings** to select databases and **Build**. The model extracts concepts only;
+LitForge formats PubMed, Scopus, Web of Science, arXiv and OpenAlex queries itself.
+Each readonly query has **Copy**; if clipboard access is unavailable, select and copy
+it manually. OpenAlex's **Search with it** starts the existing search flow with up to
+six plain queries combining each concept's first two terms.
+
+```bash
+litforge strategy -p my-review --db pubmed --db scopus --preview
+litforge strategy -p my-review --db pubmed --db scopus --approve --json
+```
+
+The default databases are PubMed, Scopus and OpenAlex. The `search_strategy` task
+uses the local model unless assigned another profile in settings. Preview shows the
+route and approval requirements without calling the model. Only the question and
+include/exclude criteria are sent, never paper text. Results are cached by criteria
+hash and database selection; reopening or rebuilding unchanged criteria costs no
+model call. Changing criteria or databases builds a fresh strategy. Warnings report
+trimmed concepts/synonyms and sanitised or dropped terms. Review the strings before
+using them in an external database.
