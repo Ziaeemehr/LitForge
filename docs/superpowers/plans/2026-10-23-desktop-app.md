@@ -265,7 +265,22 @@ Record the engine, the host Python and any preloaded library in the user config.
   `mypy` green. End to end on macOS arm64: read-only app, `PATH=/usr/bin:/bin`, `documents` installed through
   `tools._uv_sync` into the runtime, app checksums unchanged, Settings offers optional tools. Also found and
   untracked agent state files (`.omc/`) that were committed under `src/` and would have shipped.
-- [ ] Produce Windows per-user setup executable, separate macOS `.app`/DMG artifacts for Intel and Apple Silicon, and a Linux `.deb` for the supported Ubuntu versions declaring its WebKitGTK runtime prerequisites. Record architecture-specific native dependencies and bundled-license notices. Broader Linux packaging is follow-up scope.
+- [x] Produce Windows per-user setup executable, separate macOS `.app`/DMG artifacts for Intel and Apple Silicon, and a Linux `.deb` for the supported Ubuntu versions declaring its WebKitGTK runtime prerequisites. Record architecture-specific native dependencies and bundled-license notices. Broader Linux packaging is follow-up scope.
+  Done 2026-11-24 (branch `desktop/packaging-task7`). `scripts/build_desktop.py --target T --output DIR` builds
+  `LitForge-0.5.0-macos-{arm64,x64}.dmg` (ad-hoc signed `.app`, 20-24 MB), `LitForge-0.5.0-linux-x64.deb` (15 MB,
+  `/opt/litforge`, depends on `python3-gi` and `gir1.2-webkit2-4.1 | gir1.2-webkit2-4.0`) and
+  `LitForge-0.5.0-windows-x64-setup.exe` (Inno Setup, per user, 14 MB), each with a `.sha256`. macOS/Linux share
+  `packaging/desktop/launch.sh`, which builds the runtime on first start, after an update or a moved `.app`;
+  Windows builds it during setup and removes only the runtime on uninstall. Native binary: `uv` per architecture;
+  notices in `packaging/desktop/THIRD_PARTY.md`. Local macOS arm64 test (isolated HOME): install from the DMG,
+  first start, move, relaunch; it found and fixed a read-only `runtime/bin/uv` that broke a second provisioning.
+  `.github/workflows/desktop-installers.yml` builds and installs on Ubuntu 22.04/24.04, Windows Server 2022,
+  macOS 15 arm64 and Intel, then checks `/api/info` from the installed copy: three rounds green,
+  [45469637255](https://github.com/Ziaeemehr/LitForge/actions/runs/45469637255),
+  [45470038434](https://github.com/Ziaeemehr/LitForge/actions/runs/45470038434),
+  [45470284999](https://github.com/Ziaeemehr/LitForge/actions/runs/45470284999).
+  Not covered: runners are not clean machines (step 5), the window was not checked by eye, no Windows icon, unsigned
+  installers (Gatekeeper/SmartScreen warn), first start needs internet.
 - [ ] On clean machines without Python/uv, verify installation, launch and reinstall. Bundle the managed runtime/base dependency payload or provision it visibly during setup with verified artifacts; document any network requirement before calling the installer self-contained. Heavy model/tool downloads remain separate.
 - [ ] Verify a real supported optional tool install is detected after restart. Test a base update with existing extras; changing bundled Python into an executable must not silently disable optional features. Keep manual native updates separate from source `git`/`uv sync` instructions, using runtime version staging rather than modifying a running environment.
 - [ ] Verify uninstall keeps user libraries/settings/models unless the user explicitly chooses data removal. Commit only after the clean-install and update paths pass.
