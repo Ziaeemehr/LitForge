@@ -6638,7 +6638,15 @@
     document.querySelectorAll('.seg [data-go]').forEach(function (b) {
       b.onclick = function () { if (b.dataset.go === 'papers') openPapers(); else showView(b.dataset.go); };
     });
-    $('btn-add').onclick = $('side-new').onclick = function () { newSearch(); };
+    $('btn-add').onclick = function () { newSearch(); };
+    // + beside Projects starts a new project: the Add papers sheet with an empty, focused project name.
+    $('side-new').onclick = function () {
+      newSearch();
+      var name = $('project-name');
+      name.value = ''; name.placeholder = 'Name of the new project';
+      name.dispatchEvent(new Event('input'));
+      name.focus();
+    };
     $('proj-menu').addEventListener('click', function (e) { if (e.target.closest('.menu-pop button')) $('proj-menu').open = false; });
     document.addEventListener('click', function (e) { if ($('proj-menu').open && !$('proj-menu').contains(e.target)) $('proj-menu').open = false; });
 
