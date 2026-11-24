@@ -245,7 +245,14 @@ Record the engine, the host Python and any preloaded library in the user config.
 
 **Interfaces:** `python scripts/build_desktop.py --target TARGET --output DIR` builds on the matching OS/architecture. Targets: `windows-x64`, `macos-arm64`, `macos-x64`, `linux-x64`. Produce platform payload manifests recording application version, Python/runtime versions, renderer prerequisites and checksums.
 
-- [ ] First prove the packaging layout with one optional dependency: packaged app code/resources plus a managed, writable CPython 3.12 environment and uv under a per-user runtime directory. Preserve the source-project layout needed by `tools.py`, including its metadata and lockfile. Build a new environment at installation time; do not copy a non-relocatable development `.venv` into an installer.
+- [x] First prove the packaging layout with one optional dependency: packaged app code/resources plus a managed, writable CPython 3.12 environment and uv under a per-user runtime directory. Preserve the source-project layout needed by `tools.py`, including its metadata and lockfile. Build a new environment at installation time; do not copy a non-relocatable development `.venv` into an installer.
+  Done 2026-11-24 on macOS 15 arm64 (branch `desktop/packaging-task7`): `scripts/build_desktop.py --target macos-arm64`
+  stages `app/` (git-tracked `src/`, `configs/`, `pyproject.toml`, `uv.lock`, manifest with SHA-256), `bin/uv` and
+  `provision.py` (41 MB). With `app/` made read-only and `PATH=/usr/bin:/bin`, the bundled uv provisioned a uv-managed
+  CPython 3.12.15 (71 MB) and venv (254 MB with `desktop` + `embed`) under the runtime folder; `litforge` ran, adding
+  `embed` later kept `desktop`, and the app folder's checksums were unchanged. A run killed mid-sync left no
+  `state.json`; rerunning repaired it. Not yet: `tools.py` still syncs into `root/.venv` (step 3), other targets,
+  installers.
 - [ ] Add failing tests for resource lookup independent of CWD, read-only app bundles, writable tools/model/cache locations and interrupted runtime provisioning. Bundle/check configuration, templates, icons, PDF.js workers, dictionaries and editor assets. Ensure failed provisioning is retriable without touching library data.
 - [ ] Run `uv run pytest tests/unit/test_desktop_distribution.py tests/unit/test_optional_tools.py -v`; confirm expected new failures, then implement layout/path adapters and pass the tests. Keep source-install discovery compatible.
 - [ ] Produce Windows per-user setup executable, separate macOS `.app`/DMG artifacts for Intel and Apple Silicon, and a Linux `.deb` for the supported Ubuntu versions declaring its WebKitGTK runtime prerequisites. Record architecture-specific native dependencies and bundled-license notices. Broader Linux packaging is follow-up scope.
