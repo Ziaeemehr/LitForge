@@ -39,7 +39,7 @@ remain open (see "Not done"). The design findings themselves are in [DESIGN_AUDI
 | 1 (CI) | [45402158828](https://github.com/Ziaeemehr/LitForge/actions/runs/45402158828) | 4 native windows green; Linux full suite red at `mypy`: `host.py:287 "object" has no attribute "__iter__"` | `MENUS` literal inferred as `object` | Explicit type on `MENUS` |
 | 1 (live) | Real Cocoa window on this Mac | Menu bar: `Apple, Python, Edit, View, File, View, Go, Help`; item read "Library  3" | Duplicate *View* (pywebview has one); `⌘` was replaced by "" on macOS | Menu renamed *Appearance*; `⌘` kept on macOS, `Ctrl+` elsewhere. Rechecked: `…File, Appearance, Go, Help`, "Library  ⌘3"; quits cleanly |
 | 2 (CI) | [45403188136](https://github.com/Ziaeemehr/LitForge/actions/runs/45403188136) | All 5 jobs green | — | — |
-| 3 (CI) | see below | stability rerun, no code change | — | — |
+| 3 (CI) | [45404121962](https://github.com/Ziaeemehr/LitForge/actions/runs/45404121962) | All 5 jobs green, same counts as round 2 (stability rerun, docs-only change) | — | — |
 
 Round 2 results:
 
