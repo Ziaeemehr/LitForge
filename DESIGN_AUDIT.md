@@ -11,7 +11,7 @@ change as this file; the rest are open, in the order they should be done.
 | Text could not be selected in the desktop window: pywebview's `create_window` defaults to `text_select=False`. | **done**: `text_select=True` in `desktop/host.py` |
 | Page zoom (Cmd/Ctrl + / −) was off (`zoomable=False` by default). | **done** |
 | Answers, claims, the matrix, gaps and paper details had no way to copy them as text. | **done**: a *Copy* / *Save .md* bar above each, built on `static/share.js` (DOM → Markdown, tested in `tests/ui/share.test.cjs`) |
-| Sharing with NotebookLM or another model needs one file, not a folder of notes. Export writes one note per paper. | open: add an export option "one combined file" (NotebookLM caps the number of sources) |
+| Sharing with NotebookLM or another model needs one file, not a folder of notes. Export writes one note per paper. | **done**: every Markdown export also writes `all_papers.md` |
 
 ## 2. Navigation and structure
 
@@ -31,19 +31,22 @@ change as this file; the rest are open, in the order they should be done.
 
 | Finding | Status |
 |---|---|
-| Colours are tokens in `:root` with a dark set — good. The dark set is written twice (media query and `[data-theme]`). | open: keep it once via a shared selector list |
-| 13 different font sizes, including 9, 12.5 and 13.5 px. | open: type scale 11 / 12 / 13 / 15 / 18 / 22 px as tokens |
-| 11 different corner radii (2–14 px). | open: 4 / 6 / 10 px + pill |
-| Spacing values are ad hoc (3, 5, 7, 9 px …). | open: 4 px grid tokens (`--s1` … `--s6`) |
+| Colours are tokens in `:root` with a dark set. The dark set is written twice (media query and `[data-theme]`). | **done**: moved to `theme.css`; still written twice, as CSS needs |
+| 13 different font sizes, including 9, 12.5 and 13.5 px. | **done**: macOS scale 11 / 12 / 13 / 15 / 17 / 22 px (`--fs-*`) |
+| 11 different corner radii (2–14 px). | **done**: 5 / 8 / 12 px + pill (`--r-*`) |
+| Spacing values are ad hoc (3, 5, 7, 9 px …). | partly: 4 px tokens `--s1`…`--s6` exist; existing paddings not yet migrated |
 | Section headings inside cards use several sizes and colours (accent-coloured `summary`). | open |
-| Two shadows (`--shadow`, `--float`) already exist; menus added here use their own. | open: use `--float` |
+| All-caps labels (sidebar headings, Export label, badges, drawer headings). | **done**: sentence case |
+| The orange accent did not match the teal LitForge mark. | **done**: accent is the mark's teal |
+| Persian text in answers and titles was laid out left-to-right. | **done**: `unicode-bidi: plaintext` per paragraph |
+| Two shadows (`--shadow`, `--float`) already exist. | **done**: menus use `--float` |
 
 ## 4. macOS conventions
 
 | Finding | Status |
 |---|---|
-| The window has no application menu beyond pywebview's default; standard items (Edit → Copy/Paste/Select All, View → Zoom, Window, Help → Guide) and shortcuts are missing. | open: pywebview `menu=` with File (New search ⌘N, Export ⌘E), Edit, View (Theme, Sidebar ⌘\\, Zoom), Go (pages ⌘1…⌘6), Help (Guide ?) |
-| Settings opens with `,` but not ⌘, as on macOS. | open |
+| The window has no application menu beyond pywebview's default; standard items (Edit → Copy/Paste/Select All, View → Zoom, Window, Help → Guide) and shortcuts are missing. | **done**: File, Appearance, Go, Help; ⌘N, ⌘E, ⌘1–6, ⌘, in the page. pywebview menus cannot show key equivalents or disable items, so shortcuts are named in the titles and Export explains itself when no list is open |
+| Settings opens with `,` but not ⌘, as on macOS. | **done** |
 | Destructive actions (*Delete project*, *Remove unused papers*) are red links next to ordinary actions. | open: move into a "…" menu or keep only on the detail page |
 | Buttons mix filled accent, outlined and text links for actions of the same weight. | open: one primary per page, others outlined |
 
