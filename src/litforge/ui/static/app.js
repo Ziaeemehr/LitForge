@@ -313,18 +313,11 @@
     $('btn-export').title = 'Write Markdown notes to ' + (dir.value || 'the project folder');
     var links = [];
     if (name && dir.value.trim() !== defaultDir(name)) links.push('<a href="#" id="reset-exports">use default folder</a>');
-    if (p) links.push('<a href="#" id="open-exports">open folder</a>', '<a href="#" id="delete-project" class="danger">delete project</a>');
-    else if (name) links.unshift('New project');
+    if (!p && name) links.unshift('New project');
     el.innerHTML = links.join(' · ');
     if ($('reset-exports')) {
       $('reset-exports').onclick = function (e) { e.preventDefault(); state.dirEdited = true; dir.value = defaultDir(name); showPaths(); };
     }
-    if (!p) return;
-    $('open-exports').onclick = function (e) {
-      e.preventDefault();
-      post('/api/open-exports', { project: p.name }).catch(function (err) { toast(err.message); });
-    };
-    $('delete-project').onclick = function (e) { e.preventDefault(); deleteProject(p); };
   }
 
   // Papers without a PDF: their notes hold only the abstract, so list where to get each one by hand.

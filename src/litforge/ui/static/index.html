@@ -335,7 +335,7 @@
   </section>
 
   <section id="view-recents" class="view" hidden>
-    <div class="viewhead"><h2>Recents</h2>
+    <div class="viewhead"><h2>Search history</h2>
       <select id="recents-project"><option value="">All projects</option></select></div>
     <div class="card"><div class="rows" id="recents-list"></div></div>
   </section>
@@ -384,11 +384,10 @@
   </section>
 
   <section id="view-claims" class="view" hidden>
-    <div class="viewhead"><h2>Claims</h2><span class="meta">Explore findings, replications and disagreements. Possible causes are hypotheses.</span></div>
+    <div class="viewhead"><h2>Claims</h2><span class="meta">Explore findings, replications and disagreements. Possible causes are hypotheses.</span>
+      <label class="head-model">Model <select id="lens-claims-profile" aria-label="Claims model profile"><option value="">Configured default</option></select></label></div>
     <div class="card lens-panel">
       <div class="lens-actions">
-        <label class="f" for="lens-claims-profile">Model profile</label>
-        <select id="lens-claims-profile" aria-label="Claims model profile"><option value="">Configured default</option></select>
         <label class="check"><input type="checkbox" id="lens-claims-force"> Re-extract cached claims</label>
         <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-claims-all-versions"> All versions</label>
         <button class="btn accent" id="lens-claims-extract" data-lens-work>Extract claims</button>
@@ -462,21 +461,19 @@
 
   <section id="view-gaps" class="view" hidden>
     <div class="viewhead"><h2>Gaps</h2><span class="meta">Deterministic candidates from claims and study matrices</span>
-      <button class="btn accent" id="gaps-refresh">Refresh candidates</button></div>
-    <label for="gaps-profile">Model profile</label>
-    <select id="gaps-profile"><option value="">Configured default</option></select>
-    <p class="hint" id="gaps-status" role="status" aria-live="polite"></p>
+      <label class="head-model">Model <select id="gaps-profile" aria-label="Gaps model profile"><option value="">Configured default</option></select></label></div>
+    <div class="card lens-panel"><div class="lens-actions"><button class="btn accent" id="gaps-refresh">Refresh candidates</button></div>
+    <p class="hint" id="gaps-status" role="status" aria-live="polite"></p></div>
     <div class="share-bar" data-share-from="gaps-list" data-share-title="Gaps" data-share="skip"><button type="button" class="btn small" data-share-act="copy" title="Copy as Markdown, ready to paste into a chat, NotebookLM or a note">Copy</button><button type="button" class="btn small" data-share-act="save" title="Save as a Markdown (.md) file, for example to add as a NotebookLM source">Save .md</button></div>
     <div class="card lens-panel lens-rows" id="gaps-list"></div>
   </section>
 
   <section id="view-console" class="view" hidden>
     <div class="viewhead"><h2>Research Console</h2>
-      <span class="meta">A typed plan, previewed before explicit approval</span></div>
+      <span class="meta">A typed plan, previewed before explicit approval</span>
+      <label class="head-model">Planner model <select id="console-profile" aria-label="Planner model profile"><option value="">Configured default</option></select></label></div>
     <div class="card lens-panel console-panel">
       <form id="console-form">
-        <label class="f" for="console-profile">Planner model profile</label>
-        <select id="console-profile"><option value="">Configured default</option></select>
         <label class="f" for="console-request">What would you like to do?</label>
         <textarea id="console-request" rows="4" required
           placeholder="Compare methods in papers published since 2020 and answer the review question"></textarea>

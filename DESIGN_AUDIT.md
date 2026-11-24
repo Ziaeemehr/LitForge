@@ -22,10 +22,10 @@ change as this file; the rest are open, in the order they should be done.
 | The export toolbar and *Missing PDFs* showed on every page, also where they do nothing (Ask, Write, Settings). | **done**: shown only next to a result list |
 | Export showed seven controls at once. | **done**: scope + *Export Markdown* stay; PDFs, versions, Obsidian, math, RIS, BibTeX are under *Options ▾* |
 | Snapshots took half of the Claims page though rarely used. | **done**: folded card |
-| *Recents* (page) and *Recent* (sidebar list) show the same thing twice under almost the same name. | open: keep the sidebar list, drop or rename the page |
-| *Delete project* and *Open folder* appear both in the header and in the New search form. | open: keep them in one place (header) |
-| *Model profile* select repeats on Ask, Claims, Matrix, Gaps and Workflows, always full width. | open: one compact select per page, aligned right in the page head |
-| Gaps puts its controls outside a card, unlike every other page. | open |
+| *Recents* (page) and *Recent* (sidebar list) show the same thing twice under almost the same name. | **done**: page renamed *Search history*; sidebar keeps *Recent* |
+| *Delete project* and *Open folder* appear both in the header and in the New search form. | **done**: only in the project menu in the header |
+| *Model profile* select repeats on Ask, Claims, Matrix, Gaps and Workflows, always full width. | **done**: Ask and Matrix keep it in the inspector; Claims, Gaps and Workflows show one compact select in the page head |
+| Gaps puts its controls outside a card, unlike every other page. | **done** |
 
 ## 3. Visual consistency
 

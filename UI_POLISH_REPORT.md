@@ -70,8 +70,6 @@ Before (`main`) and after, 1280×800, in [docs/images/ui-polish/](docs/images/ui
 - Manual interaction on each engine (keyboard, CodeMirror, drag-and-drop) and clean-machine installs: need a person at each machine; not counted.
 - *Save .md* download inside the real desktop window was not clicked by hand; the same blob-download path is already used by other exports there.
 - Existing paddings and margins still use literal pixel values; tokens exist but a full migration risks layout regressions without visual tests.
-- Spell-check menu and `.more-menu` in Write were not restyled beyond the shared tokens.
-- Remaining audit items: *Recents* page vs. *Recent* list, duplicate delete/open-folder controls, one compact model select per page.
 - pywebview menus cannot show key equivalents or disable items; shortcuts are written in the titles, and Export explains itself when no list is open.
 
 ## Decisions made without asking
