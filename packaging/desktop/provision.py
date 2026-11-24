@@ -58,7 +58,9 @@ def provision(app: Path, runtime: Path, uv: str, extras: list[str]) -> Path:
         raise RuntimeError(f"uv sync failed with exit code {result.returncode}; run the setup again to retry")
     # LitForge adds optional tools later with this uv (litforge.distribution.bundled_uv), even if APP moves.
     (runtime / "bin").mkdir(exist_ok=True)
-    shutil.copy2(uv, runtime / "bin" / Path(uv).name)
+    bundled = runtime / "bin" / Path(uv).name
+    bundled.unlink(missing_ok=True)  # the earlier copy keeps the read-only mode of a mounted or installed app
+    shutil.copy2(uv, bundled)
     state = {"app_version": manifest["app_version"], "target": manifest["target"], "extras": sorted(set(extras))}
     state_file.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     return venv

@@ -1,0 +1,107 @@
+name: Desktop installers
+
+# Builds each native installer on its own OS/architecture, installs it on the runner and checks that LitForge
+# starts from it. Artifacts are kept for review only; nothing is published or signed here.
+on:
+  push:
+    branches: [desktop/packaging-task7]
+    paths: [packaging/desktop/**, scripts/build_desktop.py, src/litforge/distribution.py,
+            .github/workflows/desktop-installers.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installer:
+    name: ${{ matrix.target }} (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {target: linux-x64, os: ubuntu-22.04}
+          - {target: linux-x64, os: ubuntu-24.04}
+          - {target: windows-x64, os: windows-2022}
+          - {target: macos-arm64, os: macos-15}
+          - {target: macos-x64, os: macos-15-intel}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Inno Setup
+        if: runner.os == 'Windows'
+        run: '[ -f "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ] || choco install innosetup -y --no-progress'
+      - name: Build installer
+        run: uv run --no-project --python 3.12 python scripts/build_desktop.py --target ${{ matrix.target }} --output dist
+      - name: Record platform
+        run: |
+          mkdir -p evidence
+          { uname -a; uv --version; ls -l dist; cat dist/*.sha256; } | tee evidence/platform.txt
+          [ "$RUNNER_OS" != macOS ] || sw_vers | tee -a evidence/platform.txt
+          [ "$RUNNER_OS" != Linux ] || cat /etc/os-release | tee -a evidence/platform.txt
+
+      - name: Install and start (Linux .deb)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ./dist/*.deb xvfb xauth dbus-x11
+          dpkg -s litforge | tee evidence/dpkg.txt
+          xvfb-run -a dbus-run-session -- litforge-desktop > evidence/launch.log 2>&1 &
+          for i in $(seq 1 240); do pgrep -f desktop-server >/dev/null && break; sleep 1; done
+          port=$(pgrep -af desktop-server | sed -nE 's/.*--port ([0-9]+).*/\1/p' | head -1)
+          curl -sf --retry 20 --retry-delay 1 --retry-all-errors "http://127.0.0.1:$port/api/info" | tee evidence/api-info.json
+          cp ~/.local/share/litforge/runtime/setup.log evidence/ || true
+
+      - name: Install and start (macOS .dmg)
+        if: runner.os == 'macOS'
+        run: |
+          mnt=$(hdiutil attach -nobrowse -readonly dist/*.dmg | tail -1 | awk -F'\t' '{print $NF}')
+          mkdir -p ~/Applications && cp -R "$mnt/LitForge.app" ~/Applications/ && hdiutil detach "$mnt"
+          codesign --verify --deep ~/Applications/LitForge.app
+          ~/Applications/LitForge.app/Contents/MacOS/LitForge > evidence/launch.log 2>&1 &
+          for i in $(seq 1 240); do pgrep -f desktop-server >/dev/null && break; sleep 1; done
+          port=$(ps -axo command | grep desktop-server | grep -v grep | sed -nE 's/.*--port ([0-9]+).*/\1/p' | head -1)
+          curl -sf --retry 20 --retry-delay 1 --retry-all-errors "http://127.0.0.1:$port/api/info" | tee evidence/api-info.json
+          cp ~/Library/"Application Support"/LitForge/runtime/setup.log evidence/ || true
+
+      - name: Install and start (Windows setup)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\*-setup.exe | Select-Object -First 1
+          $p = Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/LOG=evidence\setup.log' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "setup exit code $($p.ExitCode)" }
+          $exe = "$env:LOCALAPPDATA\LitForge\runtime\venv\Scripts\litforge-app.exe"
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\LitForge.lnk" | Tee-Object evidence\shortcut.txt
+          Start-Process $exe
+          $port = $null
+          foreach ($i in 1..240) {
+            $proc = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'desktop-server' } | Select-Object -First 1
+            if ($proc -and $proc.CommandLine -match '--port (\d+)') { $port = $Matches[1]; break }
+            Start-Sleep 1
+          }
+          if (-not $port) { throw 'desktop-server did not start' }
+          foreach ($i in 1..30) { try { Invoke-RestMethod "http://127.0.0.1:$port/api/info" | ConvertTo-Json | Tee-Object evidence\api-info.json; break } catch { Start-Sleep 1 } }
+          if (-not (Test-Path evidence\api-info.json)) { throw '/api/info did not answer' }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installer-${{ matrix.target }}-${{ matrix.os }}-${{ github.run_attempt }}
+          path: |
+            dist/*.dmg
+            dist/*.deb
+            dist/*-setup.exe
+            dist/*.sha256
+            evidence/
+          if-no-files-found: warn
+          retention-days: 14

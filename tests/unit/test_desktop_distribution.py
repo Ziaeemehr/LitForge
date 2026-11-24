@@ -58,6 +58,9 @@ def test_failed_sync_is_not_marked_ready_and_can_be_retried(tmp_path, monkeypatc
     monkeypatch.setattr(provision, "sync_command", lambda uv, extras: ok)
     assert provision.main(["--app", str(app), "--runtime", str(runtime), "--uv", str(uv), "--extra", "desktop"]) == 0
     assert json.loads((runtime / "state.json").read_text())["extras"] == ["desktop"]
+    uv.chmod(0o555)  # as inside a read-only .app: a second run (update, moved app) must still replace its copy
+    for _ in range(2):
+        assert provision.main(["--app", str(app), "--runtime", str(runtime), "--uv", str(uv)]) == 0
 
 
 build = _load("lf_build_desktop", ROOT / "scripts" / "build_desktop.py")
