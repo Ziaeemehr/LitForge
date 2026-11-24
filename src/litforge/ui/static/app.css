@@ -990,3 +990,4 @@ header { gap: var(--s3); background: var(--panel); border-bottom: 1px solid var(
 .add-go .btn { width: auto; margin: 0; padding: var(--s2) var(--s4); }
 .add-sheet details.fold-opts { margin: var(--s3) 0 0; }
 .add-help { text-align: center; margin: 0; }
+.add-btn { padding: var(--s1h) var(--s4); font-size: var(--fs-md); font-weight: 600; }
