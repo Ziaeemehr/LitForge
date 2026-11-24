@@ -652,8 +652,10 @@
     $('results').hidden = view !== 'results';
     document.querySelectorAll('.sidebar [data-view]').forEach(function (b) { b.classList.toggle('on', b.dataset.view === view); });
     if (/^(claims|gaps|console)$/.test(view)) $('nav-more').open = true;
-    // Export and missing PDFs act on a result list, so they only show next to one.
-    document.querySelector('header .export-group').hidden = $('btn-missing').hidden = view !== 'results';
+    var tab = view === 'results' || view === 'recents' || view === 'new' ? 'papers' : view;
+    document.querySelectorAll('.seg [data-go]').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.go === tab); b.setAttribute('aria-selected', String(b.dataset.go === tab));
+    });
     document.querySelectorAll('#side-recent a').forEach(function (a) { a.classList.remove('on'); });
     if (view !== 'results') closeDrawer();
     if (view === 'recents') { $('recents-project').value = state.recentsProject || ''; loadRecents(); }
@@ -6623,6 +6625,20 @@
         e.preventDefault(); applySidebar(!document.querySelector('.app').classList.contains('side-hidden'));
       }
     });
+    // Toolbar: Papers opens the project's latest search (or Add papers when it has none).
+    function openPapers() {
+      if (state.runId && state.data) return showView('results');
+      var q = state.project ? '&project=' + encodeURIComponent(state.project) : '';
+      return api('/api/runs?limit=1' + q).then(function (runs) { if (runs.length) loadRun(runs[0].id); else newSearch(); })
+        .catch(function (e) { toast(e.message); });
+    }
+    document.querySelectorAll('.seg [data-go]').forEach(function (b) {
+      b.onclick = function () { if (b.dataset.go === 'papers') openPapers(); else showView(b.dataset.go); };
+    });
+    $('btn-add').onclick = $('side-new').onclick = function () { newSearch(); };
+    $('proj-menu').addEventListener('click', function (e) { if (e.target.closest('.menu-pop button')) $('proj-menu').open = false; });
+    document.addEventListener('click', function (e) { if ($('proj-menu').open && !$('proj-menu').contains(e.target)) $('proj-menu').open = false; });
+
     // Commands shared by the ⌘ shortcuts and the desktop window's menu bar (desktop/host.py calls LFMenu).
     var GO = ['new', 'recents', 'library', 'ask', 'matrix', 'write'];
     window.LFMenu = function (cmd) {

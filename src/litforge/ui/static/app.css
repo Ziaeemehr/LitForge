@@ -76,7 +76,7 @@ header {
 header .spacer { flex: 1; }
 header { flex-wrap: wrap; row-gap: var(--s2); }
 header .btn { white-space: nowrap; }
-header .export-group { margin-left: auto; }
+.runhead .export-group { margin-left: auto; align-self: center; }
 header .current { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 header .current small { color: var(--muted); font-weight: 400; }
 main { min-width: 0; padding: var(--s4) var(--s5); }
@@ -271,14 +271,14 @@ kbd { font-size: var(--fs-xs); border: 1px solid var(--line); border-bottom-widt
 .badge.scr.stale { opacity: .55; text-decoration: line-through; }
 /* AI screening: an optional, one-line strip that opens into the criteria form. */
 #screen-panel, #review-report { margin-bottom: var(--s3); }
-#screen-panel summary, #review-report summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--s2); padding: var(--s2) var(--s3); font-size: var(--fs-md); }
-#screen-panel summary::-webkit-details-marker, #review-report summary::-webkit-details-marker { display: none; }
-#screen-panel summary:hover, #review-report summary:hover { background: var(--chip); border-radius: var(--radius); }
-#screen-panel .chev, #review-report .chev { color: var(--muted); transition: transform .15s; display: inline-block; width: 10px; }
-#screen-panel[open] .chev, #review-report[open] .chev { transform: rotate(90deg); }
+#screen-panel summary, #review-report summary, #charts-panel summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: var(--s2); padding: var(--s2) var(--s3); font-size: var(--fs-md); }
+#screen-panel summary::-webkit-details-marker, #review-report summary::-webkit-details-marker, #charts-panel summary::-webkit-details-marker { display: none; }
+#screen-panel summary:hover, #review-report summary:hover, #charts-panel summary:hover { background: var(--chip); border-radius: var(--radius); }
+#screen-panel .chev, #review-report .chev, #charts-panel .chev { color: var(--muted); transition: transform .15s; display: inline-block; width: 10px; }
+#screen-panel[open] .chev, #review-report[open] .chev, #charts-panel[open] .chev { transform: rotate(90deg); }
 #screen-panel .tag, #review-report .tag { font-size: var(--fs-xs); color: var(--muted); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 0 var(--s1); }
 #screen-panel summary b, #review-report summary b { white-space: nowrap; }
-#screen-panel summary .meta, #review-report summary .meta { color: var(--muted); font-size: var(--fs-sm); margin-left: auto; text-align: right; }
+#screen-panel summary .meta, #review-report summary .meta, #charts-panel summary .meta { color: var(--muted); font-size: var(--fs-sm); margin-left: auto; text-align: right; }
 #screen-panel .screen-body, #review-report .screen-body { padding: 0 var(--s3) var(--s3); border-top: 1px solid var(--line); }
 #review-counts { white-space: pre-line; margin: var(--s3) 0; }
 #review-svg { background: white; padding: var(--s2); border-radius: var(--radius); overflow-x: auto; }
@@ -364,7 +364,7 @@ kbd { font-size: var(--fs-xs); border: 1px solid var(--line); border-bottom-widt
 /* narrow screens: rules that must come after the ones they override */
 @media (max-width: 900px) {
   .export-group { flex-wrap: wrap; flex: 1 1 100%; }
-  #screen-panel summary, #review-report summary { flex-wrap: wrap; }
+  #screen-panel summary, #review-report summary, #charts-panel summary { flex-wrap: wrap; }
   #screen-panel summary .meta, #review-report summary .meta { flex-basis: 100%; text-align: left; margin-left: var(--s4); }
   .bulk .hint { display: none; }
 }
@@ -886,3 +886,50 @@ main textarea, main input[type="text"] { unicode-bidi: plaintext; }
 }
 .ctx-menu button:hover, .ctx-menu button:focus-visible { background: var(--accent); color: var(--on-accent); outline: none; }
 .ctx-menu kbd { font: inherit; color: inherit; opacity: .6; }
+
+/* ---------- Desktop workspace: toolbar ---------- */
+header { gap: var(--s3); background: var(--panel); border-bottom: 1px solid var(--line); }
+.proj-menu { position: relative; }
+.proj-menu > summary { list-style: none; cursor: pointer; padding: var(--s1) var(--s2); border-radius: var(--r-sm); font-size: var(--fs-lg); }
+.proj-menu > summary::-webkit-details-marker { display: none; }
+.proj-menu > summary::after { content: ' ▾'; color: var(--muted); font-size: var(--fs-xs); }
+.proj-menu > summary:hover { background: var(--chip); }
+.menu-pop {
+  position: absolute; left: 0; top: calc(100% + var(--s1)); z-index: 40; min-width: 200px; padding: var(--s1);
+  display: flex; flex-direction: column; background: var(--panel); border-radius: var(--r-md); box-shadow: var(--float);
+}
+.menu-pop button { border: 0; background: none; text-align: left; padding: var(--s1) var(--s2); border-radius: var(--r-sm); color: var(--ink); cursor: default; }
+.menu-pop button:hover { background: var(--accent); color: var(--on-accent); }
+.menu-pop button.danger { color: var(--bad); }
+.menu-pop button.danger:hover { background: var(--bad); color: #fff; }
+.menu-pop hr { border: 0; border-top: 1px solid var(--line); margin: var(--s1) var(--s1); }
+.menu-pop hr:first-child, .menu-pop hr:last-child { display: none; }
+/* Segmented control, as in a macOS toolbar. */
+.seg { display: inline-flex; padding: var(--s0); gap: var(--s0); background: var(--chip); border-radius: var(--r-md); }
+.seg button { border: 0; background: none; padding: var(--s1) var(--s3); border-radius: var(--r-sm); color: var(--ink); cursor: default; font-weight: 500; }
+.seg button:hover { background: var(--active-line); }
+.seg button.on { background: var(--panel); box-shadow: var(--shadow); }
+/* Sidebar header with its add button. */
+.side-head { display: flex; align-items: center; justify-content: space-between; }
+.side-head h3 { margin-right: 0; }
+.side-add { width: 22px; height: 22px; margin: 10px 8px 0 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); font-size: var(--fs-lg); line-height: 1; cursor: default; }
+.side-add:hover { background: var(--chip); color: var(--ink); }
+
+/* Results: compact counts; charts fold away so the paper list starts near the top. */
+.stat { padding: var(--s2) var(--s3); }
+.stat b { font-size: var(--fs-xl); }
+.fold-charts { margin-bottom: var(--s3); }
+.fold-charts .charts { margin: var(--s3) 0 0; }
+
+/* Wide windows: paper details are a third pane beside the list (sidebar | list | reader), not an overlay. */
+@media (min-width: 1200px) {
+  .drawer { width: clamp(420px, 40vw, 640px); box-shadow: none; transition: none; }
+  body:has(.drawer.open) .main-col { margin-right: clamp(420px, 40vw, 640px); }
+}
+.stats { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: var(--s2); }
+
+/* Counts as one quiet strip above the list, not a row of tiles. */
+.stats { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s4); margin: 0 0 var(--s3); }
+.stats .stat { display: inline-flex; align-items: baseline; gap: var(--s1); padding: 0; border: 0; background: none; box-shadow: none; }
+.stats .stat b { display: inline; font-size: var(--fs-lg); }
+.drawer .share-bar { margin: var(--s2) 52px 0 0; }

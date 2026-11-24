@@ -386,7 +386,7 @@ def test_matrix_validation_errors(lens_server: LensServer) -> None:
 def test_lens_assets(lens_server: LensServer) -> None:
     _, html = lens_server.call('/')
     _, js = lens_server.call('/static/app.js')
-    assert b'data-view="ask"' in html and b'data-view="matrix"' in html
+    assert b'data-go="ask"' in html and b'data-go="matrix"' in html
     assert b'id="lens-preview"' in html and b'Evidence Lens' in html
     lens_js = js.split(b'/* ---------- Evidence Lens ---------- */')[1].split(b'function init()')[0]
     assert b'innerHTML' not in lens_js and b'textContent' in lens_js
