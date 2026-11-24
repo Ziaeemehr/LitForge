@@ -261,7 +261,7 @@ def run_desktop(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
 
 # Menu bar: (menu, [(title, LFMenu command) or None for a separator]). The ⌘ keys live in app.js, because
 # pywebview menus take no shortcuts; titles name them so they are discoverable.
-MENUS = [
+MENUS: list[tuple[str, list[tuple[str, str] | None]]] = [
     ("File", [("New Search  ⌘N", "new"), None, ("Export Markdown  ⌘E", "export")]),
     ("Appearance", [("Toggle Sidebar  ⌘\\", "sidebar"), ("Switch Theme", "theme")]),
     ("Go", [("Recents  ⌘2", "recents"), ("Library  ⌘3", "library"), None, ("Ask  ⌘4", "ask"),
