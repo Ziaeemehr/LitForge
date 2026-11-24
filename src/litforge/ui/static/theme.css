@@ -1,0 +1,41 @@
+/* LitForge design tokens: macOS-native neutrals with the teal of the LitForge mark as the one accent.
+   Every colour, type size, radius and spacing step used by app.css is defined here. */
+:root {
+  /* Colour */
+  --bg: #f5f5f7; --panel: #ffffff; --side: #ededf0; --ink: #1d1d1f; --muted: #6e6e73; --line: rgba(60, 60, 67, .16);
+  --accent: #0d786c; --accent-soft: rgba(13, 120, 108, .12); --on-accent: #ffffff;
+  --good: #1a7f37; --good-soft: #e8f5ec; --bad: #c4291c; --bad-soft: #fdecea; --warn: #9a6700;
+  --chip: rgba(60, 60, 67, .07); --bar: #9fd8cf;
+  --sel: rgba(13, 120, 108, .22); --active-line: rgba(29, 29, 31, .04);
+  --shadow: 0 0 0 .5px rgba(0, 0, 0, .06), 0 1px 2px rgba(0, 0, 0, .06);
+  --float: 0 0 0 .5px rgba(0, 0, 0, .12), 0 10px 30px rgba(0, 0, 0, .16);
+  --cm-cmd: #0a6b60; --cm-arg: #8250df; --cm-math: #b35900; --cm-comment: #8a8a8e;
+  /* Type: macOS scale (caption, footnote, body, title 3, title 2, title 1) */
+  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 17px; --fs-2xl: 22px;
+  /* Shape: controls, cards and menus, sheets */
+  --r-sm: 5px; --r-md: 8px; --r-lg: 12px; --r-pill: 999px; --radius: var(--r-md);
+  /* Spacing: 4 px grid */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+  color-scheme: light;
+}
+/* Dark: follows the system unless the theme button pins one (data-theme on <html>). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1e1e1e; --panel: #282828; --side: #232323; --ink: #f2f2f7; --muted: #98989d; --line: rgba(255, 255, 255, .12);
+    --accent: #19c2ae; --accent-soft: rgba(25, 194, 174, .16); --on-accent: #062b27;
+    --good: #4cc38a; --good-soft: #17301f; --bad: #ff6b5e; --bad-soft: #3a1c1a; --warn: #e0b04a;
+    --chip: rgba(255, 255, 255, .08); --bar: #1d6d63;
+    --sel: rgba(25, 194, 174, .3); --active-line: rgba(255, 255, 255, .05);
+    --shadow: 0 0 0 .5px rgba(255, 255, 255, .08); --float: 0 0 0 .5px rgba(255, 255, 255, .14), 0 10px 30px rgba(0, 0, 0, .5);
+    --cm-cmd: #5eead4; --cm-arg: #c4b5fd; --cm-math: #fdba74; --cm-comment: #8d8d93; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1e1e1e; --panel: #282828; --side: #232323; --ink: #f2f2f7; --muted: #98989d; --line: rgba(255, 255, 255, .12);
+  --accent: #19c2ae; --accent-soft: rgba(25, 194, 174, .16); --on-accent: #062b27;
+  --good: #4cc38a; --good-soft: #17301f; --bad: #ff6b5e; --bad-soft: #3a1c1a; --warn: #e0b04a;
+  --chip: rgba(255, 255, 255, .08); --bar: #1d6d63;
+  --sel: rgba(25, 194, 174, .3); --active-line: rgba(255, 255, 255, .05);
+  --shadow: 0 0 0 .5px rgba(255, 255, 255, .08); --float: 0 0 0 .5px rgba(255, 255, 255, .14), 0 10px 30px rgba(0, 0, 0, .5);
+  --cm-cmd: #5eead4; --cm-arg: #c4b5fd; --cm-math: #fdba74; --cm-comment: #8d8d93; color-scheme: dark;
+}

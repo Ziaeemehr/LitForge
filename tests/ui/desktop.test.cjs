@@ -213,6 +213,7 @@ function folderSetup(desktopMode) {
     $: id => elements[id] ||= {
       value: '', click: () => calls.push(id),
       focus: () => calls.push('focus'), scrollIntoView: () => calls.push('scroll'),
+      closest: () => ({}),
     },
     toast: msg => calls.push(['toast', msg]),
   });

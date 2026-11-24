@@ -72,6 +72,7 @@ class FakeWindow:
 def fake_webview(close_on_navigate: bool = True) -> tuple[types.ModuleType, dict[str, Any]]:
     seen: dict[str, Any] = {}
     mod = types.ModuleType("webview")
+    mod.menu = types.SimpleNamespace(Menu=lambda *a: a, MenuAction=lambda *a: a, MenuSeparator=lambda: None)  # type: ignore[attr-defined]
 
     def create_window(title: str, html: str = "", **kw: Any) -> FakeWindow:
         seen["window"] = FakeWindow(html, close_on_navigate)
@@ -258,6 +259,7 @@ def test_downloads_have_a_folder_even_without_xdg_user_dirs(tmp_path: Path, monk
     gtk = types.ModuleType("webview.platforms.gtk")
     gtk.BrowserView = BrowserView  # type: ignore[attr-defined]
     webview = types.ModuleType("webview")
+    webview.menu = types.SimpleNamespace(Menu=lambda *a: a, MenuAction=lambda *a: a, MenuSeparator=lambda: None)  # type: ignore[attr-defined]
     webview.__path__ = []  # type: ignore[attr-defined]
     platforms = types.ModuleType("webview.platforms")
     platforms.__path__ = []  # type: ignore[attr-defined]

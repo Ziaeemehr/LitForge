@@ -374,7 +374,7 @@
     }
     html += left ? '<p>The ' + left + ' paper' + (left === 1 ? '' : 's') + ' below still need' + (left === 1 ? 's' : '') +
       ' a PDF; under each title is why it could not be downloaded. Get them in your browser, then add them with ' +
-      '+ New → My sources.</p>' : '<p>Every listed paper now has its PDF.</p>';
+      'New search → PDFs → text.</p>' : '<p>Every listed paper now has its PDF.</p>';
     $('missing-report').innerHTML = html;
     $('missing-report').hidden = false;
     if ($('report-export')) $('report-export').onclick = function () { $('missing').close(); $('btn-export').click(); };
@@ -648,6 +648,9 @@
     ['new', 'recents', 'library', 'ask', 'matrix', 'claims', 'gaps', 'console', 'write', 'settings'].forEach(function (v) { $(('view-' + v)).hidden = v !== view; });
     $('results').hidden = view !== 'results';
     document.querySelectorAll('.sidebar [data-view]').forEach(function (b) { b.classList.toggle('on', b.dataset.view === view); });
+    if (/^(claims|gaps|console)$/.test(view)) $('nav-more').open = true;
+    // Export and missing PDFs act on a result list, so they only show next to one.
+    document.querySelector('header .export-group').hidden = $('btn-missing').hidden = view !== 'results';
     document.querySelectorAll('#side-recent a').forEach(function (a) { a.classList.remove('on'); });
     if (view !== 'results') closeDrawer();
     if (view === 'recents') { $('recents-project').value = state.recentsProject || ''; loadRecents(); }
@@ -658,6 +661,34 @@
     if (view === 'write') loadWrite(); else leaveWrite();
     if (view === 'settings') { loadSettings(); loadUpdates(); }
   }
+
+  // A click outside the export Options menu closes it.
+  document.addEventListener('click', function (e) {
+    var m = document.querySelector('.export-more[open]');
+    if (m && !m.contains(e.target)) m.open = false;
+  });
+
+  // Copy or save any result pane as Markdown (Copy / Save .md bars in index.html).
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-share-act]');
+    if (!btn) return;
+    var bar = btn.closest('.share-bar');
+    var title = bar.dataset.shareTitle + (state.project ? ' — ' + state.project : '');
+    var md = LFShare.toMarkdown(bar.dataset.shareFrom.split(' ').map($), title);
+    if (!md) { toast('Nothing to copy yet.'); return; }
+    if (btn.dataset.shareAct === 'save') {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+      a.download = LFShare.slug(title) + '.md';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+      toast('Saved ' + a.download);
+      return;
+    }
+    if (!navigator.clipboard) { toast('Copying is not available here; use Save .md.'); return; }
+    navigator.clipboard.writeText(md).then(function () { toast('Copied as Markdown'); },
+      function () { toast('Copying was blocked; use Save .md.'); });
+  });
 
   function deleteRun() {
     if (!window.confirm('Delete this run? It leaves History, and its ' + state.data.papers.length + ' papers leave ' +
@@ -1778,7 +1809,7 @@
 
   /* ---------- my PDFs ---------- */
 
-  // What the Export menu in the header covers, said as the My sources form and its report say it.
+  // What the Export menu in the header covers, said as the PDFs → text form and its report say it.
   var SCOPE_WORDS = { all: 'all papers of the project', relevant: 'the papers marked ✓',
     'not-irrelevant': 'all papers except ✗', visible: 'the visible list and the added papers' };
   function scopeWords() { return SCOPE_WORDS[$('export-scope').value] || SCOPE_WORDS.all; }
@@ -1885,6 +1916,7 @@
         }).then(function (path) {
           if (path) {
             var folder = $('pdf-folder');
+            folder.closest('details').open = true;
             folder.value = path;
             folder.focus();
             folder.scrollIntoView({ block: 'nearest' });
@@ -2079,7 +2111,7 @@
     $('pdfs-export-wrap').hidden = mode !== 'pdfs';
     $('btn-more').hidden = mode !== 'similar';
     $('btn-run').textContent = { similar: 'Find similar papers', search: 'Search', 'import': 'Import list',
-      pdfs: $('pdfs-export').checked ? 'Add sources & export' : 'Add sources' }[mode];
+      pdfs: $('pdfs-export').checked ? 'Extract text' : 'Add to library' }[mode];
     store.set('mode', mode);
   }
 
@@ -6280,7 +6312,7 @@
     $('pdfs-export').checked = store.get('pdfs-export', true);
     $('pdfs-export-scope').textContent = scopeWords();
     $('pdfs-export').onchange = function () { store.set('pdfs-export', this.checked); setMode(state.mode); };
-    setMode(store.get('mode', 'similar'));
+    setMode(store.get('mode', 'pdfs'));
     if (location.hash === '#models') history.replaceState(null, '', '#settings');
     var linked = /^#run=([\w-]+)$/.exec(location.hash);  // a bookmarked search; never set automatically
     showView(/^#(recents|library|ask|matrix|claims|gaps|console|write|settings)$/.test(location.hash) ? location.hash.slice(1) : 'new');
@@ -6548,6 +6580,25 @@
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === '\\') {
         e.preventDefault(); applySidebar(!document.querySelector('.app').classList.contains('side-hidden'));
       }
+    });
+    // Commands shared by the ⌘ shortcuts and the desktop window's menu bar (desktop/host.py calls LFMenu).
+    var GO = ['new', 'recents', 'library', 'ask', 'matrix', 'write'];
+    window.LFMenu = function (cmd) {
+      if (cmd === 'new') return newSearch();
+      if (cmd === 'export') {
+        if (state.page !== 'results') { toast('Open a result list first (Recent, in the sidebar)'); return; }
+        return $('btn-export').click();
+      }
+      if (cmd === 'sidebar') return $('btn-side-hide').click();
+      if (cmd === 'theme') return $('btn-theme').click();
+      if (cmd === 'guide') return openGuide();
+      if (cmd === 'claims' || cmd === 'gaps' || cmd === 'console' || cmd === 'settings' || GO.indexOf(cmd) >= 0) return showView(cmd);
+    };
+    document.addEventListener('keydown', function (e) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || document.querySelector('dialog[open]')) return;
+      var cmd = { n: 'new', e: 'export', ',': 'settings' }[e.key] || GO[+e.key - 1];
+      if (!cmd || (state.page === 'write' && e.key === 'e')) return;  // the editor keeps its own ⌘E
+      e.preventDefault(); window.LFMenu(cmd);
     });
     $('btn-theme').onclick = function () {
       var cur = store.get('theme', 'auto');

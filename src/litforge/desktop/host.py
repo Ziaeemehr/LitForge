@@ -259,6 +259,35 @@ def run_desktop(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
             lease.close()
 
 
+# Menu bar: (menu, [(title, LFMenu command) or None for a separator]). The ⌘ keys live in app.js, because
+# pywebview menus take no shortcuts; titles name them so they are discoverable.
+MENUS = [
+    ("File", [("New Search  ⌘N", "new"), None, ("Export Markdown  ⌘E", "export")]),
+    ("Appearance", [("Toggle Sidebar  ⌘\\", "sidebar"), ("Switch Theme", "theme")]),
+    ("Go", [("Recents  ⌘2", "recents"), ("Library  ⌘3", "library"), None, ("Ask  ⌘4", "ask"),
+            ("Matrix  ⌘5", "matrix"), ("Claims", "claims"), ("Gaps", "gaps"), ("Workflows", "console"), None,
+            ("Write  ⌘6", "write"), None, ("Settings  ⌘,", "settings")]),
+    ("Help", [("Quick Guide  ?", "guide")]),
+]
+
+
+def build_menu(webview: Any, holder: dict[str, object]) -> list[Any]:
+    """The window's menu bar; each item runs its command in the page once the page is loaded."""
+    Menu, MenuAction, MenuSeparator = webview.menu.Menu, webview.menu.MenuAction, webview.menu.MenuSeparator
+
+    def action(cmd: str) -> Any:
+        def run() -> None:
+            window = holder.get("window")
+            if window is not None:
+                cast(Any, window).evaluate_js(f"window.LFMenu && window.LFMenu({json.dumps(cmd)})")
+        return run
+
+    key = "⌘" if sys.platform == "darwin" else "Ctrl+"
+    return [Menu(title, [MenuSeparator() if item is None else MenuAction(item[0].replace("⌘", key), action(item[1]))
+                         for item in items])
+            for title, items in MENUS]
+
+
 def _run_window(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: Path, icon: Path | None,
                 storage_path: Path | None, preload: Sequence[str], holder: dict[str, object]) -> int:
     for lib in preload:  # e.g. libxcb-cursor for Qt on X11, copied by the installer without sudo
@@ -277,7 +306,8 @@ def _run_window(backend_cmd: Sequence[str], *, gui: str, title: str, log_path: P
     result = {"rc": 0}
     bridge = FolderBridge(log_path)
     window = webview.create_window(title, html=LOADING_HTML, width=1280, height=860, min_size=(820, 560),
-                                   js_api=bridge)
+                                   js_api=bridge, text_select=True, zoomable=True,
+                                   menu=build_menu(webview, holder))  # copyable text; Cmd/Ctrl +/- zoom
     assert window is not None
     bridge._window = window
     holder["window"] = window

@@ -95,6 +95,7 @@ def export_markdown(
     if obsidian:
         for row in rows:
             _, slugs[row["id"]] = _note_title_and_slug(row)
+    combined: list[str] = []
     index_lines = [
         f"# {project}\n",
         "> Private export: contains full extracted text and figure crops.\n",
@@ -178,6 +179,7 @@ def export_markdown(
                 body += "\n## Links in this export\n\n" + "\n".join(f"[[{target}]]" for target in targets) + "\n"
         header = "---\n" + yaml.safe_dump(front, sort_keys=False, allow_unicode=True) + "---\n\n"
         (kb / f"{slug}.md").write_text(header + body, encoding="utf-8")
+        combined.append(body.replace("](../assets/", "](assets/").replace("](../../pdfs/", "](../pdfs/"))
         note_link = f"[[{slug}]]" if obsidian else f"[{title.replace('|', '/')}](knowledge_base/{slug}.md)"
         index_lines.append(
             f"| {note_link} | {row['year'] or ''} "
@@ -186,6 +188,8 @@ def export_markdown(
             + f" | {f'[{file_label}](../pdfs/{pdf.name})' if pdf else ''} |"
             + (f" {row['s_decision'] or ''} |" if screened else "")
         )
+    # One file with every note, for tools that take a single source (NotebookLM, a cloud model's chat).
+    (root / "all_papers.md").write_text("\n\n---\n\n".join(combined), encoding="utf-8")
     for slug in previous - set(written.values()):
         (kb / f"{slug}.md").unlink(missing_ok=True)
         shutil.rmtree(root / "assets" / slug, ignore_errors=True)
