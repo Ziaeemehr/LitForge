@@ -38,3 +38,5 @@ scripts/spell/node_modules/
 # Desktop CI environments and evidence (published as Actions artifacts)
 /.desktop-host-ci/
 /desktop-results/
+# ...and the same state when an agent ran inside a subfolder
+**/*/.omc/
