@@ -665,6 +665,47 @@
     if (view === 'settings') { loadSettings(); loadUpdates(); }
   }
 
+  // Right-click on selected text: Copy and Select all (the desktop window has no context menu of its own).
+  // Fields and the LaTeX editor keep their usual menu.
+  var ctxMenu = null;
+  function closeCtxMenu() { if (ctxMenu) { ctxMenu.remove(); ctxMenu = null; } }
+  document.addEventListener('contextmenu', function (e) {
+    closeCtxMenu();
+    if (e.target.closest('input, textarea, select, .cm-editor, [contenteditable="true"]')) return;
+    var sel = window.getSelection(), text = sel ? sel.toString() : '';
+    if (!text.trim()) return;
+    e.preventDefault();
+    var range = sel.getRangeAt(0).cloneRange();
+    ctxMenu = document.createElement('div');
+    ctxMenu.className = 'ctx-menu'; ctxMenu.setAttribute('role', 'menu');
+    [['Copy', /Mac/.test(navigator.platform) ? '⌘C' : 'Ctrl+C', function () {
+      sel.removeAllRanges(); sel.addRange(range);
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+      if (ok) { toast('Copied'); return; }
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { toast('Copied'); }, function () { toast('Press ⌘C to copy'); });
+    }], ['Select all in this section', '', function () {
+      var box = range.commonAncestorContainer;
+      box = (box.nodeType === 1 ? box : box.parentNode).closest('.dbody, .lens-rows, .md, .card, main') || document.body;
+      sel.removeAllRanges(); var r = document.createRange(); r.selectNodeContents(box); sel.addRange(r);
+    }]].forEach(function (item) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.setAttribute('role', 'menuitem');
+      b.innerHTML = esc(item[0]) + (item[1] ? '<kbd>' + item[1] + '</kbd>' : '');
+      b.onclick = function () { closeCtxMenu(); item[2](); };
+      ctxMenu.appendChild(b);
+    });
+    document.body.appendChild(ctxMenu);
+    var w = ctxMenu.offsetWidth, h = ctxMenu.offsetHeight;
+    ctxMenu.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px';
+    ctxMenu.style.top = Math.min(e.clientY, innerHeight - h - 8) + 'px';
+    ctxMenu.querySelector('button').focus();
+  });
+  document.addEventListener('mousedown', function (e) { if (ctxMenu && !ctxMenu.contains(e.target)) closeCtxMenu(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeCtxMenu(); });
+  window.addEventListener('blur', closeCtxMenu);
+  window.addEventListener('scroll', closeCtxMenu, true);
+
   // A click outside the export Options menu closes it.
   document.addEventListener('click', function (e) {
     var m = document.querySelector('.export-more[open]');
