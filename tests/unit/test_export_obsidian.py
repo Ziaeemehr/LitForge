@@ -104,3 +104,11 @@ def test_cli_obsidian_json(conn, paths, fetch):
     assert "[[alpha-a]]" in (Path(report["path"]) / "README.md").read_text()
     if fetch:
         assert "downloaded 0 of 4" in response.stderr
+
+
+def test_all_papers_file_combines_every_note(conn, paths):
+    seed(conn)
+    root, texts = notes(conn, paths)
+    combined = (root / "all_papers.md").read_text()
+    assert combined.count("\n\n---\n\n") == len(texts) - 1
+    assert "../assets/" not in combined

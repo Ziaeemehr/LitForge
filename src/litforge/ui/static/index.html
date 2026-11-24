@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LitForge</title>
 <link rel="stylesheet" href="/static/vendor/katex.min.css">
+<link rel="stylesheet" href="/static/theme.css">
 <link rel="stylesheet" href="/static/app.css">
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <script>try { var t = JSON.parse(localStorage.getItem('lf-theme')); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
@@ -14,19 +15,17 @@
 <nav class="sidebar" id="sidebar">
   <div class="brand-row"><div class="brand">Lit<span>Forge</span></div>
     <button class="side-toggle" id="btn-side-hide" title="Hide the sidebar (Ctrl/Cmd+\\)" aria-label="Hide the sidebar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 10l-2 2 2 2"/></svg></button></div>
-  <button class="nav-new" id="nav-new" data-view="new" aria-label="New" title="Start a new search: from a paper, keywords, a reference list or your own PDFs"><svg class="nav-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="nav-label">New</span></button>
-  <button class="nav-item" data-view="recents" aria-label="Recents" title="Every search you ran, newest first"><svg class="nav-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><span class="nav-label">Recents</span></button>
+  <div class="side-head"><h3 title="A project collects the papers, ✓/✗ marks and exports of one review">Projects</h3><button type="button" class="side-add" id="side-new" title="New project" aria-label="New project">+</button></div>
+  <div class="side-list" id="side-projects"></div>
+  <h3>Collections</h3>
   <button class="nav-item" data-view="library" aria-label="Library" title="All papers LitForge knows, across projects"><svg class="nav-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4v16H5zM10 4h4v16h-4z"/><path d="M15.5 5.5l3.5-1 3 15-3.5 1z"/></svg><span class="nav-label">Library</span></button>
-  <button class="nav-item" data-view="ask" aria-label="Ask" title="Ask the current project using cited library evidence"><svg class="nav-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5h14v10H9l-4 4z"/></svg><span class="nav-label">Ask</span></button>
-  <button class="nav-item" data-view="matrix" aria-label="Matrix" title="Compare studies in the current project"><svg class="nav-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 10h16M4 15h16M10 4v16"/></svg><span class="nav-label">Matrix</span></button>
+  <details class="nav-more" id="nav-more"><summary class="nav-item" title="Claims, gaps and multi-step workflows">More tools</summary>
   <button class="nav-item" data-view="claims" aria-label="Claims" title="Explore cited claims and disagreements in this project"><svg class="nav-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h4v4H7zM13 7h4v4h-4z"/><path d="M9 11c0 3-1 4-3 5M15 11c0 3-1 4-3 5"/></svg><span class="nav-label">Claims</span></button>
   <button class="nav-item" data-view="gaps" aria-label="Gaps" title="Review evidence gaps and design research proposals"><svg class="nav-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg><span class="nav-label">Gaps</span></button>
-  <button class="nav-item" data-view="console" aria-label="Console" title="Plan, preview and run checkpointed research workflows"><svg class="nav-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10l3 2-3 2M12 15h5"/></svg><span class="nav-label">Console</span></button>
-  <button class="nav-item" data-view="write" aria-label="Write" title="Write LaTeX documents that cite this project's papers"><svg class="nav-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg><span class="nav-label">Write</span></button>
-  <h3 title="A project collects the papers, ✓/✗ marks and exports of one review">Projects</h3>
-  <div class="side-list" id="side-projects"></div>
-  <h3 title="Your latest searches; click one to reopen it with its marks">Recent</h3>
-  <div class="side-list" id="side-recent"></div>
+  <button class="nav-item" data-view="console" aria-label="Workflows" title="Plan, preview and run checkpointed research workflows"><svg class="nav-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10l3 2-3 2M12 15h5"/></svg><span class="nav-label">Workflows</span></button>
+  </details>
+  
+  <div class="side-list side-runs" id="side-recent" title="Searches and imports of this project; click one to reopen it"></div>
   <div class="side-foot"><button class="btn small" data-view="settings" title="Settings (,) — models, keys, cloud and library" aria-label="Settings"><svg class="nav-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg><span class="nav-label">Settings</span> <span id="update-badge" class="update-dot" hidden role="img" aria-label="Update available"></span></button><button class="btn small" id="btn-help" title="Quick guide: how LitForge works (?)" aria-label="Guide"><span class="nav-ico">?</span><span class="nav-label">Guide</span></button>
     <button class="btn small" id="btn-theme" title="Theme: follow the system, light or dark"><span class="nav-ico" id="theme-ico"></span><span class="nav-label" id="theme-label"></span></button>
     <button class="btn small ghost" id="btn-quit" title="Stop LitForge on this computer. Open it again from its icon" aria-label="Quit"><span class="nav-ico">⏻</span><span class="nav-label">Quit</span></button></div>
@@ -36,31 +35,21 @@
 <div class="main-col">
 <header>
   <button class="side-toggle" id="btn-side-show" title="Show the sidebar (Ctrl/Cmd+\\)" aria-label="Show the sidebar" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M13 10l2 2-2 2"/></svg></button>
-  <div class="current" id="current-project"></div>
-  <button class="btn small ghost danger" id="btn-delete-project" title="Delete the current project (papers and PDFs stay in the library)" hidden>Delete project</button>
-  <button class="btn small ghost" id="btn-open-folder" title="Show this project's export folder in Finder or the file manager" hidden>Open folder</button>
-  <div class="spacer"></div>
-  <button class="btn" id="btn-missing" title="Papers of this project that have no PDF yet, with links to get them by hand">Missing PDFs</button>
-  <div class="export-group" role="group" aria-label="Export">
-    <span class="glabel">Export</span>
-    <select id="export-scope" title="Which papers to export and check for missing PDFs">
-      <option value="all">All papers</option>
-      <option value="relevant">Marked ✓ only</option>
-      <option value="not-irrelevant">All except ✗</option>
-      <option value="visible">Visible list</option>
-    </select>
-    <label class="check" id="fetch-wrap" title="Slower: before exporting, download open-access PDFs (arXiv, publisher copies) of the chosen papers that have none, so their notes contain the full text"><input type="checkbox" id="export-fetch"> with PDFs</label>
-    <label class="check" title="Include non-primary versions as separate notes"><input type="checkbox" id="export-all-versions"> all versions</label>
-    <label class="check" title="Add screening tags, title aliases and [[links]] between exported notes"><input type="checkbox" id="export-obsidian"> Obsidian links</label>
-    <select id="export-math" title="Better math: how the pages with equations, tables or broken text are rewritten before exporting. Results are kept, so raising the level later only processes what is new.">
-      <option value="off" title="The text extracted from the PDF; equations often come out garbled">Math: as extracted</option>
-      <option value="medium" title="Pix2Text reads every formula as LaTeX; the text stays as extracted from the PDF. About 1-5 s per page">Math: medium (fast)</option>
-      <option value="high" title="Whole pages are rewritten: formulas, tables and text, also in scanned papers. On an NVIDIA GPU Nemotron Parse reads English pages (about 5 s each); a local vision model (Ollama) reads Persian pages (about 12 s on the GPU)">Math: high (best)</option>
-    </select>
-    <button class="btn small" id="btn-export-ris" title="Export included papers with their screening decision as RIS">RIS</button>
-    <button class="btn small" id="btn-export-bib" title="Export included papers with their screening decision as BibTeX">BibTeX</button>
-    <button class="btn accent" id="btn-export" title="Write Markdown notes to the project's output folder">Export Markdown</button>
+  <details class="proj-menu" id="proj-menu"><summary class="current" id="current-project" title="Project actions"></summary><div class="menu-pop">
+    <button type="button" id="btn-open-folder" hidden>Show export folder</button>
+    <hr>
+    <button type="button" class="danger" id="btn-delete-project" hidden>Delete project…</button>
+  </div></details>
+  <button type="button" class="btn accent add-btn" id="btn-add" title="Add PDFs or find papers for this project (⌘N)">+ Add papers</button>
+  <div class="seg" role="tablist" aria-label="Project views">
+    <button type="button" role="tab" data-go="papers" title="The project's papers (⌘1)">Papers</button>
+    <button type="button" role="tab" data-go="ask" title="Ask the project's papers (⌘4)">Ask</button>
+    <button type="button" role="tab" data-go="matrix" title="Compare studies (⌘5)">Matrix</button>
+    <button type="button" role="tab" data-go="write" title="Write with citations (⌘6)">Write</button>
   </div>
+  <div class="spacer"></div>
+
+
 </header>
 
 <main id="main">
@@ -269,12 +258,14 @@
     </div>
   </section>
   <section id="view-new" class="view">
+    <div class="add-sheet">
+    <div class="viewhead"><h2>Add papers</h2><span class="meta">Your files are read once and kept in the library</span></div>
     <div class="card composer">
-      <div class="tabs">
-        <button data-mode="similar" class="on" title="Start from one paper (DOI, arXiv id, PDF) or an abstract and collect papers like it">Similar</button>
-        <button data-mode="search" title="Keyword queries against OpenAlex, Crossref and arXiv">Search</button>
-        <button data-mode="import" title="Bring in a .csv, .bib or .ris list from Elicit, Zotero or another tool">Import list</button>
-        <button data-mode="pdfs" title="Add your own PDFs and documents (Word, PowerPoint, Excel, web pages…) or links to articles; each is matched to its paper and its text extracted">My sources</button>
+      <div class="seg add-src" role="tablist" aria-label="Where the papers come from">
+        <button data-mode="pdfs" title="Drop PDFs or other documents and get clean Markdown text with figures, ready for NotebookLM or a cloud model">Your PDFs</button>
+        <button data-mode="similar" title="Start from one paper (DOI, arXiv id, PDF) or an abstract and collect papers like it">From a paper</button>
+        <button data-mode="search" title="Keyword queries against OpenAlex, Crossref and arXiv">Keyword search</button>
+        <button data-mode="import" title="Bring in a .csv, .bib or .ris list from Elicit, Zotero or another tool">Reference list</button>
       </div>
 
       <form id="form-similar">
@@ -301,18 +292,18 @@
       </form>
 
       <form id="form-pdfs" hidden>
-        <label class="f">Folder on this computer <small>(subfolders included)</small></label>
-        <input type="text" id="pdf-folder" placeholder="~/papers/my-review">
-        <label class="f">or files <small>(PDF, Word, PowerPoint, Excel, HTML, EPUB, Markdown or text)</small></label>
-        <div class="drop" id="drop-pdfs">Drop files or a folder here, or <a href="#" id="pick-pdfs">choose files</a>
-          · <a href="#" id="pick-dir">choose a folder</a></div>
+        <div class="drop big" id="drop-pdfs"><span>Drop PDFs or a folder here, or <a href="#" id="pick-pdfs">choose files</a>
+          or <a href="#" id="pick-dir">a folder</a></span><small>PDF, Word, PowerPoint, Excel, HTML, EPUB, Markdown or text</small></div>
         <input type="file" id="files-pdfs" accept=".pdf,.docx,.pptx,.xlsx,.html,.htm,.epub,.md,.markdown,.txt" multiple hidden>
         <input type="file" id="dir-pdfs" webkitdirectory multiple hidden>
-        <label class="f" for="pdf-links">or links to articles <small>(one per line: the article's page, a doi.org or arXiv link, or a PDF link)</small></label>
-        <textarea id="pdf-links" rows="3" placeholder="https://www.nature.com/articles/…&#10;https://arxiv.org/abs/2007.09114"></textarea>
-        <p class="hint">Each file is added to the library once (identical files are recognized), its text is
-          extracted, and it is attached to a matching paper found earlier; a link brings its paper and, when one is
-          free to read, its PDF. The papers then appear as a run you can mark ✓.</p>
+        <p class="hint">You get one Markdown note per paper with its text, figures and equations, plus
+          <code>all_papers.md</code> with everything in one file, ready for NotebookLM or a cloud model.</p>
+        <details class="fold-opts"><summary>Other ways to add: a folder path or links</summary>
+          <label class="f">Folder on this computer <small>(subfolders included)</small></label>
+          <input type="text" id="pdf-folder" placeholder="~/papers/my-review">
+          <label class="f" for="pdf-links">Links to articles <small>(one per line: the article's page, a doi.org or arXiv link, or a PDF link)</small></label>
+          <textarea id="pdf-links" rows="3" placeholder="https://www.nature.com/articles/…&#10;https://arxiv.org/abs/2007.09114"></textarea>
+        </details>
       </form>
 
       <form id="form-import" hidden>
@@ -323,31 +314,28 @@
           use <b>Find similar to these</b> to expand the list through citations and meaning.</p>
       </form>
 
-      <label class="f">Project name</label>
+      <div class="add-foot">
+        <div class="add-proj"><label class="f" for="project-name">Project</label>
       <input type="text" id="project-name" list="project-list" placeholder="my-review">
-      <datalist id="project-list"></datalist>
+      <datalist id="project-list"></datalist></div>
+        <div class="add-opts"><label class="check" id="pdfs-export-wrap" title="Uses the paper choice of Export above the paper list, and the folder under Where the files go"><input type="checkbox" id="pdfs-export" checked> <span>Then export the notes of <b id="pdfs-export-scope">all papers of the project</b></span></label>
+        <label class="check" id="emb-wrap" title="Rank by meaning with a local embedding model, not only by shared words. Slower on the first run while the model loads"><input type="checkbox" id="embeddings" checked> Meaning-based ranking (embeddings)</label></div>
+        <div class="add-go"><button class="btn" id="btn-more" title="Run a similar-paper search seeded with every paper you marked ✓ in this project">More like my ✓ papers</button>
+        <button class="btn accent" id="btn-run">Find similar papers</button></div>
+      </div>
+      <details class="fold-opts"><summary>Where the files go</summary>
       <label class="f">Export folder <small>(default: Downloads/LitForge/&lt;project&gt;)</small></label>
       <input type="text" id="export-dir" spellcheck="false">
       <div class="hint paths" id="project-paths"></div>
-      <label class="check" id="pdfs-export-wrap" title="Uses the paper choice of Export in the top bar and the export folder above"><input type="checkbox" id="pdfs-export" checked> <span>Then export the notes of <b id="pdfs-export-scope">all papers of the project</b></span></label>
-      <label class="check" id="emb-wrap" title="Rank by meaning with a local embedding model, not only by shared words. Slower on the first run while the model loads"><input type="checkbox" id="embeddings" checked> Meaning-based ranking (embeddings)</label>
-
-      <button class="btn primary" id="btn-run">Find similar papers</button>
-      <button class="btn secondary" id="btn-more" title="Run a similar-paper search seeded with every paper you marked ✓ in this project">More like my ✓ papers</button>
+      </details>
       <div class="progress" id="progress"></div>
     </div>
-    <div class="intro" id="empty">
-      <ol class="steps">
-        <li><b>Find</b><span>Start from a paper, keywords, a reference list or your PDFs. Every result says why it was found.</span></li>
-        <li><b>Review</b><span>Papers are ranked by review priority. Mark each ✓ relevant or ✗ not relevant; marks are kept.</span></li>
-        <li><b>Export</b><span>Write Markdown notes, with PDFs and full text, for the papers you keep.</span></li>
-      </ol>
-      <p>New here? Open the <a href="#" data-help>quick guide</a>. To continue earlier work, pick a search under <b>Recent</b>.</p>
+    <p class="hint add-help">New here? Open the <a href="#" data-help>quick guide</a> (press ?).</p>
     </div>
   </section>
 
   <section id="view-recents" class="view" hidden>
-    <div class="viewhead"><h2>Recents</h2>
+    <div class="viewhead"><h2>Search history</h2>
       <select id="recents-project"><option value="">All projects</option></select></div>
     <div class="card"><div class="rows" id="recents-list"></div></div>
   </section>
@@ -366,39 +354,40 @@
     </div>
   </section>
 
-  <section id="view-ask" class="view" hidden>
-    <div class="viewhead"><h2>Ask</h2><span class="meta">Evidence from the current project</span></div>
-    <div class="card lens-panel">
-      <form id="lens-ask-form">
-        <label class="f" for="lens-question">Question</label>
-        <textarea id="lens-question" rows="3" required placeholder="What does the library report?"></textarea>
-        <div class="lens-actions">
-          <label class="f" for="lens-profile">Model profile</label>
-          <select id="lens-profile" aria-label="Model profile"><option value="">Configured default</option></select>
-          <label class="check"><input type="checkbox" id="lens-sensitive"> Sensitive content</label>
-          <label class="check"><input type="checkbox" id="lens-auto-audit" checked> Audit after answering</label>
-          <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-all-versions"> All versions</label>
-          <button class="btn accent" type="submit" data-lens-work>Ask library</button>
-          <button class="btn" type="button" id="lens-run-audit" data-lens-work>Run audit</button>
-        </div>
-      </form>
-      <p class="hint" id="lens-ask-status" role="status" aria-live="polite"></p>
-      <div class="tabs" role="tablist" aria-label="Answer views">
+  <section id="view-ask" class="view ws" hidden>
+    <div class="ws-main">
+      <div class="viewhead"><h2>Ask</h2><span class="meta">Answers from this project's papers, every quote checked against its page</span></div>
+      <div class="ws-bar"><div class="tabs" role="tablist" aria-label="Answer views">
         <button class="on" id="lens-tab-answer" role="tab" aria-selected="true" aria-controls="lens-answer" data-lens-tab="answer">Answer</button>
         <button id="lens-tab-evidence" role="tab" aria-selected="false" aria-controls="lens-answer" tabindex="-1" data-lens-tab="evidence">Evidence</button>
         <button id="lens-tab-review" role="tab" aria-selected="false" aria-controls="lens-answer" tabindex="-1" data-lens-tab="review">Needs review</button>
-      </div>
-      <button class="toggle" id="lens-audit-filter" aria-pressed="false" title="Show weak, single-source, flagged or non-supported sentences">Audit</button>
+      </div><button class="toggle" id="lens-audit-filter" aria-pressed="false" title="Show weak, single-source, flagged or non-supported sentences">Audit</button><div class="share-bar" data-share-from="lens-answer" data-share-title="Answer" data-share="skip"><button type="button" class="btn small" data-share-act="copy" title="Copy as Markdown, ready to paste into a chat, NotebookLM or a note">Copy</button><button type="button" class="btn small" data-share-act="save" title="Save as a Markdown (.md) file, for example to add as a NotebookLM source">Save .md</button></div></div>
       <div id="lens-answer" class="lens-rows" role="tabpanel" aria-labelledby="lens-tab-answer"></div>
+      <form id="lens-ask-form" class="ask-composer">
+        <label class="f sr-only" for="lens-question">Question</label>
+        <textarea id="lens-question" rows="2" required placeholder="Ask about the papers in this project…  (⌘↩ to send)"></textarea>
+        <button class="btn accent" type="submit" data-lens-work>Ask library</button>
+      </form>
+      <p class="hint" id="lens-ask-status" role="status" aria-live="polite"></p>
     </div>
+    <aside class="inspector" aria-label="Ask options">
+      <h3>Options</h3>
+      <label class="f" for="lens-profile">Model</label>
+      <select id="lens-profile" aria-label="Model profile"><option value="">Configured default</option></select>
+      <label class="check"><input type="checkbox" id="lens-sensitive"> Sensitive content</label>
+      <label class="check"><input type="checkbox" id="lens-auto-audit" checked> Audit after answering</label>
+      <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-all-versions"> All versions</label>
+      <hr>
+      <p class="hint">Check the last answer again, sentence by sentence.</p>
+      <button class="btn" type="button" id="lens-run-audit" data-lens-work>Run audit</button>
+    </aside>
   </section>
 
   <section id="view-claims" class="view" hidden>
-    <div class="viewhead"><h2>Claims</h2><span class="meta">Explore findings, replications and disagreements. Possible causes are hypotheses.</span></div>
+    <div class="viewhead"><h2>Claims</h2><span class="meta">Explore findings, replications and disagreements. Possible causes are hypotheses.</span>
+      <label class="head-model">Model <select id="lens-claims-profile" aria-label="Claims model profile"><option value="">Configured default</option></select></label></div>
     <div class="card lens-panel">
       <div class="lens-actions">
-        <label class="f" for="lens-claims-profile">Model profile</label>
-        <select id="lens-claims-profile" aria-label="Claims model profile"><option value="">Configured default</option></select>
         <label class="check"><input type="checkbox" id="lens-claims-force"> Re-extract cached claims</label>
         <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-claims-all-versions"> All versions</label>
         <button class="btn accent" id="lens-claims-extract" data-lens-work>Extract claims</button>
@@ -407,11 +396,12 @@
         <button class="btn" id="lens-claims-relate" data-lens-work>Assess relations</button>
       </div>
       <p class="hint" id="lens-claims-status" role="status" aria-live="polite"></p>
+      <div class="share-bar" data-share-from="lens-claims-clusters lens-claims-detail" data-share-title="Claims" data-share="skip"><button type="button" class="btn small" data-share-act="copy" title="Copy as Markdown, ready to paste into a chat, NotebookLM or a note">Copy</button><button type="button" class="btn small" data-share-act="save" title="Save as a Markdown (.md) file, for example to add as a NotebookLM source">Save .md</button></div>
       <div id="lens-claims-clusters" class="lens-rows"></div>
       <div id="lens-claims-detail" class="lens-rows"></div>
     </div>
-    <div class="card lens-panel" aria-labelledby="living-title">
-      <h3 id="living-title">Snapshots</h3>
+    <details class="card lens-panel fold" aria-labelledby="living-title">
+      <summary><h3 id="living-title">Snapshots</h3></summary>
       <p class="hint">Save project evidence and refresh stored searches to see what changed.</p>
       <div class="lens-actions">
         <label for="living-label">Snapshot label</label><input id="living-label" type="text" placeholder="Optional label">
@@ -422,12 +412,25 @@
       <div id="living-snapshots" class="lens-rows"></div>
       <h4>Latest delta signals</h4><div id="living-signals" class="lens-rows"></div>
       <details><summary>Latest delta report</summary><pre id="living-report" class="repro-brief"></pre></details>
-    </div>
+    </details>
   </section>
 
-  <section id="view-matrix" class="view" hidden>
-    <div class="viewhead"><h2>Matrix</h2><span class="meta">Compare studies in the current project</span></div>
-    <div class="card lens-panel">
+  <section id="view-matrix" class="view ws" hidden>
+    <div class="ws-main">
+      <div class="viewhead"><h2>Matrix</h2><span class="meta">One row per study, one column per question</span></div>
+      <div id="lens-matrix-detail" hidden>
+        <h3 id="lens-matrix-title"></h3><p id="lens-matrix-description"></p>
+        
+        
+        <p class="hint" id="lens-matrix-status" role="status" aria-live="polite"></p>
+        <div id="lens-warnings" role="status"></div>
+        <div class="share-bar" data-share-from="lens-matrix-title lens-matrix-description lens-table" data-share-title="Study matrix" data-share="skip"><button type="button" class="btn small" data-share-act="copy" title="Copy as Markdown, ready to paste into a chat, NotebookLM or a note">Copy</button><button type="button" class="btn small" data-share-act="save" title="Save as a Markdown (.md) file, for example to add as a NotebookLM source">Save .md</button></div>
+        <div class="lens-table-wrap" tabindex="0" role="region" aria-label="Study matrix"><table class="lens-table" id="lens-table"></table></div>
+      </div>
+      <div class="ws-empty" id="lens-matrix-empty"><p>Choose a matrix on the right, or create one: give it a question and the columns to fill.</p></div>
+    </div>
+    <aside class="inspector" aria-label="Matrix options">
+      <h3>Matrix</h3>
       <label class="f" for="lens-matrices">Study matrix</label>
       <select id="lens-matrices"><option value="">Choose a matrix</option></select>
       <details id="lens-create-panel">
@@ -440,9 +443,9 @@
             <button class="btn accent" type="submit">Create matrix</button></div>
         </form>
       </details>
-      <div id="lens-matrix-detail" hidden>
-        <h3 id="lens-matrix-title"></h3><p id="lens-matrix-description"></p>
-        <div class="lens-actions">
+      <div class="insp-detail" id="lens-matrix-insp">
+        <hr>
+        <div class="insp-group">
           <label class="f" for="lens-matrix-profile">Model profile</label><select id="lens-matrix-profile" aria-label="Matrix model profile"><option value="">Configured default</option></select>
           <label class="check"><input type="checkbox" id="lens-force"> Re-extract cached cells</label>
           <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-matrix-all-versions"> All versions</label>
@@ -452,29 +455,25 @@
         <details><summary>Add a column to this matrix</summary><form id="lens-add-column-form">
           <div id="lens-add-column"></div><button class="btn small" type="submit">Save column</button>
         </form></details>
-        <p class="hint" id="lens-matrix-status" role="status" aria-live="polite"></p>
-        <div id="lens-warnings" role="status"></div>
-        <div class="lens-table-wrap" tabindex="0" role="region" aria-label="Study matrix"><table class="lens-table" id="lens-table"></table></div>
       </div>
-    </div>
+    </aside>
   </section>
 
   <section id="view-gaps" class="view" hidden>
     <div class="viewhead"><h2>Gaps</h2><span class="meta">Deterministic candidates from claims and study matrices</span>
-      <button class="btn accent" id="gaps-refresh">Refresh candidates</button></div>
-    <label for="gaps-profile">Model profile</label>
-    <select id="gaps-profile"><option value="">Configured default</option></select>
-    <p class="hint" id="gaps-status" role="status" aria-live="polite"></p>
+      <label class="head-model">Model <select id="gaps-profile" aria-label="Gaps model profile"><option value="">Configured default</option></select></label></div>
+    <div class="card lens-panel"><div class="lens-actions"><button class="btn accent" id="gaps-refresh">Refresh candidates</button></div>
+    <p class="hint" id="gaps-status" role="status" aria-live="polite"></p></div>
+    <div class="share-bar" data-share-from="gaps-list" data-share-title="Gaps" data-share="skip"><button type="button" class="btn small" data-share-act="copy" title="Copy as Markdown, ready to paste into a chat, NotebookLM or a note">Copy</button><button type="button" class="btn small" data-share-act="save" title="Save as a Markdown (.md) file, for example to add as a NotebookLM source">Save .md</button></div>
     <div class="card lens-panel lens-rows" id="gaps-list"></div>
   </section>
 
   <section id="view-console" class="view" hidden>
     <div class="viewhead"><h2>Research Console</h2>
-      <span class="meta">A typed plan, previewed before explicit approval</span></div>
+      <span class="meta">A typed plan, previewed before explicit approval</span>
+      <label class="head-model">Planner model <select id="console-profile" aria-label="Planner model profile"><option value="">Configured default</option></select></label></div>
     <div class="card lens-panel console-panel">
       <form id="console-form">
-        <label class="f" for="console-profile">Planner model profile</label>
-        <select id="console-profile"><option value="">Configured default</option></select>
         <label class="f" for="console-request">What would you like to do?</label>
         <textarea id="console-request" rows="4" required
           placeholder="Compare methods in papers published since 2020 and answer the review question"></textarea>
@@ -495,18 +494,25 @@
   </section>
 
   <section id="view-write" class="view" hidden>
-    <div id="write-home">
-      <h1>Write</h1>
-      <p class="muted">LaTeX documents of project <b id="write-project"></b>. Files live in the project folder; every save keeps a version.</p>
-      <div class="card write-new">
+    <div id="write-home" class="ws">
+      <div class="ws-main">
+        <div class="viewhead"><h2>Write</h2><span class="meta">LaTeX documents of <b id="write-project"></b>; every save keeps a version</span></div>
+        <ul id="write-docs" class="write-docs"></ul>
+      </div>
+      <aside class="inspector" aria-label="New document">
+        <h3>New document</h3>
+        <label class="f" for="write-new-name">Name</label>
         <input id="write-new-name" placeholder="Document name" aria-label="Document name" maxlength="200">
+        <label class="f" for="write-new-template">Template</label>
         <select id="write-new-template" aria-label="Template"></select>
-        <button class="btn primary" id="write-create">New document</button>
+        <button class="btn accent" id="write-create">New document</button>
+        <hr>
+        <p class="hint">Or bring an existing one:</p>
         <label class="btn" title="A .zip of a LaTeX project: an Overleaf download, a journal template or a LitForge export">Import ZIP<input type="file" id="write-import" accept=".zip,application/zip" hidden></label>
         <button class="btn" id="write-clone" title="A copy of a git repository (Overleaf's git link, GitHub…) that you can sync both ways">Clone from git</button>
-      </div>
-      <p id="write-engine" class="muted" role="status"></p>
-      <ul id="write-docs" class="write-docs"></ul>
+        <hr>
+        <p id="write-engine" class="hint" role="status"></p>
+      </aside>
     </div>
     <div id="write-editor" class="write-editor" hidden>
       <div class="write-toolbar">
@@ -671,13 +677,39 @@
   </section>
 
   <section id="results" class="view" hidden>
-      <div class="runhead"><h2 id="run-title"></h2><span class="meta" id="run-meta"></span></div>
+      <div class="runhead"><h2 id="run-title"></h2><span class="meta" id="run-meta"></span>
+  <div class="export-group" role="group" aria-label="Export">
+    <span class="glabel">Export</span>
+    <select id="export-scope" title="Which papers to export and check for missing PDFs">
+      <option value="all">All papers</option>
+      <option value="relevant">Marked ✓ only</option>
+      <option value="not-irrelevant">All except ✗</option>
+      <option value="visible">Visible list</option>
+    </select>
+    <details class="export-more"><summary class="btn small" title="PDFs, versions, Obsidian links, math quality, RIS and BibTeX">Options ▾</summary><div class="export-menu">
+    <label class="check" id="fetch-wrap" title="Slower: before exporting, download open-access PDFs (arXiv, publisher copies) of the chosen papers that have none, so their notes contain the full text"><input type="checkbox" id="export-fetch"> with PDFs</label>
+    <label class="check" title="Include non-primary versions as separate notes"><input type="checkbox" id="export-all-versions"> all versions</label>
+    <label class="check" title="Add screening tags, title aliases and [[links]] between exported notes"><input type="checkbox" id="export-obsidian"> Obsidian links</label>
+    <select id="export-math" title="Better math: how the pages with equations, tables or broken text are rewritten before exporting. Results are kept, so raising the level later only processes what is new.">
+      <option value="off" title="The text extracted from the PDF; equations often come out garbled">Math: as extracted</option>
+      <option value="medium" title="Pix2Text reads every formula as LaTeX; the text stays as extracted from the PDF. About 1-5 s per page">Math: medium (fast)</option>
+      <option value="high" title="Whole pages are rewritten: formulas, tables and text, also in scanned papers. On an NVIDIA GPU Nemotron Parse reads English pages (about 5 s each); a local vision model (Ollama) reads Persian pages (about 12 s on the GPU)">Math: high (best)</option>
+    </select>
+    <button class="btn small" id="btn-missing" title="Papers of this project that have no PDF yet, with links to get them by hand">Missing PDFs</button>
+    <button class="btn small" id="btn-export-ris" title="Export included papers with their screening decision as RIS">RIS</button>
+    <button class="btn small" id="btn-export-bib" title="Export included papers with their screening decision as BibTeX">BibTeX</button>
+    </div></details>
+    <button class="btn accent" id="btn-export" title="Write Markdown notes to the project's output folder">Export Markdown</button>
+  </div>
+      </div>
       <div class="stats" id="stats"></div>
+      <details class="card fold-charts" id="charts-panel"><summary><span class="chev">▸</span><b>Charts and filters</b> <span class="meta">years, how papers were found, venues</span></summary>
       <div class="charts">
         <div class="card chart"><h4>Publication years</h4><div id="chart-years"></div></div>
         <div class="card chart"><h4>Found via <small>(click to filter)</small></h4><div id="chart-channels"></div></div>
         <div class="card chart"><h4>Top venues</h4><div id="chart-venues"></div></div>
       </div>
+      </details>
       <details class="card" id="screen-panel">
         <summary title="Optional: let a local model pre-sort papers by your inclusion and exclusion criteria">
           <span class="chev">▸</span><b>AI screening</b> <span class="tag">optional</span>
@@ -804,6 +836,7 @@
 
 <section class="drawer" id="drawer" aria-hidden="true">
   <button class="btn small close" id="drawer-close" title="Close (Esc)">✕</button>
+  <div class="share-bar" data-share-from="dhead dbody" data-share-title="Paper" data-share="skip"><button type="button" class="btn small" data-share-act="copy" title="Copy as Markdown, ready to paste into a chat, NotebookLM or a note">Copy</button><button type="button" class="btn small" data-share-act="save" title="Save as a Markdown (.md) file, for example to add as a NotebookLM source">Save .md</button></div>
   <div class="dhead" id="dhead"></div>
   <div class="dbody" id="dbody"></div>
 </section>
@@ -818,7 +851,7 @@
     <button class="btn small ghost" id="missing-close" title="Close">✕</button>
   </div>
   <p class="hint">Their notes hold only the abstract. Open a link, download the PDF in your browser, then add the
-    files with <a href="#" id="missing-add">+ New → My sources</a>: each one is matched to its paper, and the notes are
+    files with <a href="#" id="missing-add">Add papers → Your PDFs</a>: each one is matched to its paper, and the notes are
     exported again with the full text.</p>
   <div class="mail" id="missing-mail"></div>
   <div class="mactions">
@@ -859,10 +892,10 @@
           papers close in meaning.</li>
         <li><b>Search</b>: keyword queries, one per line.</li>
         <li><b>Import list</b>: a .csv, .bib or .ris export from Elicit, Zotero and similar tools.</li>
-        <li><b>My sources</b>: PDFs and documents you already have, or links to articles; each is matched to its paper and its text is extracted. Unless
+        <li><b>Your PDFs</b>: PDFs and documents you already have, or links to articles; each is matched to its paper and its text is extracted. Unless
           you untick <i>Then export</i>, the notes are exported right after, for the papers chosen under Export.</li>
       </ul>
-      <p>Each search belongs to a <b>project</b> (one literature review). Searches are listed under <b>Recent</b>.</p>
+      <p>Each search belongs to a <b>project</b> (one literature review). Its searches and PDF imports are listed under it in the sidebar.</p>
     </section>
     <section>
       <h3>2 · Read the scores</h3>
@@ -915,6 +948,7 @@
 <script src="/static/vendor/purify.min.js"></script>
 <script src="/static/vendor/katex.min.js"></script>
 <script src="/static/md.js"></script>
+<script src="/static/share.js"></script>
 <script src="/static/vendor/codemirror.bundle.js"></script>
 <script type="module">
   // PDF.js for the Write view. The desktop offers the PDF app if this viewer is unavailable.

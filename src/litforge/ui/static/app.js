@@ -270,6 +270,7 @@
       a.innerHTML = '<span class="count">' + p.papers + '</span>' + esc(p.name);
       a.onclick = function (e) { e.preventDefault(); selectProject(p.name); state.recentsProject = p.name; showView('recents'); };
       el.appendChild(a);
+      if (p.name === state.project) el.appendChild($('side-recent'));  // its searches and imports sit under it
     });
     var cur = state.projects.find(function (p) { return p.name === state.project; });
     $('current-project').innerHTML = cur ? esc(cur.name) + ' <small>· ' + cur.papers + ' papers</small>'
@@ -289,6 +290,7 @@
     store.set('project', name);
     syncProjectFields();
     renderSideProjects();
+    loadRuns();
     if ($('review-report').open) loadReviewReport();
     if (state.page === 'write') closeWriteDoc(false);
   }
@@ -311,18 +313,11 @@
     $('btn-export').title = 'Write Markdown notes to ' + (dir.value || 'the project folder');
     var links = [];
     if (name && dir.value.trim() !== defaultDir(name)) links.push('<a href="#" id="reset-exports">use default folder</a>');
-    if (p) links.push('<a href="#" id="open-exports">open folder</a>', '<a href="#" id="delete-project" class="danger">delete project</a>');
-    else if (name) links.unshift('New project');
+    if (!p && name) links.unshift('New project');
     el.innerHTML = links.join(' · ');
     if ($('reset-exports')) {
       $('reset-exports').onclick = function (e) { e.preventDefault(); state.dirEdited = true; dir.value = defaultDir(name); showPaths(); };
     }
-    if (!p) return;
-    $('open-exports').onclick = function (e) {
-      e.preventDefault();
-      post('/api/open-exports', { project: p.name }).catch(function (err) { toast(err.message); });
-    };
-    $('delete-project').onclick = function (e) { e.preventDefault(); deleteProject(p); };
   }
 
   // Papers without a PDF: their notes hold only the abstract, so list where to get each one by hand.
@@ -374,7 +369,7 @@
     }
     html += left ? '<p>The ' + left + ' paper' + (left === 1 ? '' : 's') + ' below still need' + (left === 1 ? 's' : '') +
       ' a PDF; under each title is why it could not be downloaded. Get them in your browser, then add them with ' +
-      '+ New → My sources.</p>' : '<p>Every listed paper now has its PDF.</p>';
+      'Add papers → Your PDFs.</p>' : '<p>Every listed paper now has its PDF.</p>';
     $('missing-report').innerHTML = html;
     $('missing-report').hidden = false;
     if ($('report-export')) $('report-export').onclick = function () { $('missing').close(); $('btn-export').click(); };
@@ -538,11 +533,12 @@
     }).catch(function (err) { toast(err.message); });
   }
 
-  // Sidebar: the latest searches of all projects, like a chat app's history.
+  // Sidebar: the latest searches and imports of the current project, nested under it.
   function loadRuns() {
-    return api('/api/runs?limit=15').then(function (runs) {
+    var q = state.project ? '&project=' + encodeURIComponent(state.project) : '';
+    return api('/api/runs?limit=15' + q).then(function (runs) {
       var el = $('side-recent');
-      el.innerHTML = runs.length ? '' : '<div class="none">No searches yet</div>';
+      el.innerHTML = runs.length ? '' : '<div class="none">No searches or PDFs yet</div>';
       runs.forEach(function (r) { el.appendChild(runLink(r)); });
       if (state.page === 'recents') loadRecents();
     });
@@ -553,7 +549,7 @@
     a.href = '#';
     a.className = r.id === state.runId ? 'on' : '';
     a.title = r.label;
-    a.innerHTML = esc(r.label) + '<small>' + esc(r.project) + ' · ' + r.papers + ' papers · ' +
+    a.innerHTML = esc(r.label) + '<small>' + r.papers + ' papers · ' +
       esc((r.started_at || '').slice(5, 16).replace('T', ' ')) + (r.status !== 'done' ? ' · ' + esc(r.status) : '') + '</small>';
     a.onclick = function (e) { e.preventDefault(); loadRun(r.id); };
     return a;
@@ -648,6 +644,11 @@
     ['new', 'recents', 'library', 'ask', 'matrix', 'claims', 'gaps', 'console', 'write', 'settings'].forEach(function (v) { $(('view-' + v)).hidden = v !== view; });
     $('results').hidden = view !== 'results';
     document.querySelectorAll('.sidebar [data-view]').forEach(function (b) { b.classList.toggle('on', b.dataset.view === view); });
+    if (/^(claims|gaps|console)$/.test(view)) $('nav-more').open = true;
+    var tab = view === 'results' || view === 'recents' || view === 'new' ? 'papers' : view;
+    document.querySelectorAll('.seg [data-go]').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.go === tab); b.setAttribute('aria-selected', String(b.dataset.go === tab));
+    });
     document.querySelectorAll('#side-recent a').forEach(function (a) { a.classList.remove('on'); });
     if (view !== 'results') closeDrawer();
     if (view === 'recents') { $('recents-project').value = state.recentsProject || ''; loadRecents(); }
@@ -658,6 +659,75 @@
     if (view === 'write') loadWrite(); else leaveWrite();
     if (view === 'settings') { loadSettings(); loadUpdates(); }
   }
+
+  // Right-click on selected text: Copy and Select all (the desktop window has no context menu of its own).
+  // Fields and the LaTeX editor keep their usual menu.
+  var ctxMenu = null;
+  function closeCtxMenu() { if (ctxMenu) { ctxMenu.remove(); ctxMenu = null; } }
+  document.addEventListener('contextmenu', function (e) {
+    closeCtxMenu();
+    if (e.target.closest('input, textarea, select, .cm-editor, [contenteditable="true"]')) return;
+    var sel = window.getSelection(), text = sel ? sel.toString() : '';
+    if (!text.trim()) return;
+    e.preventDefault();
+    var range = sel.getRangeAt(0).cloneRange();
+    ctxMenu = document.createElement('div');
+    ctxMenu.className = 'ctx-menu'; ctxMenu.setAttribute('role', 'menu');
+    [['Copy', /Mac/.test(navigator.platform) ? '⌘C' : 'Ctrl+C', function () {
+      sel.removeAllRanges(); sel.addRange(range);
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+      if (ok) { toast('Copied'); return; }
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { toast('Copied'); }, function () { toast('Press ⌘C to copy'); });
+    }], ['Select all in this section', '', function () {
+      var box = range.commonAncestorContainer;
+      box = (box.nodeType === 1 ? box : box.parentNode).closest('.dbody, .lens-rows, .md, .card, main') || document.body;
+      sel.removeAllRanges(); var r = document.createRange(); r.selectNodeContents(box); sel.addRange(r);
+    }]].forEach(function (item) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.setAttribute('role', 'menuitem');
+      b.innerHTML = esc(item[0]) + (item[1] ? '<kbd>' + item[1] + '</kbd>' : '');
+      b.onclick = function () { closeCtxMenu(); item[2](); };
+      ctxMenu.appendChild(b);
+    });
+    document.body.appendChild(ctxMenu);
+    var w = ctxMenu.offsetWidth, h = ctxMenu.offsetHeight;
+    ctxMenu.style.left = Math.min(e.clientX, innerWidth - w - 8) + 'px';
+    ctxMenu.style.top = Math.min(e.clientY, innerHeight - h - 8) + 'px';
+    ctxMenu.querySelector('button').focus();
+  });
+  document.addEventListener('mousedown', function (e) { if (ctxMenu && !ctxMenu.contains(e.target)) closeCtxMenu(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeCtxMenu(); });
+  window.addEventListener('blur', closeCtxMenu);
+  window.addEventListener('scroll', closeCtxMenu, true);
+
+  // A click outside the export Options menu closes it.
+  document.addEventListener('click', function (e) {
+    var m = document.querySelector('.export-more[open]');
+    if (m && !m.contains(e.target)) m.open = false;
+  });
+
+  // Copy or save any result pane as Markdown (Copy / Save .md bars in index.html).
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-share-act]');
+    if (!btn) return;
+    var bar = btn.closest('.share-bar');
+    var title = bar.dataset.shareTitle + (state.project ? ' — ' + state.project : '');
+    var md = LFShare.toMarkdown(bar.dataset.shareFrom.split(' ').map($), title);
+    if (!md) { toast('Nothing to copy yet.'); return; }
+    if (btn.dataset.shareAct === 'save') {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+      a.download = LFShare.slug(title) + '.md';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+      toast('Saved ' + a.download);
+      return;
+    }
+    if (!navigator.clipboard) { toast('Copying is not available here; use Save .md.'); return; }
+    navigator.clipboard.writeText(md).then(function () { toast('Copied as Markdown'); },
+      function () { toast('Copying was blocked; use Save .md.'); });
+  });
 
   function deleteRun() {
     if (!window.confirm('Delete this run? It leaves History, and its ' + state.data.papers.length + ' papers leave ' +
@@ -1778,7 +1848,7 @@
 
   /* ---------- my PDFs ---------- */
 
-  // What the Export menu in the header covers, said as the My sources form and its report say it.
+  // What the Export menu in the header covers, said as the Your PDFs form and its report say it.
   var SCOPE_WORDS = { all: 'all papers of the project', relevant: 'the papers marked ✓',
     'not-irrelevant': 'all papers except ✗', visible: 'the visible list and the added papers' };
   function scopeWords() { return SCOPE_WORDS[$('export-scope').value] || SCOPE_WORDS.all; }
@@ -1885,6 +1955,7 @@
         }).then(function (path) {
           if (path) {
             var folder = $('pdf-folder');
+            folder.closest('details').open = true;
             folder.value = path;
             folder.focus();
             folder.scrollIntoView({ block: 'nearest' });
@@ -2079,7 +2150,7 @@
     $('pdfs-export-wrap').hidden = mode !== 'pdfs';
     $('btn-more').hidden = mode !== 'similar';
     $('btn-run').textContent = { similar: 'Find similar papers', search: 'Search', 'import': 'Import list',
-      pdfs: $('pdfs-export').checked ? 'Add sources & export' : 'Add sources' }[mode];
+      pdfs: $('pdfs-export').checked ? 'Extract text' : 'Add to library' }[mode];
     store.set('mode', mode);
   }
 
@@ -2445,7 +2516,7 @@
       });
       if (!(data.documents || []).length) {
         var empty = document.createElement('li');
-        empty.className = 'muted'; empty.textContent = 'No documents yet.';
+        empty.className = 'muted'; empty.textContent = 'No documents yet. Start one on the right, or import a ZIP or a git repository.';
         list.appendChild(empty);
       }
     }).catch(function (e) {
@@ -6221,6 +6292,9 @@
     refreshModelChoices();
     lensColumnEditor($('lens-columns'), true); lensColumnEditor($('lens-add-column'), false);
     $('lens-more-column').onclick = function () { lensColumnEditor($('lens-columns'), true); };
+    $('lens-question').onkeydown = function (e) {  // ⌘↩ / Ctrl+↩ sends the question
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $('lens-ask-form').requestSubmit(); }
+    };
     $('lens-ask-form').onsubmit = function (e) {
       e.preventDefault(); startLensTask('ask', '/api/ask', { question: $('lens-question').value,
         profile: $('lens-profile').value.trim() || null, sensitive: $('lens-sensitive').checked,
@@ -6280,7 +6354,7 @@
     $('pdfs-export').checked = store.get('pdfs-export', true);
     $('pdfs-export-scope').textContent = scopeWords();
     $('pdfs-export').onchange = function () { store.set('pdfs-export', this.checked); setMode(state.mode); };
-    setMode(store.get('mode', 'similar'));
+    setMode(store.get('mode', 'pdfs'));
     if (location.hash === '#models') history.replaceState(null, '', '#settings');
     var linked = /^#run=([\w-]+)$/.exec(location.hash);  // a bookmarked search; never set automatically
     showView(/^#(recents|library|ask|matrix|claims|gaps|console|write|settings)$/.test(location.hash) ? location.hash.slice(1) : 'new');
@@ -6507,8 +6581,6 @@
     wireReferenceExports();
     wireReviewReport();
     wireSearchStrategy();
-    $('screen-panel').open = store.get('screen-open', false);
-    $('screen-panel').ontoggle = function () { store.set('screen-open', this.open); };
     $('btn-help').onclick = openGuide;
     $('btn-quit').onclick = function () { quit(false); };
     $('guide-close').onclick = function () { $('guide').close(); };
@@ -6548,6 +6620,47 @@
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === '\\') {
         e.preventDefault(); applySidebar(!document.querySelector('.app').classList.contains('side-hidden'));
       }
+    });
+    // Toolbar: Papers opens the project's latest search (or Add papers when it has none).
+    function openPapers() {
+      if (state.runId && state.data) return showView('results');
+      var q = state.project ? '&project=' + encodeURIComponent(state.project) : '';
+      return api('/api/runs?limit=1' + q).then(function (runs) { if (runs.length) loadRun(runs[0].id); else newSearch(); })
+        .catch(function (e) { toast(e.message); });
+    }
+    document.querySelectorAll('.seg [data-go]').forEach(function (b) {
+      b.onclick = function () { if (b.dataset.go === 'papers') openPapers(); else showView(b.dataset.go); };
+    });
+    $('btn-add').onclick = function () { newSearch(); };
+    // + beside Projects starts a new project: the Add papers sheet with an empty, focused project name.
+    $('side-new').onclick = function () {
+      newSearch();
+      var name = $('project-name');
+      name.value = ''; name.placeholder = 'Name of the new project';
+      name.dispatchEvent(new Event('input'));
+      name.focus();
+    };
+    $('proj-menu').addEventListener('click', function (e) { if (e.target.closest('.menu-pop button')) $('proj-menu').open = false; });
+    document.addEventListener('click', function (e) { if ($('proj-menu').open && !$('proj-menu').contains(e.target)) $('proj-menu').open = false; });
+
+    // Commands shared by the ⌘ shortcuts and the desktop window's menu bar (desktop/host.py calls LFMenu).
+    var GO = ['new', 'recents', 'library', 'ask', 'matrix', 'write'];
+    window.LFMenu = function (cmd) {
+      if (cmd === 'new') return newSearch();
+      if (cmd === 'export') {
+        if (state.page !== 'results') { toast('Open a result list first (Recent, in the sidebar)'); return; }
+        return $('btn-export').click();
+      }
+      if (cmd === 'sidebar') return $('btn-side-hide').click();
+      if (cmd === 'theme') return $('btn-theme').click();
+      if (cmd === 'guide') return openGuide();
+      if (cmd === 'claims' || cmd === 'gaps' || cmd === 'console' || cmd === 'settings' || GO.indexOf(cmd) >= 0) return showView(cmd);
+    };
+    document.addEventListener('keydown', function (e) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || document.querySelector('dialog[open]')) return;
+      var cmd = { n: 'new', e: 'export', ',': 'settings' }[e.key] || GO[+e.key - 1];
+      if (!cmd || (state.page === 'write' && e.key === 'e')) return;  // the editor keeps its own ⌘E
+      e.preventDefault(); window.LFMenu(cmd);
     });
     $('btn-theme').onclick = function () {
       var cur = store.get('theme', 'auto');

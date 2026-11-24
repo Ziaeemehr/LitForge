@@ -74,7 +74,7 @@ function setup(routes = {}) {
 }
 
 test('Write view is in the sidebar, has the editor, PDF frame and loads the bundle offline', () => {
-  assert.match(html, /data-view="write"/);
+  assert.match(html, /data-go="write"/);
   for (const id of ['view-write', 'write-cm', 'write-pdf', 'write-errors', 'write-conflict', 'write-compile'])
     assert.match(html, new RegExp('id="' + id + '"'));
   assert.match(html, /\/static\/vendor\/codemirror\.bundle\.js/);

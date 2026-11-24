@@ -153,6 +153,8 @@ Paths below are proposed additions unless already present. Keep host-specific lo
 **Interfaces:** Consumes the current app via `litforge ui --no-browser`; produces a recorded engine/version matrix and the engine decision per OS.
 
 Status on 2026-10-23: the Linux runs are done; the Windows and macOS runs are pending. See the report.
+Update 2026-11-24: branch `ui/polish-2026-11` ran the native-window jobs on macOS 15 (arm64, x64), Windows Server 2022
+and Linux GTK, all green; manual keyboard checks per engine are still open. See [UI_POLISH_REPORT.md](../../../UI_POLISH_REPORT.md).
 
 - [x] Select and record the pywebview version: 6.2.1, which needs Python ≥ 3.8.
 - [x] Run the probe on Linux on GTK (system WebKitGTK 2.52 through the system Python) and on Qt (PyQt6 6.11 and PySide6 6.12). Record download size, installed size, memory and timings. Reproduce the Qt failure without `libxcb-cursor0` and verify the no-sudo preload workaround.

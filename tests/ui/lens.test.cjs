@@ -256,7 +256,7 @@ test('Repro structured brief uses safe nodes and evidence chips open the shared 
 test('Claims description stays in its header and Living review follows claims', () => {
   const html = fs.readFileSync('src/litforge/ui/static/index.html', 'utf8');
   const claims = html.split('id="view-claims"')[1].split('</section>')[0];
-  assert.match(claims, /class="viewhead">.*Possible causes are hypotheses\.<\/span><\/div>/);
+  assert.match(claims, /class="viewhead">.*Possible causes are hypotheses\.<\/span>[^]*?<\/div>/);
   assert.ok(claims.indexOf('lens-claims-detail') < claims.indexOf('living-title'));
 });
 
