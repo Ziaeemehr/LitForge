@@ -859,3 +859,12 @@ details.fold[open] > summary::before { content: '▾ '; }
 details.fold-opts { margin: 10px 0; }
 details.fold-opts > summary { cursor: pointer; color: var(--muted); font-size: var(--fs-md); }
 details.fold-opts[open] > summary { margin-bottom: 6px; }
+
+/* Sidebar selection as in a macOS source list: a solid accent row. */
+.nav-item.on, .side-list a.on { background: var(--accent); color: var(--on-accent); }
+.nav-item.on .nav-ico, .side-list a.on small, .side-list a.on .count { color: var(--on-accent); }
+.nav-item:focus-visible, .nav-new:focus-visible, .side-list a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Mixed Persian/English: each paragraph takes the direction of its first letter (titles, answers, notes). */
+main :is(p, li, h2, h3, h4, td, th, dd, blockquote, .md, .title), .drawer :is(p, li, h2, h3, h4, .title),
+main textarea, main input[type="text"] { unicode-bidi: plaintext; }
