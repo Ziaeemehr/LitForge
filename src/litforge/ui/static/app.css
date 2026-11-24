@@ -908,7 +908,7 @@ header { gap: var(--s3); background: var(--panel); border-bottom: 1px solid var(
 .seg { display: inline-flex; padding: var(--s0); gap: var(--s0); background: var(--chip); border-radius: var(--r-md); }
 .seg button { border: 0; background: none; padding: var(--s1) var(--s3); border-radius: var(--r-sm); color: var(--ink); cursor: default; font-weight: 500; }
 .seg button:hover { background: var(--active-line); }
-.seg button.on { background: var(--panel); box-shadow: var(--shadow); }
+.seg button.on, .seg button[aria-pressed="true"] { background: var(--panel); box-shadow: var(--shadow); }
 /* Sidebar header with its add button. */
 .side-head { display: flex; align-items: center; justify-content: space-between; }
 .side-head h3 { margin-right: 0; }
@@ -933,3 +933,44 @@ header { gap: var(--s3); background: var(--panel); border-bottom: 1px solid var(
 .stats .stat { display: inline-flex; align-items: baseline; gap: var(--s1); padding: 0; border: 0; background: none; box-shadow: none; }
 .stats .stat b { display: inline; font-size: var(--fs-lg); }
 .drawer .share-bar { margin: var(--s2) 52px 0 0; }
+
+/* ---------- Workspace pages (Ask, Matrix): content in the middle, settings in an inspector on the right ---------- */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.view.ws:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: var(--s5); align-items: start; }
+.ws-main { min-width: 0; display: flex; flex-direction: column; gap: var(--s3); }
+.ws-main > .viewhead { margin: 0; }
+.ws-bar { display: flex; align-items: center; gap: var(--s2); }
+.ws-bar .tabs { margin: 0; flex: none; }
+.ws-bar .share-bar { margin: 0 0 0 auto; }
+.ws #lens-answer { min-height: 240px; padding: var(--s4); background: var(--panel); border-radius: var(--r-md); box-shadow: var(--shadow); }
+.composer { display: flex; gap: var(--s2); align-items: flex-end; padding: var(--s2); background: var(--panel); border-radius: var(--r-lg); box-shadow: var(--shadow); position: sticky; bottom: var(--s3); }
+.composer textarea { border: 0; background: transparent; resize: none; min-height: 44px; }
+.composer textarea:focus { border: 0; }
+.composer:focus-within { box-shadow: 0 0 0 2px var(--accent); }
+.inspector {
+  position: sticky; top: var(--s3); display: flex; flex-direction: column; gap: var(--s2); padding: var(--s4);
+  background: var(--panel); border-radius: var(--r-md); box-shadow: var(--shadow); font-size: var(--fs-md);
+}
+.inspector h3 { margin: 0 0 var(--s1); font-size: var(--fs-md); }
+.inspector label.f { margin: var(--s1) 0 0; }
+.inspector .check { margin: 0; }
+.inspector hr { width: 100%; border: 0; border-top: 1px solid var(--line); margin: var(--s2) 0; }
+.inspector .btn { align-self: flex-start; }
+.inspector details { margin: 0; }
+.inspector summary { cursor: pointer; color: var(--accent); }
+.insp-group { display: flex; flex-direction: column; gap: var(--s2); }
+.insp-group .lens-actions { margin: 0; }
+#lens-matrix-insp, .ws:has(#lens-matrix-detail:not([hidden])) .ws-empty { display: none; }
+.ws:has(#lens-matrix-detail:not([hidden])) #lens-matrix-insp { display: block; }
+.ws-empty { padding: var(--s6) var(--s4); text-align: center; color: var(--muted); background: var(--panel); border-radius: var(--r-md); box-shadow: var(--shadow); }
+#lens-matrix-detail { background: var(--panel); border-radius: var(--r-md); box-shadow: var(--shadow); padding: var(--s4); }
+#lens-matrix-detail h3 { margin: 0; }
+@media (max-width: 1000px) { .view.ws:not([hidden]) { grid-template-columns: 1fr; } .inspector { position: static; } }
+.composer { width: 100%; max-width: none; margin: 0; }
+.composer textarea { flex: 1; width: auto; }
+.composer .btn { flex: none; white-space: nowrap; }
+#write-home.ws:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: var(--s5); align-items: start; }
+#write-home .write-docs { margin: 0; }
+#write-home .inspector input { width: 100%; }
+#write-home .inspector .btn { align-self: stretch; text-align: center; }
+@media (max-width: 1000px) { #write-home.ws:not([hidden]) { grid-template-columns: 1fr; } }

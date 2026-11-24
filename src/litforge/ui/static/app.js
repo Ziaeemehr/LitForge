@@ -2523,7 +2523,7 @@
       });
       if (!(data.documents || []).length) {
         var empty = document.createElement('li');
-        empty.className = 'muted'; empty.textContent = 'No documents yet.';
+        empty.className = 'muted'; empty.textContent = 'No documents yet. Start one on the right, or import a ZIP or a git repository.';
         list.appendChild(empty);
       }
     }).catch(function (e) {
@@ -6299,6 +6299,9 @@
     refreshModelChoices();
     lensColumnEditor($('lens-columns'), true); lensColumnEditor($('lens-add-column'), false);
     $('lens-more-column').onclick = function () { lensColumnEditor($('lens-columns'), true); };
+    $('lens-question').onkeydown = function (e) {  // ⌘↩ / Ctrl+↩ sends the question
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $('lens-ask-form').requestSubmit(); }
+    };
     $('lens-ask-form').onsubmit = function (e) {
       e.preventDefault(); startLensTask('ask', '/api/ask', { question: $('lens-question').value,
         profile: $('lens-profile').value.trim() || null, sensitive: $('lens-sensitive').checked,

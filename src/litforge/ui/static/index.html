@@ -357,32 +357,33 @@
     </div>
   </section>
 
-  <section id="view-ask" class="view" hidden>
-    <div class="viewhead"><h2>Ask</h2><span class="meta">Evidence from the current project</span></div>
-    <div class="card lens-panel">
-      <form id="lens-ask-form">
-        <label class="f" for="lens-question">Question</label>
-        <textarea id="lens-question" rows="3" required placeholder="What does the library report?"></textarea>
-        <div class="lens-actions">
-          <label class="f" for="lens-profile">Model profile</label>
-          <select id="lens-profile" aria-label="Model profile"><option value="">Configured default</option></select>
-          <label class="check"><input type="checkbox" id="lens-sensitive"> Sensitive content</label>
-          <label class="check"><input type="checkbox" id="lens-auto-audit" checked> Audit after answering</label>
-          <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-all-versions"> All versions</label>
-          <button class="btn accent" type="submit" data-lens-work>Ask library</button>
-          <button class="btn" type="button" id="lens-run-audit" data-lens-work>Run audit</button>
-        </div>
-      </form>
-      <p class="hint" id="lens-ask-status" role="status" aria-live="polite"></p>
-      <div class="tabs" role="tablist" aria-label="Answer views">
+  <section id="view-ask" class="view ws" hidden>
+    <div class="ws-main">
+      <div class="viewhead"><h2>Ask</h2><span class="meta">Answers from this project's papers, every quote checked against its page</span></div>
+      <div class="ws-bar"><div class="tabs" role="tablist" aria-label="Answer views">
         <button class="on" id="lens-tab-answer" role="tab" aria-selected="true" aria-controls="lens-answer" data-lens-tab="answer">Answer</button>
         <button id="lens-tab-evidence" role="tab" aria-selected="false" aria-controls="lens-answer" tabindex="-1" data-lens-tab="evidence">Evidence</button>
         <button id="lens-tab-review" role="tab" aria-selected="false" aria-controls="lens-answer" tabindex="-1" data-lens-tab="review">Needs review</button>
-      </div>
-      <button class="toggle" id="lens-audit-filter" aria-pressed="false" title="Show weak, single-source, flagged or non-supported sentences">Audit</button>
-      <div class="share-bar" data-share-from="lens-answer" data-share-title="Answer" data-share="skip"><button type="button" class="btn small" data-share-act="copy" title="Copy as Markdown, ready to paste into a chat, NotebookLM or a note">Copy</button><button type="button" class="btn small" data-share-act="save" title="Save as a Markdown (.md) file, for example to add as a NotebookLM source">Save .md</button></div>
+      </div><button class="toggle" id="lens-audit-filter" aria-pressed="false" title="Show weak, single-source, flagged or non-supported sentences">Audit</button><div class="share-bar" data-share-from="lens-answer" data-share-title="Answer" data-share="skip"><button type="button" class="btn small" data-share-act="copy" title="Copy as Markdown, ready to paste into a chat, NotebookLM or a note">Copy</button><button type="button" class="btn small" data-share-act="save" title="Save as a Markdown (.md) file, for example to add as a NotebookLM source">Save .md</button></div></div>
       <div id="lens-answer" class="lens-rows" role="tabpanel" aria-labelledby="lens-tab-answer"></div>
+      <form id="lens-ask-form" class="composer">
+        <label class="f sr-only" for="lens-question">Question</label>
+        <textarea id="lens-question" rows="2" required placeholder="Ask about the papers in this project…  (⌘↩ to send)"></textarea>
+        <button class="btn accent" type="submit" data-lens-work>Ask library</button>
+      </form>
+      <p class="hint" id="lens-ask-status" role="status" aria-live="polite"></p>
     </div>
+    <aside class="inspector" aria-label="Ask options">
+      <h3>Options</h3>
+      <label class="f" for="lens-profile">Model</label>
+      <select id="lens-profile" aria-label="Model profile"><option value="">Configured default</option></select>
+      <label class="check"><input type="checkbox" id="lens-sensitive"> Sensitive content</label>
+      <label class="check"><input type="checkbox" id="lens-auto-audit" checked> Audit after answering</label>
+      <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-all-versions"> All versions</label>
+      <hr>
+      <p class="hint">Check the last answer again, sentence by sentence.</p>
+      <button class="btn" type="button" id="lens-run-audit" data-lens-work>Run audit</button>
+    </aside>
   </section>
 
   <section id="view-claims" class="view" hidden>
@@ -418,9 +419,22 @@
     </details>
   </section>
 
-  <section id="view-matrix" class="view" hidden>
-    <div class="viewhead"><h2>Matrix</h2><span class="meta">Compare studies in the current project</span></div>
-    <div class="card lens-panel">
+  <section id="view-matrix" class="view ws" hidden>
+    <div class="ws-main">
+      <div class="viewhead"><h2>Matrix</h2><span class="meta">One row per study, one column per question</span></div>
+      <div id="lens-matrix-detail" hidden>
+        <h3 id="lens-matrix-title"></h3><p id="lens-matrix-description"></p>
+        
+        
+        <p class="hint" id="lens-matrix-status" role="status" aria-live="polite"></p>
+        <div id="lens-warnings" role="status"></div>
+        <div class="share-bar" data-share-from="lens-matrix-title lens-matrix-description lens-table" data-share-title="Study matrix" data-share="skip"><button type="button" class="btn small" data-share-act="copy" title="Copy as Markdown, ready to paste into a chat, NotebookLM or a note">Copy</button><button type="button" class="btn small" data-share-act="save" title="Save as a Markdown (.md) file, for example to add as a NotebookLM source">Save .md</button></div>
+        <div class="lens-table-wrap" tabindex="0" role="region" aria-label="Study matrix"><table class="lens-table" id="lens-table"></table></div>
+      </div>
+      <div class="ws-empty" id="lens-matrix-empty"><p>Choose a matrix on the right, or create one: give it a question and the columns to fill.</p></div>
+    </div>
+    <aside class="inspector" aria-label="Matrix options">
+      <h3>Matrix</h3>
       <label class="f" for="lens-matrices">Study matrix</label>
       <select id="lens-matrices"><option value="">Choose a matrix</option></select>
       <details id="lens-create-panel">
@@ -433,9 +447,9 @@
             <button class="btn accent" type="submit">Create matrix</button></div>
         </form>
       </details>
-      <div id="lens-matrix-detail" hidden>
-        <h3 id="lens-matrix-title"></h3><p id="lens-matrix-description"></p>
-        <div class="lens-actions">
+      <div class="insp-detail" id="lens-matrix-insp">
+        <hr>
+        <div class="insp-group">
           <label class="f" for="lens-matrix-profile">Model profile</label><select id="lens-matrix-profile" aria-label="Matrix model profile"><option value="">Configured default</option></select>
           <label class="check"><input type="checkbox" id="lens-force"> Re-extract cached cells</label>
           <label class="check" title="Include non-primary versions (preprints, accepted manuscripts) in this run; by default only each work's primary version is used"><input type="checkbox" id="lens-matrix-all-versions"> All versions</label>
@@ -445,12 +459,8 @@
         <details><summary>Add a column to this matrix</summary><form id="lens-add-column-form">
           <div id="lens-add-column"></div><button class="btn small" type="submit">Save column</button>
         </form></details>
-        <p class="hint" id="lens-matrix-status" role="status" aria-live="polite"></p>
-        <div id="lens-warnings" role="status"></div>
-        <div class="share-bar" data-share-from="lens-matrix-title lens-matrix-description lens-table" data-share-title="Study matrix" data-share="skip"><button type="button" class="btn small" data-share-act="copy" title="Copy as Markdown, ready to paste into a chat, NotebookLM or a note">Copy</button><button type="button" class="btn small" data-share-act="save" title="Save as a Markdown (.md) file, for example to add as a NotebookLM source">Save .md</button></div>
-        <div class="lens-table-wrap" tabindex="0" role="region" aria-label="Study matrix"><table class="lens-table" id="lens-table"></table></div>
       </div>
-    </div>
+    </aside>
   </section>
 
   <section id="view-gaps" class="view" hidden>
@@ -490,18 +500,25 @@
   </section>
 
   <section id="view-write" class="view" hidden>
-    <div id="write-home">
-      <h1>Write</h1>
-      <p class="muted">LaTeX documents of project <b id="write-project"></b>. Files live in the project folder; every save keeps a version.</p>
-      <div class="card write-new">
+    <div id="write-home" class="ws">
+      <div class="ws-main">
+        <div class="viewhead"><h2>Write</h2><span class="meta">LaTeX documents of <b id="write-project"></b>; every save keeps a version</span></div>
+        <ul id="write-docs" class="write-docs"></ul>
+      </div>
+      <aside class="inspector" aria-label="New document">
+        <h3>New document</h3>
+        <label class="f" for="write-new-name">Name</label>
         <input id="write-new-name" placeholder="Document name" aria-label="Document name" maxlength="200">
+        <label class="f" for="write-new-template">Template</label>
         <select id="write-new-template" aria-label="Template"></select>
-        <button class="btn primary" id="write-create">New document</button>
+        <button class="btn accent" id="write-create">New document</button>
+        <hr>
+        <p class="hint">Or bring an existing one:</p>
         <label class="btn" title="A .zip of a LaTeX project: an Overleaf download, a journal template or a LitForge export">Import ZIP<input type="file" id="write-import" accept=".zip,application/zip" hidden></label>
         <button class="btn" id="write-clone" title="A copy of a git repository (Overleaf's git link, GitHub…) that you can sync both ways">Clone from git</button>
-      </div>
-      <p id="write-engine" class="muted" role="status"></p>
-      <ul id="write-docs" class="write-docs"></ul>
+        <hr>
+        <p id="write-engine" class="hint" role="status"></p>
+      </aside>
     </div>
     <div id="write-editor" class="write-editor" hidden>
       <div class="write-toolbar">
