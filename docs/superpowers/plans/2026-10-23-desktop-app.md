@@ -253,8 +253,18 @@ Record the engine, the host Python and any preloaded library in the user config.
   `embed` later kept `desktop`, and the app folder's checksums were unchanged. A run killed mid-sync left no
   `state.json`; rerunning repaired it. Not yet: `tools.py` still syncs into `root/.venv` (step 3), other targets,
   installers.
-- [ ] Add failing tests for resource lookup independent of CWD, read-only app bundles, writable tools/model/cache locations and interrupted runtime provisioning. Bundle/check configuration, templates, icons, PDF.js workers, dictionaries and editor assets. Ensure failed provisioning is retriable without touching library data.
-- [ ] Run `uv run pytest tests/unit/test_desktop_distribution.py tests/unit/test_optional_tools.py -v`; confirm expected new failures, then implement layout/path adapters and pass the tests. Keep source-install discovery compatible.
+- [x] Add failing tests for resource lookup independent of CWD, read-only app bundles, writable tools/model/cache locations and interrupted runtime provisioning. Bundle/check configuration, templates, icons, PDF.js workers, dictionaries and editor assets. Ensure failed provisioning is retriable without touching library data.
+- [x] Run `uv run pytest tests/unit/test_desktop_distribution.py tests/unit/test_optional_tools.py -v`; confirm expected new failures, then implement layout/path adapters and pass the tests. Keep source-install discovery compatible.
+  Done 2026-11-24 (branch `desktop/packaging-task7`). New `litforge.distribution` recognises a packaged runtime by
+  `state.json` beside the venv; `tools.py` (optional tools) and Linux `desktop/setup.py` then sync with `--frozen`
+  into the runtime venv and write `desktop-host`/`desktop-libs` there; both prefer the uv that `provision.py` copies
+  to `runtime/bin`; `updates.py` points packaged copies to the installer. Source installs behave as before. Tests:
+  payload resources (config, workflows, icons, PDF.js, dictionaries, fonts, templates, migrations) and no local
+  junk, manifest checksums, CWD-independent lookup, packaged/source sync env, optional-tool and Linux setup paths,
+  failed provisioning retriable. The tests were written with the code, not run red first. Full `pytest`, `ruff`,
+  `mypy` green. End to end on macOS arm64: read-only app, `PATH=/usr/bin:/bin`, `documents` installed through
+  `tools._uv_sync` into the runtime, app checksums unchanged, Settings offers optional tools. Also found and
+  untracked agent state files (`.omc/`) that were committed under `src/` and would have shipped.
 - [ ] Produce Windows per-user setup executable, separate macOS `.app`/DMG artifacts for Intel and Apple Silicon, and a Linux `.deb` for the supported Ubuntu versions declaring its WebKitGTK runtime prerequisites. Record architecture-specific native dependencies and bundled-license notices. Broader Linux packaging is follow-up scope.
 - [ ] On clean machines without Python/uv, verify installation, launch and reinstall. Bundle the managed runtime/base dependency payload or provision it visibly during setup with verified artifacts; document any network requirement before calling the installer self-contained. Heavy model/tool downloads remain separate.
 - [ ] Verify a real supported optional tool install is detected after restart. Test a base update with existing extras; changing bundled Python into an executable must not silently disable optional features. Keep manual native updates separate from source `git`/`uv sync` instructions, using runtime version staging rather than modifying a running environment.

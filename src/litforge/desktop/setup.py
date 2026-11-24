@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from litforge.desktop.workspace import save_settings
+from litforge.distribution import packaged_runtime, uv_sync_env, writable_root
 
 PYWEBVIEW = "6.2.1"
 GTK_PROBE = """import gi
@@ -101,15 +102,18 @@ def setup_desktop(install_dir: Path, config_dir: Path, *, platform: str, env: Ma
     elif platform == "darwin":
         result = DesktopSetup("cocoa")
     elif engine in ("auto", "gtk") and (engine == "gtk" or detect_gtk(system_python, run=run)):
-        host_env = install_dir / "desktop-host"
+        host_env = writable_root(install_dir) / "desktop-host"
         _run(run, [uv, "venv", "--allow-existing", "--python", system_python, "--system-site-packages",
                    str(host_env)])
         host_python = host_env / "bin" / "python"
         _run(run, [uv, "pip", "install", "--python", str(host_python), f"pywebview=={PYWEBVIEW}"])
         result = DesktopSetup("gtk", host_python=str(host_python), message="the system's WebKitGTK")
     else:
-        _run(run, [uv, "sync", "--inexact", "--extra", "desktop", "--extra", "desktop-qt"], cwd=str(install_dir))
-        preload, hint = _xcb_cursor(install_dir, env, run, which, find_library)
+        # A source install keeps uv's own choice of environment; a packaged one must sync its runtime venv.
+        flags, sync_env = uv_sync_env(install_dir, dict(env)) if packaged_runtime() else ([], None)
+        _run(run, [uv, "sync", "--inexact", "--extra", "desktop", "--extra", "desktop-qt", *flags],
+             cwd=str(install_dir), env=sync_env)
+        preload, hint = _xcb_cursor(writable_root(install_dir), env, run, which, find_library)
         result = DesktopSetup("qt", preload=preload, message=hint or "Qt WebEngine")
     save_settings(config_dir, {"engine": result.engine, "host_python": result.host_python,
                                "preload": result.preload})

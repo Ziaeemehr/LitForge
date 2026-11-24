@@ -39,9 +39,10 @@ def host_target() -> str | None:
 
 
 def tracked_files(directory: str) -> list[Path]:
-    """Only what git tracks: no caches, local data or .venv slips into an installer."""
-    out = subprocess.run(["git", "ls-files", "-z", "--", directory], cwd=ROOT, capture_output=True, check=True)
-    return [Path(p) for p in out.stdout.decode().split("\0") if p]
+    """Tracked and not-ignored files only: no caches, local data or .venv slips into an installer."""
+    argv = ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", directory]
+    out = subprocess.run(argv, cwd=ROOT, capture_output=True, check=True)
+    return [Path(p) for p in out.stdout.decode().split("\0") if p and (ROOT / p).is_file()]  # not deleted
 
 
 def sha256(path: Path) -> str:

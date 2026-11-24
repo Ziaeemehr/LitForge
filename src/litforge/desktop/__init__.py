@@ -22,6 +22,7 @@ from litforge.desktop.workspace import (
     save_settings,
     user_config_dir,
 )
+from litforge.distribution import bundled_uv
 
 INSTALL_DIR = Path(__file__).resolve().parents[3]  # the source checkout the installer created
 ICON = Path(__file__).resolve().parents[1] / "ui" / "static" / "icon.svg"
@@ -51,7 +52,8 @@ def desktop_status() -> dict[str, object]:
 
 
 def find_uv() -> str:
-    for candidate in (shutil.which("uv"), Path.home() / ".local" / "bin" / "uv", Path.home() / ".cargo" / "bin" / "uv"):
+    for candidate in (bundled_uv(), shutil.which("uv"),
+                       Path.home() / ".local" / "bin" / "uv", Path.home() / ".cargo" / "bin" / "uv"):
         if candidate and Path(candidate).is_file():
             return str(candidate)
     raise SetupError("uv was not found; run the LitForge installer again")

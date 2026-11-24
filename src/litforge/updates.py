@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from litforge.config import Paths, load_settings
+from litforge.distribution import packaged_runtime
 from litforge.tools import _install_root
 
 CHECK_TIMEOUT_S = 10
@@ -113,7 +114,12 @@ def check_for_update(paths: Paths, *, force: bool = False) -> dict[str, Any]:
         root = _install_root()
         if root is not None:
             result['command'] = _installer_command(root)  # also shown when the check itself fails
-        if root is None or not (root / '.git').exists():
+        if packaged_runtime() is not None:
+            result.update(status='not_git', command='', message=(
+                'This copy came from the LitForge installer. To update, close LitForge and run the new installer '
+                'from https://github.com/Ziaeemehr/LitForge/releases; your library, settings and optional tools '
+                'are kept.'))
+        elif root is None or not (root / '.git').exists():
             result.update(status='not_git', command='', message=(
                 'This copy was installed without git, so it cannot update itself and the installer leaves it '
                 'unchanged. Download the new version from https://github.com/Ziaeemehr/LitForge and replace the '

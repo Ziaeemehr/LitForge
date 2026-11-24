@@ -5,7 +5,7 @@ uv (`uv run --no-project --python 3.12 provision.py ...`), so a clean machine ne
 
 Layout (Task 7 of docs/superpowers/plans/2026-10-23-desktop-app.md):
   APP      read-only: pyproject.toml, uv.lock, src/, configs/, LICENSE, README.md, manifest.json
-  RUNTIME  writable, per user: venv/, python/ (uv-managed CPython), cache/, state.json
+  RUNTIME  writable, per user: venv/, python/ (uv-managed CPython), cache/, bin/uv, state.json
 
 `uv sync` is idempotent, so an interrupted or failed run is repaired by running it again; state.json, which
 says the runtime is ready, is written only after a sync succeeds. The venv is synced in place, because its
@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +56,9 @@ def provision(app: Path, runtime: Path, uv: str, extras: list[str]) -> Path:
     result = subprocess.run(sync_command(uv, extras), cwd=app, env=uv_env(runtime, venv), stdin=subprocess.DEVNULL)
     if result.returncode != 0:
         raise RuntimeError(f"uv sync failed with exit code {result.returncode}; run the setup again to retry")
+    # LitForge adds optional tools later with this uv (litforge.distribution.bundled_uv), even if APP moves.
+    (runtime / "bin").mkdir(exist_ok=True)
+    shutil.copy2(uv, runtime / "bin" / Path(uv).name)
     state = {"app_version": manifest["app_version"], "target": manifest["target"], "extras": sorted(set(extras))}
     state_file.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     return venv

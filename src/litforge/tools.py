@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from litforge.config import Paths
+from litforge.distribution import bundled_uv, uv_sync_env
 from litforge.jobs import check_cancelled, track_process
 
 PIX2TEXT_SIZE = "~2 GB"
@@ -52,7 +53,7 @@ def _install_root() -> Path | None:
 
 
 def _uv_path() -> str | None:
-    if found := shutil.which("uv"):
+    if found := bundled_uv() or shutil.which("uv"):
         return found
     adjacent = Path(sys.executable).with_name("uv.exe" if os.name == "nt" else "uv")
     return str(adjacent) if adjacent.is_file() and (os.name == "nt" or os.access(adjacent, os.X_OK)) else None
@@ -199,10 +200,8 @@ def _uv_sync(root: Path, extras: list[str], progress: Callable[[str], None], tim
     uv = _uv_path()
     if uv is None:
         raise ValueError("uv is no longer available")
-    argv = [uv, "sync", *[a for extra in extras for a in ("--extra", extra)], "--inexact"]
-    env = dict(os.environ)
-    env["UV_CACHE_DIR"] = str(root / ".litforge-uv-cache")
-    env["UV_PROJECT_ENVIRONMENT"] = str(root / ".venv")
+    flags, env = uv_sync_env(root)
+    argv = [uv, "sync", *[a for extra in extras for a in ("--extra", extra)], "--inexact", *flags]
     progress(f"Running uv sync for {', '.join(extras)} in {root}")
     output: queue.Queue[str] = queue.Queue(maxsize=200)
     recent: deque[str] = deque(maxlen=12)
