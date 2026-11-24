@@ -6583,8 +6583,6 @@
     wireReferenceExports();
     wireReviewReport();
     wireSearchStrategy();
-    $('screen-panel').open = store.get('screen-open', false);
-    $('screen-panel').ontoggle = function () { store.set('screen-open', this.open); };
     $('btn-help').onclick = openGuide;
     $('btn-quit').onclick = function () { quit(false); };
     $('guide-close').onclick = function () { $('guide').close(); };
