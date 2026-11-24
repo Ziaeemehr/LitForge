@@ -270,6 +270,7 @@
       a.innerHTML = '<span class="count">' + p.papers + '</span>' + esc(p.name);
       a.onclick = function (e) { e.preventDefault(); selectProject(p.name); state.recentsProject = p.name; showView('recents'); };
       el.appendChild(a);
+      if (p.name === state.project) el.appendChild($('side-recent'));  // its searches and imports sit under it
     });
     var cur = state.projects.find(function (p) { return p.name === state.project; });
     $('current-project').innerHTML = cur ? esc(cur.name) + ' <small>· ' + cur.papers + ' papers</small>'
@@ -289,6 +290,7 @@
     store.set('project', name);
     syncProjectFields();
     renderSideProjects();
+    loadRuns();
     if ($('review-report').open) loadReviewReport();
     if (state.page === 'write') closeWriteDoc(false);
   }
@@ -538,11 +540,12 @@
     }).catch(function (err) { toast(err.message); });
   }
 
-  // Sidebar: the latest searches of all projects, like a chat app's history.
+  // Sidebar: the latest searches and imports of the current project, nested under it.
   function loadRuns() {
-    return api('/api/runs?limit=15').then(function (runs) {
+    var q = state.project ? '&project=' + encodeURIComponent(state.project) : '';
+    return api('/api/runs?limit=15' + q).then(function (runs) {
       var el = $('side-recent');
-      el.innerHTML = runs.length ? '' : '<div class="none">No searches yet</div>';
+      el.innerHTML = runs.length ? '' : '<div class="none">No searches or PDFs yet</div>';
       runs.forEach(function (r) { el.appendChild(runLink(r)); });
       if (state.page === 'recents') loadRecents();
     });
@@ -553,7 +556,7 @@
     a.href = '#';
     a.className = r.id === state.runId ? 'on' : '';
     a.title = r.label;
-    a.innerHTML = esc(r.label) + '<small>' + esc(r.project) + ' · ' + r.papers + ' papers · ' +
+    a.innerHTML = esc(r.label) + '<small>' + r.papers + ' papers · ' +
       esc((r.started_at || '').slice(5, 16).replace('T', ' ')) + (r.status !== 'done' ? ' · ' + esc(r.status) : '') + '</small>';
     a.onclick = function (e) { e.preventDefault(); loadRun(r.id); };
     return a;

@@ -15,7 +15,7 @@
   /* Shape: controls, cards and menus, sheets */
   --r-sm: 5px; --r-md: 8px; --r-lg: 12px; --r-pill: 999px; --radius: var(--r-md);
   /* Spacing: 4 px grid */
-  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+  --s0: 2px; --s1: 4px; --s1h: 6px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;  /* s0, s1h: compact controls */
   color-scheme: light;
 }
 /* Dark: follows the system unless the theme button pins one (data-theme on <html>). */
