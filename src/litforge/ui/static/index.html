@@ -258,12 +258,14 @@
     </div>
   </section>
   <section id="view-new" class="view">
+    <div class="add-sheet">
+    <div class="viewhead"><h2>Add papers</h2><span class="meta">Your files are read once and kept in the library</span></div>
     <div class="card composer">
-      <div class="tabs">
-        <button data-mode="pdfs" title="Drop PDFs or other documents and get clean Markdown text with figures, ready for NotebookLM or a cloud model">PDFs → text</button>
-        <button data-mode="similar" title="Start from one paper (DOI, arXiv id, PDF) or an abstract and collect papers like it">Find similar</button>
-        <button data-mode="search" title="Keyword queries against OpenAlex, Crossref and arXiv">Search</button>
-        <button data-mode="import" title="Bring in a .csv, .bib or .ris list from Elicit, Zotero or another tool">Import list</button>
+      <div class="seg add-src" role="tablist" aria-label="Where the papers come from">
+        <button data-mode="pdfs" title="Drop PDFs or other documents and get clean Markdown text with figures, ready for NotebookLM or a cloud model">Your PDFs</button>
+        <button data-mode="similar" title="Start from one paper (DOI, arXiv id, PDF) or an abstract and collect papers like it">From a paper</button>
+        <button data-mode="search" title="Keyword queries against OpenAlex, Crossref and arXiv">Keyword search</button>
+        <button data-mode="import" title="Bring in a .csv, .bib or .ris list from Elicit, Zotero or another tool">Reference list</button>
       </div>
 
       <form id="form-similar">
@@ -312,28 +314,23 @@
           use <b>Find similar to these</b> to expand the list through citations and meaning.</p>
       </form>
 
-      <label class="f">Project name</label>
+      <div class="add-foot">
+        <div class="add-proj"><label class="f" for="project-name">Project</label>
       <input type="text" id="project-name" list="project-list" placeholder="my-review">
-      <datalist id="project-list"></datalist>
+      <datalist id="project-list"></datalist></div>
+        <div class="add-opts"><label class="check" id="pdfs-export-wrap" title="Uses the paper choice of Export above the paper list, and the folder under Where the files go"><input type="checkbox" id="pdfs-export" checked> <span>Then export the notes of <b id="pdfs-export-scope">all papers of the project</b></span></label>
+        <label class="check" id="emb-wrap" title="Rank by meaning with a local embedding model, not only by shared words. Slower on the first run while the model loads"><input type="checkbox" id="embeddings" checked> Meaning-based ranking (embeddings)</label></div>
+        <div class="add-go"><button class="btn" id="btn-more" title="Run a similar-paper search seeded with every paper you marked ✓ in this project">More like my ✓ papers</button>
+        <button class="btn accent" id="btn-run">Find similar papers</button></div>
+      </div>
       <details class="fold-opts"><summary>Where the files go</summary>
       <label class="f">Export folder <small>(default: Downloads/LitForge/&lt;project&gt;)</small></label>
       <input type="text" id="export-dir" spellcheck="false">
       <div class="hint paths" id="project-paths"></div>
       </details>
-      <label class="check" id="pdfs-export-wrap" title="Uses the paper choice of Export in the top bar and the export folder above"><input type="checkbox" id="pdfs-export" checked> <span>Then export the notes of <b id="pdfs-export-scope">all papers of the project</b></span></label>
-      <label class="check" id="emb-wrap" title="Rank by meaning with a local embedding model, not only by shared words. Slower on the first run while the model loads"><input type="checkbox" id="embeddings" checked> Meaning-based ranking (embeddings)</label>
-
-      <button class="btn primary" id="btn-run">Find similar papers</button>
-      <button class="btn secondary" id="btn-more" title="Run a similar-paper search seeded with every paper you marked ✓ in this project">More like my ✓ papers</button>
       <div class="progress" id="progress"></div>
     </div>
-    <div class="intro" id="empty">
-      <ol class="steps">
-        <li><b>Find</b><span>Start from a paper, keywords, a reference list or your PDFs. Every result says why it was found.</span></li>
-        <li><b>Review</b><span>Papers are ranked by review priority. Mark each ✓ relevant or ✗ not relevant; marks are kept.</span></li>
-        <li><b>Export</b><span>Write Markdown notes, with PDFs and full text, for the papers you keep.</span></li>
-      </ol>
-      <p>New here? Open the <a href="#" data-help>quick guide</a>. To continue earlier work, pick a search under its project in the sidebar.</p>
+    <p class="hint add-help">New here? Open the <a href="#" data-help>quick guide</a> (press ?).</p>
     </div>
   </section>
 
@@ -366,7 +363,7 @@
         <button id="lens-tab-review" role="tab" aria-selected="false" aria-controls="lens-answer" tabindex="-1" data-lens-tab="review">Needs review</button>
       </div><button class="toggle" id="lens-audit-filter" aria-pressed="false" title="Show weak, single-source, flagged or non-supported sentences">Audit</button><div class="share-bar" data-share-from="lens-answer" data-share-title="Answer" data-share="skip"><button type="button" class="btn small" data-share-act="copy" title="Copy as Markdown, ready to paste into a chat, NotebookLM or a note">Copy</button><button type="button" class="btn small" data-share-act="save" title="Save as a Markdown (.md) file, for example to add as a NotebookLM source">Save .md</button></div></div>
       <div id="lens-answer" class="lens-rows" role="tabpanel" aria-labelledby="lens-tab-answer"></div>
-      <form id="lens-ask-form" class="composer">
+      <form id="lens-ask-form" class="ask-composer">
         <label class="f sr-only" for="lens-question">Question</label>
         <textarea id="lens-question" rows="2" required placeholder="Ask about the papers in this project…  (⌘↩ to send)"></textarea>
         <button class="btn accent" type="submit" data-lens-work>Ask library</button>
@@ -857,7 +854,7 @@
     <button class="btn small ghost" id="missing-close" title="Close">✕</button>
   </div>
   <p class="hint">Their notes hold only the abstract. Open a link, download the PDF in your browser, then add the
-    files with <a href="#" id="missing-add">New search → PDFs → text</a>: each one is matched to its paper, and the notes are
+    files with <a href="#" id="missing-add">Add papers → Your PDFs</a>: each one is matched to its paper, and the notes are
     exported again with the full text.</p>
   <div class="mail" id="missing-mail"></div>
   <div class="mactions">
@@ -898,7 +895,7 @@
           papers close in meaning.</li>
         <li><b>Search</b>: keyword queries, one per line.</li>
         <li><b>Import list</b>: a .csv, .bib or .ris export from Elicit, Zotero and similar tools.</li>
-        <li><b>PDFs → text</b>: PDFs and documents you already have, or links to articles; each is matched to its paper and its text is extracted. Unless
+        <li><b>Your PDFs</b>: PDFs and documents you already have, or links to articles; each is matched to its paper and its text is extracted. Unless
           you untick <i>Then export</i>, the notes are exported right after, for the papers chosen under Export.</li>
       </ul>
       <p>Each search belongs to a <b>project</b> (one literature review). Its searches and PDF imports are listed under it in the sidebar.</p>

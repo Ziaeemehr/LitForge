@@ -908,7 +908,7 @@ header { gap: var(--s3); background: var(--panel); border-bottom: 1px solid var(
 .seg { display: inline-flex; padding: var(--s0); gap: var(--s0); background: var(--chip); border-radius: var(--r-md); }
 .seg button { border: 0; background: none; padding: var(--s1) var(--s3); border-radius: var(--r-sm); color: var(--ink); cursor: default; font-weight: 500; }
 .seg button:hover { background: var(--active-line); }
-.seg button.on, .seg button[aria-pressed="true"] { background: var(--panel); box-shadow: var(--shadow); }
+.seg button.on, .seg button[aria-pressed="true"] { background: var(--seg-on); box-shadow: var(--shadow); }
 /* Sidebar header with its add button. */
 .side-head { display: flex; align-items: center; justify-content: space-between; }
 .side-head h3 { margin-right: 0; }
@@ -943,10 +943,10 @@ header { gap: var(--s3); background: var(--panel); border-bottom: 1px solid var(
 .ws-bar .tabs { margin: 0; flex: none; }
 .ws-bar .share-bar { margin: 0 0 0 auto; }
 .ws #lens-answer { min-height: 240px; padding: var(--s4); background: var(--panel); border-radius: var(--r-md); box-shadow: var(--shadow); }
-.composer { display: flex; gap: var(--s2); align-items: flex-end; padding: var(--s2); background: var(--panel); border-radius: var(--r-lg); box-shadow: var(--shadow); position: sticky; bottom: var(--s3); }
-.composer textarea { border: 0; background: transparent; resize: none; min-height: 44px; }
-.composer textarea:focus { border: 0; }
-.composer:focus-within { box-shadow: 0 0 0 2px var(--accent); }
+.ask-composer { display: flex; gap: var(--s2); align-items: flex-end; padding: var(--s2); background: var(--panel); border-radius: var(--r-lg); box-shadow: var(--shadow); position: sticky; bottom: var(--s3); }
+.ask-composer textarea { border: 0; background: transparent; resize: none; min-height: 44px; }
+.ask-composer textarea:focus { border: 0; }
+.ask-composer:focus-within { box-shadow: 0 0 0 2px var(--accent); }
 .inspector {
   position: sticky; top: var(--s3); display: flex; flex-direction: column; gap: var(--s2); padding: var(--s4);
   background: var(--panel); border-radius: var(--r-md); box-shadow: var(--shadow); font-size: var(--fs-md);
@@ -966,11 +966,27 @@ header { gap: var(--s3); background: var(--panel); border-bottom: 1px solid var(
 #lens-matrix-detail { background: var(--panel); border-radius: var(--r-md); box-shadow: var(--shadow); padding: var(--s4); }
 #lens-matrix-detail h3 { margin: 0; }
 @media (max-width: 1000px) { .view.ws:not([hidden]) { grid-template-columns: 1fr; } .inspector { position: static; } }
-.composer { width: 100%; max-width: none; margin: 0; }
-.composer textarea { flex: 1; width: auto; }
-.composer .btn { flex: none; white-space: nowrap; }
+.ask-composer { width: 100%; max-width: none; margin: 0; }
+.ask-composer textarea { flex: 1; width: auto; }
+.ask-composer .btn { flex: none; white-space: nowrap; }
 #write-home.ws:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: var(--s5); align-items: start; }
 #write-home .write-docs { margin: 0; }
 #write-home .inspector input { width: 100%; }
 #write-home .inspector .btn { align-self: stretch; text-align: center; }
 @media (max-width: 1000px) { #write-home.ws:not([hidden]) { grid-template-columns: 1fr; } }
+
+/* ---------- Add papers: one focused sheet ---------- */
+.add-sheet { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--s3); }
+.add-sheet > .viewhead { margin: 0; }
+.add-sheet .composer { max-width: none; margin: 0; padding: var(--s4); display: block; }
+.add-src { display: flex; width: 100%; margin-bottom: var(--s4); }
+.add-src button { flex: 1; }
+.add-foot { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s3); margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--line); }
+.add-proj { flex: 1 1 200px; min-width: 180px; }
+.add-proj label.f { margin-top: 0; }
+.add-opts { flex: 1 1 220px; display: flex; flex-direction: column; gap: var(--s1); }
+.add-opts .check { margin: 0; }
+.add-go { display: flex; gap: var(--s2); margin-left: auto; }
+.add-go .btn { width: auto; margin: 0; padding: var(--s2) var(--s4); }
+.add-sheet details.fold-opts { margin: var(--s3) 0 0; }
+.add-help { text-align: center; margin: 0; }
